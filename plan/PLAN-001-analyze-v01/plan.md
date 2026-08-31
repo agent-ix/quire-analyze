@@ -29,7 +29,7 @@ Task-001 -> Task-002 -> Task-003 -> Task-004 -> Task-005 -> Task-006 -> Task-007
 | Task | Native issue | Status |
 |---|---|---|
 | Task-001 | #2 foundation specification | done |
-| Task-002 | #2 verification/evidence | in_progress |
+| Task-002 | #2 verification/evidence | done |
 | Task-003 | #6 ADR-0010 algebra/identity | not_started |
 | Task-004 | #7 deterministic SMT lowering | not_started |
 | Task-005 | #3 bounded solver adapters | not_started |

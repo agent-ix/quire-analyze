@@ -2,7 +2,7 @@
 id: Task-002
 title: "Foundation verification and evidence"
 type: Task
-status: in_progress
+status: done
 track: A
 priority: P0
 relationships:
@@ -19,3 +19,9 @@ perform code review and gap analysis, and report semantic coverage truthfully as
 ## Guard
 
 Hosted CI is manual-only and shall not be dispatched. Local success is not a hosted-check or release claim.
+
+## Completion Evidence
+
+`evidence/foundation-d589a13/validation-summary.md` retains exact inputs, tool identities, local and
+MSRV outcomes, the initial sandbox target-directory failure, branch protection, review scope, zero
+semantic coverage, and open limitations.

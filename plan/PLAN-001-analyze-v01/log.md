@@ -11,3 +11,5 @@ title: "PLAN-001 update log"
 - Preserved manual-dispatch-only hosted CI and left source release to PGM-02 Wave 4.
 - Quire validation and all local Rust, license, and unsafe-code gates passed; Task-001 completed and
   Task-002 advanced to evidence retention and review.
+- Retained the source-bound validation summary, MSRV/doc outcomes, remote protection facts, review
+  disposition, and zero-semantic-coverage limitation; Task-002 completed.
