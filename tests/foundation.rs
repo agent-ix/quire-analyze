@@ -59,6 +59,15 @@ fn foundation_defines_closed_requirements_and_non_conclusive_states() {
 
     assert!(INTERFACE.contains("conclusive: [satisfied, refuted]"));
     assert!(INTERFACE.contains("only a complete recognized sat/unsat response"));
+    for analysis in [
+        "consistency",
+        "contradiction",
+        "implication",
+        "redundancy",
+        "dead-antecedent",
+    ] {
+        assert!(INTERFACE.contains(analysis), "missing analysis {analysis}");
+    }
 }
 
 /// Issue #2 assurance-artifact completeness gate.

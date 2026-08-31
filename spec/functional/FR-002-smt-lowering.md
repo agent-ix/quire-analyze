@@ -34,6 +34,7 @@ construct has a declared exact encoding under the selected profile.
 | FR-002-AC-2 | Every public IR construct has an exact supported encoding test or an explicit unsupported fixture. | Test (TC-003) |
 | FR-002-AC-3 | Query symbols and named assertions map injectively to complete source identities. | Test (TC-004) |
 | FR-002-AC-4 | No approximation can yield a conclusive result. | Test (TC-003) |
+| FR-002-AC-5 | Golden queries expose declared logic, assertions, identities, and source maps for independent review. | Inspection and test (TC-004) |
 
 ## Dependencies
 

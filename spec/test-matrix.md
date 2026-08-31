@@ -12,19 +12,25 @@ type: TestMatrix
 | FR-001 | FR-001-AC-1, FR-001-AC-2 | TC-001 | 🚧 Planned |
 | FR-001 | FR-001-AC-3 | TC-002 | 🚧 Planned |
 | FR-001 | FR-001-AC-4 | TC-003 | 🚧 Planned |
+| FR-001 | FR-001-AC-5 | TC-002 | 🚧 Planned |
 | FR-002 | FR-002-AC-1 | TC-002 | 🚧 Planned |
 | FR-002 | FR-002-AC-2, FR-002-AC-4 | TC-003 | 🚧 Planned |
 | FR-002 | FR-002-AC-3 | TC-004 | 🚧 Planned |
+| FR-002 | FR-002-AC-5 | TC-004, Inspection | 🚧 Planned |
 | FR-003 | FR-003-AC-1, FR-003-AC-2 | TC-005 | 🚧 Planned |
 | FR-003 | FR-003-AC-3 | TC-006 | 🚧 Planned |
 | FR-003 | FR-003-AC-4 | TC-007 | 🚧 Planned |
+| FR-003 | FR-003-AC-5 | TC-005 | 🚧 Planned |
+| FR-003 | FR-003-AC-6 | Inspection | 🚧 Planned |
 | FR-004 | FR-004-AC-1 | TC-001 | 🚧 Planned |
 | FR-004 | FR-004-AC-2 | TC-006 | 🚧 Planned |
 | FR-004 | FR-004-AC-3 | TC-004 | 🚧 Planned |
 | FR-004 | FR-004-AC-4 | TC-007 | 🚧 Planned |
+| FR-004 | FR-004-AC-5 | TC-005, TC-006 | 🚧 Planned |
 | FR-005 | FR-005-AC-1, FR-005-AC-4 | TC-008 | 🚧 Planned |
 | FR-005 | FR-005-AC-2 | TC-007 | 🚧 Planned |
 | FR-005 | FR-005-AC-3 | TC-006 | 🚧 Planned |
+| FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Planned |
 
 ## Nonfunctional and Stakeholder Coverage
 

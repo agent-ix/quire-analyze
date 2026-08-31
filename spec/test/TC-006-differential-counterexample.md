@@ -19,9 +19,11 @@ Verify pinned engines agree on supported cases and every published counterexampl
 ## Test Procedure
 
 Run pinned Z3 and cvc5 versions over the seeded supported corpus. Independently re-evaluate every
-model against authoritative contract semantics. Inject a controlled disagreement fixture.
+model against authoritative contract semantics. Inject a controlled disagreement fixture. Verify
+every filed semantic defect has a stable executable regression fixture and retained disposition.
 
 ## Expected Results
 
 Supported cases agree and decoded counterexamples satisfy the required truth condition. A
-disagreement retains both raw and normalized results and cannot be classified as agreement.
+disagreement retains both raw and normalized results and cannot be classified as conclusive before
+human-reviewed adjudication. Every filed semantic defect remains reproducible by its regression fixture.

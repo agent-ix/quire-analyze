@@ -14,7 +14,8 @@ relationships:
 ## Scope
 
 Complete native issue #6: reconcile the exact IR dependency, decide shared-variable and encoding
-semantics, implement canonical request/statement identities, and verify TC-001 through TC-003 scope.
+semantics, implement canonical request/statement identities, verify TC-001 through TC-003 scope, and
+link the accepted ADR as the explicit replacement that supersedes `quire-rs#164`.
 
 ## Guard
 

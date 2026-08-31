@@ -12,7 +12,8 @@ name: ContractAnalysis
 version: draft-analysis-v1
 input:
   package: validated package at pinned quire-contract-ir revision and schema digest
-  request: analysis kind, ordered clause identities, execution point, encoding profile, limits
+  request: closed analysis kind, ordered assumption/left/right/candidate groups, execution point, encoding profile, limits
+analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
   - name: prepare
     output: AnalysisModel | DiagnosticSet
@@ -28,7 +29,7 @@ operations:
     semantics: analysis-kind-specific sat/unsat classification and checked source mapping
   - name: compare
     output: DifferentialReport
-    semantics: retains both engine records and never converts disagreement to agreement
+    semantics: retains both engine records; disagreement is non-conclusive until human-reviewed adjudication
   - name: cli_analyze
     output: deterministic JSON report, stable exit class, and stderr diagnostics
     semantics: equivalent to library operation and atomically published

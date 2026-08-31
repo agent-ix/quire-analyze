@@ -12,14 +12,16 @@ relationships:
 
 ## Description
 
-The analyzer shall translate a normalized solver response into a typed consistency or implication
-conclusion and, when applicable, a source-mapped counterexample.
+The analyzer shall translate a normalized solver response into a typed consistency, contradiction,
+implication, redundancy, or dead-antecedent conclusion and, when applicable, a source-mapped model
+or counterexample.
 
 ## Behavior
 
-- Consistency `sat` is `satisfied` with a witness; `unsat` is `refuted` with an unsat explanation.
-- Implication `unsat` is `satisfied`; `sat` is `refuted` with an antecedent-satisfying,
-  consequent-falsifying counterexample.
+- Classification follows the five predicates in FR-001: consistency alone treats `sat` as
+  `satisfied`; contradiction, implication, redundancy, and dead antecedent treat `unsat` as
+  `satisfied`. The opposite recognized answer is `refuted` with the corresponding shared,
+  counterexample, distinguishing, or activation model.
 - Models are decoded only through the query assertion/symbol map and checked against type and bound
   constraints before publication.
 - An invalid, incomplete, or undecodable model keeps the logical response but marks the requested
@@ -30,10 +32,11 @@ conclusion and, when applicable, a source-mapped counterexample.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-004-AC-1 | The four sat/unsat-by-analysis-kind classifications match the independent truth table. | Test (TC-001) |
+| FR-004-AC-1 | All ten sat/unsat-by-analysis-kind classifications match the independent truth table. | Test (TC-001) |
 | FR-004-AC-2 | Every published counterexample re-evaluates against the authoritative semantics. | Test (TC-006) |
 | FR-004-AC-3 | Source mapping preserves package, clause, revision, declaration, observation, and span identity. | Test (TC-004) |
 | FR-004-AC-4 | Missing optional explanation data cannot be represented as present or verified. | Test (TC-007) |
+| FR-004-AC-5 | Seeded contradictions and dead antecedents are detected without false success on timeout. | Test (TC-005, TC-006) |
 
 ## Dependencies
 

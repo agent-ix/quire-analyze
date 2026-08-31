@@ -16,6 +16,7 @@ type: Review
 | GAP-005 | No requirements-to-test coverage or QA sufficiency rule existed. | TM-001 maps every criterion and distinguishes scaffold health from semantic coverage. |
 | GAP-006 | Evidence and authority boundaries were absent locally. | PGM-01 is inherited; AP/AD/CAC/MP/AA define evidence and leave human claims open. |
 | GAP-007 | No dependency-aware execution plan existed. | PLAN-001 maps native issues and guards their order. |
+| GAP-008 | Review round 2 found the algebra omitted contradiction, redundancy, and dead-antecedent scope plus several native-ticket acceptance details. | FR-001/FR-004 now define all five analyses; FR-002/FR-003/FR-005, tests, matrix, and tasks explicitly cover golden review, air-gapped unlinked adapters, differential adjudication, defect fixtures, and issue supersession. |
 
 ## Open Implementation Gaps
 

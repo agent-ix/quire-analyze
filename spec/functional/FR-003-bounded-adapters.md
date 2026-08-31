@@ -18,6 +18,10 @@ and normalize their protocol responses without shell interpretation.
 ## Behavior
 
 - Arguments are passed as an argv vector; query bytes use a bounded stdin channel.
+- Z3 and cvc5 executable paths are independently configured and may refer to air-gapped installs;
+  query content cannot select or modify a path.
+- No Z3 or cvc5 library is linked; engines remain external processes and therefore do not become
+  transitive libraries in a consumer binary.
 - Wall time, output bytes, diagnostic bytes, model bytes, and process cleanup are bounded.
 - Timeout or cancellation terminates the process tree and remains `timed-out` or `cancelled`.
 - Missing executables, spawn errors, malformed output, nonzero exit, signals, and solver `unknown`
@@ -33,6 +37,8 @@ and normalize their protocol responses without shell interpretation.
 | FR-003-AC-2 | Malformed, excessive, contradictory, signaled, and nonzero-exit responses cannot become conclusive. | Test (TC-005) |
 | FR-003-AC-3 | Z3 and cvc5 adapters expose the same normalized result contract. | Test (TC-006) |
 | FR-003-AC-4 | Evidence identifies exact engine, version, executable digest, argv, and configuration digest. | Test (TC-007) |
+| FR-003-AC-5 | Independently configured absolute solver paths work without network or shell resolution. | Test (TC-005) |
+| FR-003-AC-6 | Dependency and binary inspection finds no linked Z3 or cvc5 library. | Inspection |
 
 ## Dependencies
 

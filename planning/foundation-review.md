@@ -29,6 +29,13 @@ TC-008 or an explicit inspection. The design separates semantic preparation, exa
 untrusted process execution, checked conclusion, and evidence publication so critical controls have
 testable boundaries.
 
+Review round 2 found that the first draft named only consistency and implication even though native
+issue #4 also requires contradiction, redundancy, and dead-antecedent analysis. The revision closes
+that gap with a five-kind decision table, explicit assumption groups, all ten sat/unsat
+classifications, seeded contradiction/dead-antecedent checks, and corresponding matrix coverage. It
+also makes native issue #3's air-gapped paths and no-linked-solver rule, issue #5's adjudication and
+regression-fixture rules, issue #6's supersession link, and issue #7's reviewable golden-query rule explicit.
+
 ## QA Sufficiency Review
 
 The plan covers normal examples but does not rely on them. It requires independent finite-model

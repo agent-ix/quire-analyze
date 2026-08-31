@@ -12,13 +12,14 @@ relationships:
 
 ## Description
 
-The analyzer shall define closed consistency and implication requests over validated Boolean
-contract clauses without reinterpreting contract-IR types, observations, definedness, or identity.
+The analyzer shall define closed consistency, contradiction, implication, redundancy, and
+dead-antecedent requests over validated Boolean contract clauses without reinterpreting contract-IR
+types, observations, definedness, or identity.
 
 ## Inputs
 
-A pinned validated package, selected clause identities, analysis kind, execution point, bounds, and
-encoding profile.
+A pinned validated package, ordered assumption/left/right/candidate clause groups as required by the
+analysis kind, execution point, bounds, and encoding profile.
 
 ## Outputs
 
@@ -27,9 +28,17 @@ digests.
 
 ## Behavior
 
-- Consistency asks whether all selected statements have a shared model.
-- Implication asks whether antecedent statements entail one consequent by checking the
-  unsatisfiability of antecedents and the negated consequent.
+- The closed analysis kinds and decision predicates are:
+
+| Kind | Decision predicate | `satisfied` | `refuted` |
+|---|---|---|---|
+| consistency | conjunction of selected statements | `sat` with shared model | `unsat` |
+| contradiction | conjunction of left and right groups under assumptions | `unsat` | `sat` with common model |
+| implication | assumptions and antecedents and negated consequent | `unsat` | `sat` with counterexample |
+| redundancy | assumptions and peer statements and negated candidate | `unsat` | `sat` with distinguishing model |
+| dead antecedent | assumptions and selected case antecedent | `unsat` | `sat` with activation model |
+
+- A request declares every assumption explicitly; no ambient requirement is inferred.
 - Variables are shared only when package, declaration, observation, execution-point, and type
   identities agree; display names alone never alias variables.
 - The model preserves contract-IR short-circuit, total Boolean, definedness, bounded arithmetic,
@@ -42,10 +51,11 @@ digests.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-001-AC-1 | Consistency and implication truth conditions are explicit and independently executable. | Test (TC-001) |
+| FR-001-AC-1 | All five analysis truth conditions and assumption sets are explicit and independently executable. | Test (TC-001) |
 | FR-001-AC-2 | Shared-variable identity neither aliases unequal identities nor splits equal identities. | Test (TC-001) |
 | FR-001-AC-3 | Request and statement hashes change for every material semantic input and ignore irrelevant input ordering. | Test (TC-002) |
 | FR-001-AC-4 | Invalid or ambiguous requests fail before query generation with stable diagnostics. | Test (TC-003) |
+| FR-001-AC-5 | Changing an assumption group changes request identity and cannot reuse stale evidence. | Test (TC-002) |
 
 ## Dependencies
 
