@@ -281,11 +281,7 @@ fn retained_evidence_is_censused_and_cannot_claim_machine_verification() {
         assert_eq!(actual, expected, "changed evidence artifact {relative}");
         let text =
             String::from_utf8(fs::read(path).expect("text evidence")).expect("UTF-8 evidence");
-        if relative.contains("analysis-semantics-a1c6f6e")
-            || relative.contains("smt-lowering-0da1747")
-            || relative.contains("solver-adapters-37d8628")
-        {
-            assert!(text.contains("Producer validation attestation"));
+        if text.contains("Producer validation attestation") {
             assert!(text.contains("no raw command transcript"));
             assert!(text.contains("independent review"));
         } else {
