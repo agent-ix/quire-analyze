@@ -118,7 +118,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     }
 
     assert!(PLAN.contains("| Task-004 | #7 deterministic SMT lowering | done |"));
-    assert!(PLAN.contains("| Task-007 | #5 evidence/differential/CLI | not_started |"));
+    assert!(PLAN.contains("| Task-007 | #5 evidence/differential/CLI | in_progress |"));
     assert!(PLAN.contains("| Task-005 | #3 bounded solver adapters | done |"));
     assert!(PLAN.contains("| Task-006 | #4 analyses/counterexamples | done |"));
     assert!(PLAN.contains("| Task-003 | #6 ADR-0010 algebra/identity | done |"));

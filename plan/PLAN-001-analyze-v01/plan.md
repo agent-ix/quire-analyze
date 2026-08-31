@@ -34,7 +34,7 @@ Task-001 -> Task-002 -> Task-003 -> Task-004 -> Task-005 -> Task-006 -> Task-007
 | Task-004 | #7 deterministic SMT lowering | done |
 | Task-005 | #3 bounded solver adapters | done |
 | Task-006 | #4 analyses/counterexamples | done |
-| Task-007 | #5 evidence/differential/CLI | not_started |
+| Task-007 | #5 evidence/differential/CLI | in_progress |
 | Task-008 | #8 epic verification/human handoff | not_started |
 
 ## Guard

@@ -24,6 +24,11 @@ predicate-refuting assignments as verified evidence. In Task-007, run pinned Z3 
 over the seeded supported corpus, inject a controlled disagreement fixture, and verify every filed
 semantic defect has a stable executable regression fixture and retained disposition.
 
+The issue #5 corpus includes satisfied/refuted examples for all five kinds, unsupported lowering,
+timeout, missing-engine, and controlled sat/unsat disagreement fixtures. Both engine records are
+retained before disposition. Real-engine execution is a measured local lane and unavailability is a
+result, never a skipped pass.
+
 ## Expected Results
 
 Every published decoded counterexample satisfies the required truth condition. Later pinned engines
