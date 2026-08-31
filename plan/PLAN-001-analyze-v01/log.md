@@ -13,3 +13,5 @@ title: "PLAN-001 update log"
   Task-002 advanced to evidence retention and review.
 - Retained the source-bound validation summary, MSRV/doc outcomes, remote protection facts, review
   disposition, and zero-semantic-coverage limitation; Task-002 completed.
+- Review round 2 found and closed missing native analysis scope and acceptance details; the exact
+  corrected subject and full local reverification are retained in `evidence/foundation-b995182/`.
