@@ -33,5 +33,5 @@ the profile census rather than relying on line coverage.
 Only complete valid sat/unsat responses with successful exit are eligible for conclusions. Every
 other state is distinct, bounded, non-conclusive, and leaves no live child process. No shell
 expansion occurs and no solver library is linked.
-The retained cleanup maximum is no greater than 1,000 ms; absent non-Unix execution is reported as
+The retained Linux cleanup maximum is no greater than 1,000 ms; every non-Linux execution is reported as
 an explicit platform limitation, not a pass.

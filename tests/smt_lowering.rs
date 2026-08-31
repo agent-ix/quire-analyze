@@ -221,23 +221,24 @@ fn golden_query_is_order_independent_and_source_mapped() {
     let forward = lower_boolean_statements(&[first.clone(), second.clone()], &[]).expect("lower");
     let reverse = lower_boolean_statements(&[second, first.clone()], &[]).expect("lower reversed");
 
-    assert_eq!(forward.query, reverse.query);
+    assert_eq!(forward.query(), reverse.query());
     assert_eq!(
-        forward.analysis_request_digest,
-        reverse.analysis_request_digest
+        forward.analysis_request_digest(),
+        reverse.analysis_request_digest()
     );
-    assert_eq!(forward.query_digest, reverse.query_digest);
-    assert_eq!(forward.assertions, reverse.assertions);
-    assert_eq!(forward.query, include_str!("golden/boolean-v1.smt2"));
-    assert_eq!(forward.profile, SMTLIB2_PROFILE);
-    assert_eq!(forward.logic, "QF_UF");
-    assert_eq!(forward.assertions.len(), 2);
+    assert_eq!(forward.query_digest(), reverse.query_digest());
+    assert_eq!(forward.binding_set_digest(), reverse.binding_set_digest());
+    assert_eq!(forward.assertions(), reverse.assertions());
+    assert_eq!(forward.query(), include_str!("golden/boolean-v1.smt2"));
+    assert_eq!(forward.profile(), SMTLIB2_PROFILE);
+    assert_eq!(forward.logic(), "QF_UF");
+    assert_eq!(forward.assertions().len(), 2);
     assert!(forward
-        .assertions
+        .assertions()
         .iter()
         .all(|item| item.name.contains("_c")));
-    assert_eq!(first.clause(), &forward.assertions[0].clause);
-    assert_eq!(first.clause_digest(), forward.assertions[0].clause_digest);
+    assert_eq!(first.clause(), &forward.assertions()[0].clause);
+    assert_eq!(first.clause_digest(), forward.assertions()[0].clause_digest);
     assert_eq!(first.execution_point(), &point());
     assert_eq!(first.expression(), &implication("ready", "blocked"));
 }
@@ -339,7 +340,7 @@ fn every_supported_boolean_operator_has_an_exact_encoding() {
         );
         let bundle = lower_boolean_statements(&[statement], &[]).expect("lower operator");
         assert!(
-            bundle.query.contains(expected),
+            bundle.query().contains(expected),
             "missing encoding for {operator:?}"
         );
     }
@@ -368,7 +369,7 @@ fn every_supported_boolean_operator_has_an_exact_encoding() {
             u8::try_from(index + 20).expect("small fixture"),
         );
         let bundle = lower_boolean_statements(&[statement], &[]).expect("lower comparison");
-        assert!(bundle.query.contains(expected));
+        assert!(bundle.query().contains(expected));
     }
 }
 
@@ -508,11 +509,11 @@ fn explicit_binding_merges_two_complete_origins() {
 
     let unbound = lower_boolean_statements(&[first.clone(), second.clone()], &[]).expect("unbound");
     let bound = lower_boolean_statements(&[first, second], &[group]).expect("bound");
-    assert_eq!(unbound.variables.len(), 2);
-    assert_eq!(bound.variables.len(), 1);
-    assert_eq!(bound.variables[0].origins.len(), 2);
+    assert_eq!(unbound.variables().len(), 2);
+    assert_eq!(bound.variables().len(), 1);
+    assert_eq!(bound.variables()[0].origins.len(), 2);
     assert_eq!(
-        bound.variables[0].binding_group.as_deref(),
+        bound.variables()[0].binding_group.as_deref(),
         Some("system-active")
     );
 }
@@ -533,9 +534,9 @@ fn state_observations_are_identity_bearing() {
     let statement = statement_from_parts("C-state", environment.clone(), expression, 0x56);
     let bundle = lower_boolean_statements(&[statement], &[]).expect("lower state observations");
 
-    assert_eq!(bundle.variables.len(), 2);
+    assert_eq!(bundle.variables().len(), 2);
     let origins: Vec<_> = bundle
-        .variables
+        .variables()
         .iter()
         .flat_map(|variable| variable.origins.iter())
         .collect();
@@ -774,10 +775,10 @@ fn material_input_changes_invalidate_request_and_query_digests() {
     let first = lower_boolean_statements(&[first], &[]).expect("first");
     let changed = lower_boolean_statements(&[changed], &[]).expect("changed");
     assert_ne!(
-        first.analysis_request_digest,
-        changed.analysis_request_digest
+        first.analysis_request_digest(),
+        changed.analysis_request_digest()
     );
-    assert_ne!(first.query_digest, changed.query_digest);
+    assert_ne!(first.query_digest(), changed.query_digest());
 }
 
 /// NFR-001-AC-2/3: the public statement bound rejects work before lowering.

@@ -17,11 +17,11 @@ type: TestMatrix
 | FR-002 | FR-002-AC-2, FR-002-AC-4 | TC-003, TC-010 | ✅ Boolean v1 complete |
 | FR-002 | FR-002-AC-3 | TC-004, TC-010 | ✅ Boolean v1 complete |
 | FR-002 | FR-002-AC-5 | TC-004, TC-010, Inspection | ✅ Boolean v1 complete |
-| FR-003 | FR-003-AC-1, FR-003-AC-2 | TC-005 | 🚧 Planned |
-| FR-003 | FR-003-AC-3 | TC-006 | 🚧 Planned |
-| FR-003 | FR-003-AC-4 | TC-007 | 🚧 Planned |
-| FR-003 | FR-003-AC-5 | TC-005 | 🚧 Planned |
-| FR-003 | FR-003-AC-6 | Inspection | 🚧 Planned |
+| FR-003 | FR-003-AC-1, FR-003-AC-2 | TC-005 | ✅ Linux adapter v1 complete |
+| FR-003 | FR-003-AC-3 | TC-005, TC-006 | ✅ Adapter contract complete; real-engine corpus planned |
+| FR-003 | FR-003-AC-4 | TC-005, TC-007 | ✅ Adapter record complete; evidence envelope planned |
+| FR-003 | FR-003-AC-5 | TC-005 | ✅ Linux adapter v1 complete |
+| FR-003 | FR-003-AC-6 | TC-005, Inspection | ✅ Complete |
 | FR-004 | FR-004-AC-1 | TC-001 | 🚧 Planned |
 | FR-004 | FR-004-AC-2 | TC-006 | 🚧 Planned |
 | FR-004 | FR-004-AC-3 | TC-004 | 🚧 Planned |
@@ -39,9 +39,9 @@ type: TestMatrix
 | StR-001 | StR-001-VC-1 | TC-002, TC-007 | 🚧 Planned |
 | StR-001 | StR-001-VC-2 | TC-006 | 🚧 Planned |
 | NFR-001 | NFR-001-AC-1 | TC-002, TC-010 | 🚧 Planned; lowering slice complete |
-| NFR-001 | NFR-001-AC-2, NFR-001-AC-3 | TC-005 | 🚧 Planned |
+| NFR-001 | NFR-001-AC-2, NFR-001-AC-3 | TC-005, TC-010 | ✅ Lowering and Linux adapter boundaries complete |
 | NFR-002 | NFR-002-AC-1, NFR-002-AC-3 | TC-007 | 🚧 Planned |
-| NFR-002 | NFR-002-AC-2 | TC-005 | 🚧 Planned |
+| NFR-002 | NFR-002-AC-2 | TC-005 | ✅ Adapter failure states complete |
 | NFR-002 | NFR-002-AC-4 | Inspection | 🚧 Planned |
 
 ## Test Case Summary
@@ -52,19 +52,20 @@ type: TestMatrix
 | TC-002 | Canonical requests and deterministic lowering | Property | P0 | FR-001, FR-002, NFR-001 | 🚧 Planned |
 | TC-003 | Capability rejection | Integration | P0 | FR-001, FR-002 | 🚧 Planned |
 | TC-004 | Injective symbols and source mapping | Property | P0 | FR-002, FR-004 | 🚧 Planned |
-| TC-005 | Adapter resource and failure isolation | Integration | P0 | FR-003, NFR-001, NFR-002 | 🚧 Planned |
+| TC-005 | Adapter resource and failure isolation | Integration | P0 | FR-003, NFR-001, NFR-002 | ✅ Linux adapter v1 complete |
 | TC-006 | Engine parity and counterexamples | Analysis | P0 | FR-003, FR-004, FR-005 | 🚧 Planned |
 | TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | 🚧 Planned |
 | TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Planned |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
 
-The broader semantic rows TC-001 through TC-008 remain planned until the corresponding native
-implementation issue has executable, requirement-tagged tests and retained evidence. TC-009 is
-completed architecture research. TC-010 completes only the Boolean-v1 lowering boundary and does not
-claim solver execution, conclusion, evidence, or CLI coverage. The placeholder crate tests count only
-as scaffold health and satisfy no row. A row may become complete only when its entire acceptance scope
-runs; ignored, skipped, unavailable, or platform-deferred cases remain visible and not complete.
+TC-001 through TC-004 and TC-006 through TC-008 remain planned until their corresponding native
+implementation issues have executable, requirement-tagged tests and retained records. TC-005
+completes the Linux adapter v1 boundary; it does not claim real-engine differential, semantic
+conclusion, evidence-envelope, non-Linux, or CLI coverage. TC-009 is completed architecture research.
+TC-010 completes only Boolean-v1 lowering. The placeholder crate tests count only as scaffold health
+and satisfy no row. A row may become complete only when its entire acceptance scope runs; ignored,
+skipped, unavailable, or platform-deferred cases remain visible and not complete.
 
 ## QA Coverage Obligations
 

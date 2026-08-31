@@ -1,8 +1,10 @@
 //! SMT-backed consistency and implication analysis for versioned requirement contracts.
 
 mod smt;
+mod solver;
 
 pub use smt::*;
+pub use solver::*;
 
 /// Placeholder entry point.
 pub fn hello() -> &'static str {

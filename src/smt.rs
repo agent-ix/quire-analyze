@@ -390,14 +390,48 @@ pub struct VariableMap {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryBundle {
-    pub profile: &'static str,
-    pub logic: &'static str,
-    pub query: String,
-    pub analysis_request_digest: AnalysisDigest,
-    pub query_digest: AnalysisDigest,
-    pub binding_set_digest: AnalysisDigest,
-    pub assertions: Vec<AssertionMap>,
-    pub variables: Vec<VariableMap>,
+    profile: &'static str,
+    logic: &'static str,
+    query: String,
+    analysis_request_digest: AnalysisDigest,
+    query_digest: AnalysisDigest,
+    binding_set_digest: AnalysisDigest,
+    assertions: Vec<AssertionMap>,
+    variables: Vec<VariableMap>,
+}
+
+impl QueryBundle {
+    pub const fn profile(&self) -> &'static str {
+        self.profile
+    }
+
+    pub const fn logic(&self) -> &'static str {
+        self.logic
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub const fn analysis_request_digest(&self) -> AnalysisDigest {
+        self.analysis_request_digest
+    }
+
+    pub const fn query_digest(&self) -> AnalysisDigest {
+        self.query_digest
+    }
+
+    pub const fn binding_set_digest(&self) -> AnalysisDigest {
+        self.binding_set_digest
+    }
+
+    pub fn assertions(&self) -> &[AssertionMap] {
+        &self.assertions
+    }
+
+    pub fn variables(&self) -> &[VariableMap] {
+        &self.variables
+    }
 }
 
 pub fn lower_boolean_statements(

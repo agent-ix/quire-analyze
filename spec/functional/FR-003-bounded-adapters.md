@@ -33,7 +33,8 @@ and normalize their protocol responses without shell interpretation.
   remain distinct non-conclusive outcomes.
 - A conclusive answer requires a recognized `sat` or `unsat` response, successful exit, complete
   protocol parse, exact engine/version/executable/configuration identities, and no truncated output.
-- v0.1 process-tree containment uses a fresh POSIX process group and is supported on Unix targets.
+- v0.1 process-tree containment uses a fresh POSIX process group and executes the already-hashed
+  open file descriptor on Linux targets.
   Other targets return `unsupported-platform` before spawn; a missing platform campaign cannot be
   represented as successful cleanup.
 
@@ -41,7 +42,7 @@ and normalize their protocol responses without shell interpretation.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-003-AC-1 | In each of three timeout and cancellation repetitions, zero members of the spawned POSIX process group survive 1,000 ms after cleanup begins; the measured maximum is retained. | Test (TC-005) |
+| FR-003-AC-1 | In each of three timeout and cancellation repetitions on Linux, zero members of the spawned POSIX process group survive 1,000 ms after cleanup begins; the measured maximum is retained. | Test (TC-005) |
 | FR-003-AC-2 | Malformed, excessive, contradictory, signaled, and nonzero-exit responses cannot become conclusive. | Test (TC-005) |
 | FR-003-AC-3 | Z3 and cvc5 adapters expose the same normalized result contract. | Test (TC-006) |
 | FR-003-AC-4 | The record identifies exact engine, full normalized version output, executable SHA-256, argv, query digest, limits, configuration digest, exit state, stdout/stderr, and elapsed/cleanup milliseconds. | Test (TC-005, TC-007) |

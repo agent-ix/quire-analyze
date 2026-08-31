@@ -14,6 +14,7 @@ name = "quire_analyze"
 path = "src/lib.rs"
 
 [dependencies]
+libc = "=0.2.189"
 quire-contract-ir = { git = "https://github.com/agent-ix/quire-contract-ir", rev = "bb5d30cbb1519b7ac286250114c96ba967661cba", version = "=0.1.0" }
 sha2 = "=0.10.9"
 

@@ -130,7 +130,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     assert!(TEST_MATRIX.contains("The placeholder"));
     assert!(TEST_MATRIX.contains("satisfy no row"));
     for semantic_test in [
-        "TC-001", "TC-002", "TC-003", "TC-004", "TC-005", "TC-006", "TC-007", "TC-008",
+        "TC-001", "TC-002", "TC-003", "TC-004", "TC-006", "TC-007", "TC-008",
     ] {
         let row = TEST_MATRIX
             .lines()
@@ -138,6 +138,8 @@ fn foundation_plan_advances_only_first_unblocked_child() {
             .expect("semantic test row must exist");
         assert!(row.ends_with("🚧 Planned |"));
     }
+    assert!(TEST_MATRIX.contains("| TC-005 | Adapter resource and failure isolation |"));
+    assert!(TEST_MATRIX.contains("| ✅ Linux adapter v1 complete |"));
     assert!(TEST_MATRIX.contains("| TC-009 | ADR-0010 identity research |"));
 
     let complete_rows: Vec<_> = TEST_MATRIX
@@ -146,7 +148,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .collect();
     assert_eq!(
         complete_rows.len(),
-        6,
+        14,
         "a new complete matrix row requires an executable trace binding"
     );
     assert_eq!(
@@ -155,6 +157,13 @@ fn foundation_plan_advances_only_first_unblocked_child() {
             .filter(|line| line.starts_with("| FR-002 |"))
             .count(),
         4
+    );
+    assert_eq!(
+        complete_rows
+            .iter()
+            .filter(|line| line.starts_with("| FR-003 |"))
+            .count(),
+        5
     );
     assert!(complete_rows
         .iter()
