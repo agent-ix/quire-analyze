@@ -120,14 +120,12 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     assert!(PLAN.contains("| Task-004 | #7 deterministic SMT lowering | done |"));
     assert!(PLAN.contains("| Task-007 | #5 evidence/differential/CLI | not_started |"));
     assert!(PLAN.contains("| Task-005 | #3 bounded solver adapters | done |"));
-    assert!(PLAN.contains("| Task-006 | #4 analyses/counterexamples | in_progress |"));
+    assert!(PLAN.contains("| Task-006 | #4 analyses/counterexamples | done |"));
     assert!(PLAN.contains("| Task-003 | #6 ADR-0010 algebra/identity | done |"));
     assert!(PLAN.contains("All implementation children remain Backlog"));
     assert!(TEST_MATRIX.contains("The placeholder"));
     assert!(TEST_MATRIX.contains("satisfy no row"));
-    for semantic_test in [
-        "TC-001", "TC-002", "TC-003", "TC-004", "TC-006", "TC-007", "TC-008",
-    ] {
+    for semantic_test in ["TC-002", "TC-003", "TC-004", "TC-006", "TC-007", "TC-008"] {
         let row = TEST_MATRIX
             .lines()
             .find(|line| line.starts_with(&format!("| {semantic_test} |")))
@@ -136,6 +134,8 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     }
     assert!(TEST_MATRIX.contains("| TC-005 | Adapter resource and failure isolation |"));
     assert!(TEST_MATRIX.contains("| ✅ Linux adapter v1 complete |"));
+    assert!(TEST_MATRIX.contains("| TC-001 | Analysis algebra and truth table |"));
+    assert!(TEST_MATRIX.contains("| ✅ Boolean v1 complete |"));
     assert!(TEST_MATRIX.contains("| TC-009 | ADR-0010 identity research |"));
 
     let complete_rows: Vec<_> = TEST_MATRIX
@@ -144,7 +144,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .collect();
     assert_eq!(
         complete_rows.len(),
-        14,
+        24,
         "a new complete matrix row requires an executable trace binding"
     );
     assert_eq!(
@@ -158,6 +158,20 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         complete_rows
             .iter()
             .filter(|line| line.starts_with("| FR-003 |"))
+            .count(),
+        5
+    );
+    assert_eq!(
+        complete_rows
+            .iter()
+            .filter(|line| line.starts_with("| FR-001 |"))
+            .count(),
+        4
+    );
+    assert_eq!(
+        complete_rows
+            .iter()
+            .filter(|line| line.starts_with("| FR-004 |"))
             .count(),
         5
     );

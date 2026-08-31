@@ -28,6 +28,69 @@ pub const MAX_EXPRESSION_NODES: usize = 100_000;
 /// The only statement grouping represented by this issue's lowering API.
 pub const LOWERING_REQUEST_KIND: &str = "boolean_conjunction";
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AnalysisKind {
+    Consistency,
+    Contradiction,
+    Implication,
+    Redundancy,
+    DeadAntecedent,
+}
+
+impl AnalysisKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Consistency => "consistency",
+            Self::Contradiction => "contradiction",
+            Self::Implication => "implication",
+            Self::Redundancy => "redundancy",
+            Self::DeadAntecedent => "dead-antecedent",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum StatementRole {
+    Assumption,
+    Selected,
+    Left,
+    Right,
+    Antecedent,
+    Consequent,
+    Peer,
+    Candidate,
+}
+
+impl StatementRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Assumption => "assumption",
+            Self::Selected => "selected",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Antecedent => "antecedent",
+            Self::Consequent => "consequent",
+            Self::Peer => "peer",
+            Self::Candidate => "candidate",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AssertionPolarity {
+    Positive,
+    Negated,
+}
+
+impl AssertionPolarity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Positive => "positive",
+            Self::Negated => "negated",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LoweringErrorCode {
     InvalidStatement,
@@ -379,6 +442,8 @@ pub struct AssertionMap {
     pub clause: ClauseRef,
     pub clause_digest: CanonicalDigest,
     pub source: SourceSpan,
+    pub role: StatementRole,
+    pub polarity: AssertionPolarity,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -389,6 +454,39 @@ pub struct VariableMap {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ReplayExpression {
+    Literal(bool),
+    Variable(String),
+    Not(Box<Self>),
+    And(Box<Self>, Box<Self>),
+    Or(Box<Self>, Box<Self>),
+    Implies(Box<Self>, Box<Self>),
+    Equal(Box<Self>, Box<Self>),
+    NotEqual(Box<Self>, Box<Self>),
+}
+
+impl ReplayExpression {
+    pub(crate) fn evaluate(&self, values: &BTreeMap<String, bool>) -> Option<bool> {
+        match self {
+            Self::Literal(value) => Some(*value),
+            Self::Variable(symbol) => values.get(symbol).copied(),
+            Self::Not(operand) => Some(!operand.evaluate(values)?),
+            Self::And(left, right) => Some(left.evaluate(values)? && right.evaluate(values)?),
+            Self::Or(left, right) => Some(left.evaluate(values)? || right.evaluate(values)?),
+            Self::Implies(left, right) => Some(!left.evaluate(values)? || right.evaluate(values)?),
+            Self::Equal(left, right) => Some(left.evaluate(values)? == right.evaluate(values)?),
+            Self::NotEqual(left, right) => Some(left.evaluate(values)? != right.evaluate(values)?),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReplayAssertion {
+    pub(crate) name: String,
+    pub(crate) expression: ReplayExpression,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueryBundle {
     profile: &'static str,
     logic: &'static str,
@@ -396,8 +494,10 @@ pub struct QueryBundle {
     analysis_request_digest: AnalysisDigest,
     query_digest: AnalysisDigest,
     binding_set_digest: AnalysisDigest,
+    analysis_kind: Option<AnalysisKind>,
     assertions: Vec<AssertionMap>,
     variables: Vec<VariableMap>,
+    replay_assertions: Vec<ReplayAssertion>,
 }
 
 impl QueryBundle {
@@ -425,6 +525,10 @@ impl QueryBundle {
         self.binding_set_digest
     }
 
+    pub const fn analysis_kind(&self) -> Option<AnalysisKind> {
+        self.analysis_kind
+    }
+
     pub fn assertions(&self) -> &[AssertionMap] {
         &self.assertions
     }
@@ -432,10 +536,45 @@ impl QueryBundle {
     pub fn variables(&self) -> &[VariableMap] {
         &self.variables
     }
+
+    pub(crate) fn replay_assertions(&self) -> &[ReplayAssertion] {
+        &self.replay_assertions
+    }
 }
 
 pub fn lower_boolean_statements(
     statements: &[StatementInput],
+    bindings: &[BindingGroup],
+) -> Result<QueryBundle, Vec<LoweringError>> {
+    let statements = statements
+        .iter()
+        .map(|statement| AnalysisStatement {
+            statement,
+            role: StatementRole::Selected,
+            polarity: AssertionPolarity::Positive,
+        })
+        .collect::<Vec<_>>();
+    lower_statement_specs(None, LOWERING_REQUEST_KIND, &statements, bindings)
+}
+
+pub(crate) struct AnalysisStatement<'a> {
+    pub(crate) statement: &'a StatementInput,
+    pub(crate) role: StatementRole,
+    pub(crate) polarity: AssertionPolarity,
+}
+
+pub(crate) fn lower_analysis_statements(
+    kind: AnalysisKind,
+    statements: &[AnalysisStatement<'_>],
+    bindings: &[BindingGroup],
+) -> Result<QueryBundle, Vec<LoweringError>> {
+    lower_statement_specs(Some(kind), kind.as_str(), statements, bindings)
+}
+
+fn lower_statement_specs(
+    analysis_kind: Option<AnalysisKind>,
+    request_kind: &str,
+    statements: &[AnalysisStatement<'_>],
     bindings: &[BindingGroup],
 ) -> Result<QueryBundle, Vec<LoweringError>> {
     if statements.is_empty() {
@@ -459,12 +598,35 @@ pub fn lower_boolean_statements(
     let mut lowered = Vec::with_capacity(statements.len());
     let mut errors = Vec::new();
 
-    for statement in statements {
-        let statement_digest = statement_digest(statement, binding_set_digest);
-        let assertion_name = assertion_symbol(statement, statement_digest);
-        match lower_expression(statement, &binding_lookup, &mut encountered, &mut variables) {
-            Ok(expression) => {
-                lowered.push((assertion_name, statement_digest, statement, expression));
+    for specification in statements {
+        let source_digest = statement_digest(specification.statement, binding_set_digest);
+        let mapped_digest = analysis_kind.map_or(source_digest, |kind| {
+            hash_fields(
+                "analysis-statement",
+                &[
+                    ANALYSIS_MODEL_PROFILE.as_bytes(),
+                    kind.as_str().as_bytes(),
+                    specification.role.as_str().as_bytes(),
+                    specification.polarity.as_str().as_bytes(),
+                    source_digest.as_bytes(),
+                ],
+            )
+        });
+        let assertion_name = assertion_symbol(specification.statement, mapped_digest);
+        match lower_expression(
+            specification.statement,
+            &binding_lookup,
+            &mut encountered,
+            &mut variables,
+        ) {
+            Ok(mut expression) => {
+                if specification.polarity == AssertionPolarity::Negated {
+                    expression = LoweredExpression {
+                        smt: format!("(not {})", expression.smt),
+                        replay: ReplayExpression::Not(Box::new(expression.replay)),
+                    };
+                }
+                lowered.push((assertion_name, mapped_digest, specification, expression));
             }
             Err(error) => errors.push(error),
         }
@@ -505,7 +667,7 @@ pub fn lower_boolean_statements(
         "request",
         &[
             ANALYSIS_MODEL_PROFILE.as_bytes(),
-            LOWERING_REQUEST_KIND.as_bytes(),
+            request_kind.as_bytes(),
             &canonical_statements,
             MAX_QUERY_STATEMENTS.to_string().as_bytes(),
             MAX_QUERY_BYTES.to_string().as_bytes(),
@@ -526,17 +688,24 @@ pub fn lower_boolean_statements(
         query.push_str(" () Bool)\n");
     }
     let mut assertions = Vec::with_capacity(lowered.len());
-    for (name, _, statement, expression) in lowered {
+    let mut replay_assertions = Vec::with_capacity(lowered.len());
+    for (name, _, specification, expression) in lowered {
         query.push_str("(assert (! ");
-        query.push_str(&expression);
+        query.push_str(&expression.smt);
         query.push_str(" :named ");
         query.push_str(&name);
         query.push_str("))\n");
         assertions.push(AssertionMap {
+            name: name.clone(),
+            clause: specification.statement.clause.clone(),
+            clause_digest: specification.statement.clause_digest,
+            source: specification.statement.source.clone(),
+            role: specification.role,
+            polarity: specification.polarity,
+        });
+        replay_assertions.push(ReplayAssertion {
             name,
-            clause: statement.clause.clone(),
-            clause_digest: statement.clause_digest,
-            source: statement.source.clone(),
+            expression: expression.replay,
         });
     }
     query.push_str("(check-sat)\n");
@@ -562,12 +731,19 @@ pub fn lower_boolean_statements(
         analysis_request_digest,
         query_digest,
         binding_set_digest,
+        analysis_kind,
         assertions,
         variables: variables.into_values().collect(),
+        replay_assertions,
     })
 }
 
 type BindingLookup = BTreeMap<String, String>;
+
+struct LoweredExpression {
+    smt: String,
+    replay: ReplayExpression,
+}
 
 fn validate_bindings(
     bindings: &[BindingGroup],
@@ -617,7 +793,7 @@ fn lower_expression(
     bindings: &BindingLookup,
     encountered: &mut BTreeSet<String>,
     variables: &mut BTreeMap<String, VariableMap>,
-) -> Result<String, LoweringError> {
+) -> Result<LoweredExpression, LoweringError> {
     fn lower(
         expression: &Expression,
         statement: &StatementInput,
@@ -626,7 +802,7 @@ fn lower_expression(
         variables: &mut BTreeMap<String, VariableMap>,
         depth: usize,
         nodes: &mut usize,
-    ) -> Result<String, LoweringError> {
+    ) -> Result<LoweredExpression, LoweringError> {
         if depth > MAX_EXPRESSION_DEPTH {
             return Err(LoweringError::new(
                 LoweringErrorCode::ResourceLimit,
@@ -657,7 +833,10 @@ fn lower_expression(
             )
         };
         match expression.kind() {
-            ExpressionKind::BooleanLiteral { value } => Ok(value.to_string()),
+            ExpressionKind::BooleanLiteral { value } => Ok(LoweredExpression {
+                smt: value.to_string(),
+                replay: ReplayExpression::Literal(*value),
+            }),
             ExpressionKind::ValueReference { name, observation } => {
                 let declaration = statement
                     .environment
@@ -722,27 +901,43 @@ fn lower_expression(
                     entry.origins.push(key);
                     entry.origins.sort();
                 }
-                Ok(symbol)
+                Ok(LoweredExpression {
+                    smt: symbol.clone(),
+                    replay: ReplayExpression::Variable(symbol),
+                })
             }
-            ExpressionKind::BooleanNot { operand } => Ok(format!(
-                "(not {})",
-                recurse(operand, encountered, variables, nodes)?
-            )),
+            ExpressionKind::BooleanNot { operand } => {
+                let operand = recurse(operand, encountered, variables, nodes)?;
+                Ok(LoweredExpression {
+                    smt: format!("(not {})", operand.smt),
+                    replay: ReplayExpression::Not(Box::new(operand.replay)),
+                })
+            }
             ExpressionKind::Boolean {
                 operator,
                 left,
                 right,
             } => {
-                let op = match operator {
-                    BooleanOperator::ShortCircuitAnd | BooleanOperator::TotalAnd => "and",
-                    BooleanOperator::ShortCircuitOr | BooleanOperator::TotalOr => "or",
-                    BooleanOperator::Implication => "=>",
+                let left = recurse(left, encountered, variables, nodes)?;
+                let right = recurse(right, encountered, variables, nodes)?;
+                let (operator_name, replay) = match operator {
+                    BooleanOperator::ShortCircuitAnd | BooleanOperator::TotalAnd => (
+                        "and",
+                        ReplayExpression::And(Box::new(left.replay), Box::new(right.replay)),
+                    ),
+                    BooleanOperator::ShortCircuitOr | BooleanOperator::TotalOr => (
+                        "or",
+                        ReplayExpression::Or(Box::new(left.replay), Box::new(right.replay)),
+                    ),
+                    BooleanOperator::Implication => (
+                        "=>",
+                        ReplayExpression::Implies(Box::new(left.replay), Box::new(right.replay)),
+                    ),
                 };
-                Ok(format!(
-                    "({op} {} {})",
-                    recurse(left, encountered, variables, nodes)?,
-                    recurse(right, encountered, variables, nodes)?
-                ))
+                Ok(LoweredExpression {
+                    smt: format!("({operator_name} {} {})", left.smt, right.smt),
+                    replay,
+                })
             }
             ExpressionKind::Compare {
                 operator,
@@ -756,8 +951,20 @@ fn lower_expression(
                 let left = recurse(left, encountered, variables, nodes)?;
                 let right = recurse(right, encountered, variables, nodes)?;
                 Ok(match operator {
-                    ComparisonOperator::Equal => format!("(= {left} {right})"),
-                    ComparisonOperator::NotEqual => format!("(not (= {left} {right}))"),
+                    ComparisonOperator::Equal => LoweredExpression {
+                        smt: format!("(= {} {})", left.smt, right.smt),
+                        replay: ReplayExpression::Equal(
+                            Box::new(left.replay),
+                            Box::new(right.replay),
+                        ),
+                    },
+                    ComparisonOperator::NotEqual => LoweredExpression {
+                        smt: format!("(not (= {} {}))", left.smt, right.smt),
+                        replay: ReplayExpression::NotEqual(
+                            Box::new(left.replay),
+                            Box::new(right.replay),
+                        ),
+                    },
                     _ => unreachable!(),
                 })
             }

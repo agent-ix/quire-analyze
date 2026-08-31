@@ -2,7 +2,7 @@
 id: Task-006
 title: "Analysis conclusions and counterexamples"
 type: Task
-status: in_progress
+status: done
 track: B
 priority: P0
 relationships:
