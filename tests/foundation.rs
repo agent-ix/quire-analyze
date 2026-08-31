@@ -105,7 +105,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     ] {
         assert!(PLAN.contains(row), "missing guarded child row {row}");
     }
-    assert!(PLAN.contains("| Task-003 | #6 ADR-0010 algebra/identity | in_progress |"));
+    assert!(PLAN.contains("| Task-003 | #6 ADR-0010 algebra/identity | done |"));
     assert!(PLAN.contains("All implementation children remain Backlog"));
     assert!(TEST_MATRIX.contains("The placeholder"));
     assert!(TEST_MATRIX.contains("crate tests count only as scaffold health and satisfy no row"));

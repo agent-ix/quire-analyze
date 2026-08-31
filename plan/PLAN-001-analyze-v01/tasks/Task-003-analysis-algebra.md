@@ -2,7 +2,7 @@
 id: Task-003
 title: "Analysis algebra identity and ADR-0010"
 type: Task
-status: in_progress
+status: done
 track: B
 priority: P0
 relationships:
@@ -26,3 +26,6 @@ Tasks 001 and 002 must be done. The exact IR revision, schemas, corpus, and lock
 ADR-0010 accepts the minimal analysis algebra, explicit cross-requirement binding groups, and
 versioned invalidation rules. REV-004 retains the reproduced dual encoding and corpus/fixture
 measurements. TC-009 executes the identity comparison and incompatible-binding controls.
+
+The source-bound local outcomes and eight closed review findings are retained at
+`evidence/adr-0010-2690c25/validation-summary.md`.
