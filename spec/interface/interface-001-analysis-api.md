@@ -47,7 +47,14 @@ identity_envelope:
   schema: quire.derivation-evidence/v1
   required: [producer, inputs, backend, outputs, parameters, dependencies, environment, provenance, result]
 resource_limits:
-  required: [wall_time_ms, cleanup_time_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes]
+  lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
+  adapter: [wall_time_ms, cleanup_time_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes]
+lowering_v1:
+  request_kind: boolean_conjunction
+  logic: QF_UF
+  identities: [binding_set_digest, analysis_request_digest, query_digest]
+  maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding]
+  unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
   exact_source_revision: required for development

@@ -1,4 +1,6 @@
 /target
+/target-msrv
+/target-coverage
 Cargo.lock.bak
 *.swp
 .DS_Store

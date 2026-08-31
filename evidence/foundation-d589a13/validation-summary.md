@@ -1,5 +1,9 @@
 # Issue #2 foundation validation summary
 
+> **Legacy narrative only.** This file has no retained command transcripts or machine-derived verdict.
+> Its outcome table is an authored historical claim, not verification evidence, and discharges no
+> acceptance criterion. The repository checksum manifest detects byte changes and omission only.
+
 ## Subject
 
 - Source revision: `d589a13ef3ed50a32cbc2e18812135753b1f4864`

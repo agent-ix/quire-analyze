@@ -2,7 +2,7 @@
 id: Task-004
 title: "Deterministic SMT-LIB2 lowering"
 type: Task
-status: not_started
+status: in_progress
 track: B
 priority: P0
 relationships:
@@ -19,3 +19,9 @@ source assertion maps, unsupported fixtures, and reproducibility evidence.
 ## Guard
 
 Task-003 must be done and ADR-0010 accepted.
+
+## Verification
+
+TC-010 owns the executable issue slice: order invariance, exact Boolean operator encodings, explicit
+unsupported categories, binding validation, structural type-shape order, identity invalidation,
+statement resource bounds, golden bytes, exact dependency pinning, and Rust 1.75 compatibility.

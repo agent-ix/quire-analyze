@@ -5,7 +5,7 @@ on:
 
 jobs:
   rust:
-    name: Rust Checks
+    name: Complete Local Gate
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -15,33 +15,23 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install MSRV
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.75.0
+
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Format
-        run: cargo fmt --all -- --check
-
-      - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test
-
-      - name: Unsafe audit
-        run: bash scripts/check_unsafe_comments.sh
-
-  licenses:
-    name: License Check
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
-      - name: Install cargo-deny
+      - name: Install Cargo policy and coverage tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
-      - name: cargo deny check licenses
-        run: cargo deny check licenses
+          tool: cargo-deny,cargo-llvm-cov
+
+      - name: Install specification tools and modules
+        run: |
+          npm install --global '@agent-ix/quire-cli@0.31.0' '@agent-ix/quoin@0.22.5'
+          quoin module ensure-defaults
+
+      - name: Run the complete local gate
+        run: make ci

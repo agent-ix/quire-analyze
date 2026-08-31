@@ -10,13 +10,13 @@ type: TestMatrix
 | Functional Req | Acceptance Criteria | Test Cases | Coverage Status |
 |---|---|---|---|
 | FR-001 | FR-001-AC-1, FR-001-AC-2 | TC-001, TC-009 | 🚧 Planned |
-| FR-001 | FR-001-AC-3 | TC-002, TC-009 | 🚧 Planned |
-| FR-001 | FR-001-AC-4 | TC-003 | 🚧 Planned |
-| FR-001 | FR-001-AC-5 | TC-002, TC-009 | 🚧 Planned |
-| FR-002 | FR-002-AC-1 | TC-002 | 🚧 Planned |
-| FR-002 | FR-002-AC-2, FR-002-AC-4 | TC-003 | 🚧 Planned |
-| FR-002 | FR-002-AC-3 | TC-004 | 🚧 Planned |
-| FR-002 | FR-002-AC-5 | TC-004, Inspection | 🚧 Planned |
+| FR-001 | FR-001-AC-3 | TC-002, TC-009, TC-010 | 🚧 Planned; lowering slice complete |
+| FR-001 | FR-001-AC-4 | TC-003, TC-010 | 🚧 Planned; lowering slice complete |
+| FR-001 | FR-001-AC-5 | TC-002, TC-009, TC-010 | 🚧 Planned; lowering slice complete |
+| FR-002 | FR-002-AC-1 | TC-002, TC-010 | ✅ Boolean v1 complete |
+| FR-002 | FR-002-AC-2, FR-002-AC-4 | TC-003, TC-010 | ✅ Boolean v1 complete |
+| FR-002 | FR-002-AC-3 | TC-004, TC-010 | ✅ Boolean v1 complete |
+| FR-002 | FR-002-AC-5 | TC-004, TC-010, Inspection | ✅ Boolean v1 complete |
 | FR-003 | FR-003-AC-1, FR-003-AC-2 | TC-005 | 🚧 Planned |
 | FR-003 | FR-003-AC-3 | TC-006 | 🚧 Planned |
 | FR-003 | FR-003-AC-4 | TC-007 | 🚧 Planned |
@@ -38,7 +38,7 @@ type: TestMatrix
 |---|---|---|---|
 | StR-001 | StR-001-VC-1 | TC-002, TC-007 | 🚧 Planned |
 | StR-001 | StR-001-VC-2 | TC-006 | 🚧 Planned |
-| NFR-001 | NFR-001-AC-1 | TC-002 | 🚧 Planned |
+| NFR-001 | NFR-001-AC-1 | TC-002, TC-010 | 🚧 Planned; lowering slice complete |
 | NFR-001 | NFR-001-AC-2, NFR-001-AC-3 | TC-005 | 🚧 Planned |
 | NFR-002 | NFR-002-AC-1, NFR-002-AC-3 | TC-007 | 🚧 Planned |
 | NFR-002 | NFR-002-AC-2 | TC-005 | 🚧 Planned |
@@ -57,13 +57,14 @@ type: TestMatrix
 | TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | 🚧 Planned |
 | TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Planned |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
+| TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
 
-All semantic rows TC-001 through TC-008 remain planned until the corresponding native implementation
-issue has executable, requirement-tagged tests and retained evidence. TC-009 is completed
-architecture research and does not make FR-001 or a semantic analysis row complete. The placeholder
-crate tests count only as scaffold health and satisfy no row. A row may become complete only when its
-entire acceptance scope runs; ignored, skipped, unavailable, or platform-deferred cases remain
-visible and not complete.
+The broader semantic rows TC-001 through TC-008 remain planned until the corresponding native
+implementation issue has executable, requirement-tagged tests and retained evidence. TC-009 is
+completed architecture research. TC-010 completes only the Boolean-v1 lowering boundary and does not
+claim solver execution, conclusion, evidence, or CLI coverage. The placeholder crate tests count only
+as scaffold health and satisfy no row. A row may become complete only when its entire acceptance scope
+runs; ignored, skipped, unavailable, or platform-deferred cases remain visible and not complete.
 
 ## QA Coverage Obligations
 

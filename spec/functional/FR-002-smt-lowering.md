@@ -19,10 +19,21 @@ construct has a declared exact encoding under the selected profile.
 
 - Declaration, assertion, and metadata order is stable and independent of host maps and paths.
 - Symbols use injective encoding of complete semantic identities.
-- Each named assertion maps to one or more source clause/span identities.
-- Integer and rational bounds, overflow, division, remainder, definedness, options, records,
-  collections, finite quantifiers, and state observations follow the accepted IR semantics exactly.
-- A profile declares supported constructs, solver logic, encoding version, and resource limits.
+- Each named assertion maps to its complete package, requirement, revision, clause digest, and source
+  span identity; each variable map retains all complete declaration origins and any explicit binding.
+- `quire.smtlib2/v1` is deliberately Boolean-only: literals, typed Boolean input/state references,
+  negation, short-circuit and total conjunction/disjunction, implication, and Boolean equality or
+  inequality lower exactly to SMT-LIB 2.6 `QF_UF`.
+- Integer, rational, text, enum, record, option, collection, field/index/option access, calls,
+  arithmetic, ordering, locals, and quantifiers are explicitly unsupported by this profile. The
+  exhaustive Rust match makes an upstream expression variant addition a compile-time review point.
+- State observations and execution points remain part of variable identity. Short-circuit and total
+  Boolean operators share an encoding only after upstream validation establishes total Boolean
+  operands and discharges definedness obligations.
+- The profile declares supported and unsupported constructs, logic and SMT-LIB version, exact
+  dependency revision, statement/expression/query byte limits, and named-assertion/model features.
+- Domain-separated statement, binding-set, analysis-request, and query digests bind sorted canonical
+  identities, public limits, the encoding profile, and exact query bytes.
 - Unsupported or approximate semantics return `unsupported`; v0.1 never emits an approximate query
   that can produce `satisfied` or `refuted`.
 
@@ -30,11 +41,11 @@ construct has a declared exact encoding under the selected profile.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-002-AC-1 | Identical models produce byte-identical queries and assertion maps. | Test (TC-002) |
-| FR-002-AC-2 | Every public IR construct has an exact supported encoding test or an explicit unsupported fixture. | Test (TC-003) |
-| FR-002-AC-3 | Query symbols and named assertions map injectively to complete source identities. | Test (TC-004) |
-| FR-002-AC-4 | No approximation can yield a conclusive result. | Test (TC-003) |
-| FR-002-AC-5 | Golden queries expose declared logic, assertions, identities, and source maps for independent review. | Inspection and test (TC-004) |
+| FR-002-AC-1 | Identical models produce byte-identical queries and assertion maps. | Test (TC-002, TC-010) |
+| FR-002-AC-2 | Every public IR construct has an exact supported encoding or an explicit unsupported classification, with representative fixtures for arithmetic, quantification, and data types. | Test (TC-003, TC-010) |
+| FR-002-AC-3 | Query symbols and named assertions map injectively to complete source identities. | Test (TC-004, TC-010) |
+| FR-002-AC-4 | No approximation can yield a query or conclusive result. | Test (TC-003, TC-010) |
+| FR-002-AC-5 | Golden queries expose declared logic, assertions, identities, and source maps for independent review. | Test (TC-004, TC-010) |
 
 ## Dependencies
 
