@@ -7,6 +7,8 @@ relationships:
     type: satisfies
   - target: ix://agent-ix/quire-analyze/interface-001
     type: implements
+  - target: ix://agent-ix/quire-analyze/ADR-0010
+    type: references
 ---
 # FR-001: Define analysis algebra, identity, and shared-variable semantics
 
@@ -39,8 +41,17 @@ digests.
 | dead antecedent | assumptions and selected case antecedent | `unsat` | `sat` with activation model |
 
 - A request declares every assumption explicitly; no ambient requirement is inferred.
-- Variables are shared only when package, declaration, observation, execution-point, and type
-  identities agree; display names alone never alias variables.
+- Within one statement, complete contract-IR dependency identity is authoritative. Across
+  requirements, dependencies remain separate by default and share only through an explicit binding
+  group accepted under ADR-0010. Each member binds a root input or state using its full
+  package/requirement/revision, declaration path, observation, execution point, and ADR-0010
+  type-shape digest. Field, enum-variant, and function dependencies are not bindable variables.
+  Display names, lexicon
+  entries, or inferred entities never create aliases.
+- A binding group rejects a non-input/state member, different package or type-shape digest,
+  dependency kind, observation,
+  non-identical execution point, unresolved member, duplicate member, or member assigned to two
+  groups. V0.1 reports cross-execution-point binding unsupported.
 - The model preserves contract-IR short-circuit, total Boolean, definedness, bounded arithmetic,
   option, record, collection, and observation semantics.
 - Canonical request and statement identities bind the source package digest, clause revisions,
@@ -52,11 +63,11 @@ digests.
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-001-AC-1 | All five analysis truth conditions and assumption sets are explicit and independently executable. | Test (TC-001) |
-| FR-001-AC-2 | Shared-variable identity neither aliases unequal identities nor splits equal identities. | Test (TC-001) |
-| FR-001-AC-3 | Request and statement hashes change for every material semantic input and ignore irrelevant input ordering. | Test (TC-002) |
+| FR-001-AC-2 | Default singleton identity and explicit binding groups neither alias same-named unequal scopes nor split accepted equal members; incompatible groups reject. | Test (TC-001, TC-009) |
+| FR-001-AC-3 | Request and statement hashes change for every material semantic input, binding, analysis-model profile, or encoding-profile identity and ignore irrelevant input ordering. | Test (TC-002, TC-009) |
 | FR-001-AC-4 | Invalid or ambiguous requests fail before query generation with stable diagnostics. | Test (TC-003) |
-| FR-001-AC-5 | Changing an assumption group changes request identity and cannot reuse stale evidence. | Test (TC-002) |
+| FR-001-AC-5 | Changing an assumption group, requirement revision, clause digest, execution point, binding set, semantic limit, analysis-model profile, encoding profile, or query bytes changes the applicable identity and cannot reuse stale evidence. | Test (TC-002, TC-009) |
 
 ## Dependencies
 
-Accepted contract-IR FR-013 through FR-017 and ADR-0010 research in native issue #6.
+Accepted contract-IR FR-013 through FR-017 and accepted ADR-0010 in native issue #6.
