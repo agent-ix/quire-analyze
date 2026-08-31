@@ -90,15 +90,14 @@ fn foundation_names_assurance_boundary_evidence_and_owner() {
     assert!(ASSURANCE_ARGUMENT.contains("human-release-owner"));
 }
 
-/// Issue #2 workflow gate: implementation children remain unstarted until foundation completion.
+/// Issue #2 workflow gate: after foundation completion, only the first DAG child advances.
 #[test]
-fn foundation_plan_keeps_semantic_children_not_started() {
+fn foundation_plan_advances_only_first_unblocked_child() {
     for issue in ["#6", "#7", "#3", "#4", "#5"] {
         assert!(PLAN.contains(issue));
     }
 
     for row in [
-        "| Task-003 | #6 ADR-0010 algebra/identity | not_started |",
         "| Task-004 | #7 deterministic SMT lowering | not_started |",
         "| Task-005 | #3 bounded solver adapters | not_started |",
         "| Task-006 | #4 analyses/counterexamples | not_started |",
@@ -106,8 +105,18 @@ fn foundation_plan_keeps_semantic_children_not_started() {
     ] {
         assert!(PLAN.contains(row), "missing guarded child row {row}");
     }
+    assert!(PLAN.contains("| Task-003 | #6 ADR-0010 algebra/identity | in_progress |"));
     assert!(PLAN.contains("All implementation children remain Backlog"));
-    assert!(TEST_MATRIX.contains("placeholder crate tests count only as scaffold"));
-    assert!(TEST_MATRIX.contains("health and satisfy no row"));
-    assert!(!TEST_MATRIX.contains("✅ Complete"));
+    assert!(TEST_MATRIX.contains("The placeholder"));
+    assert!(TEST_MATRIX.contains("crate tests count only as scaffold health and satisfy no row"));
+    for semantic_test in [
+        "TC-001", "TC-002", "TC-003", "TC-004", "TC-005", "TC-006", "TC-007", "TC-008",
+    ] {
+        let row = TEST_MATRIX
+            .lines()
+            .find(|line| line.starts_with(&format!("| {semantic_test} |")))
+            .expect("semantic test row must exist");
+        assert!(row.ends_with("🚧 Planned |"));
+    }
+    assert!(TEST_MATRIX.contains("| TC-009 | ADR-0010 identity research |"));
 }

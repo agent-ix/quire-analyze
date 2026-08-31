@@ -1,0 +1,12 @@
+id	package	requirement	revision	kind	observation	name	type	anchor	truth_binding
+A	agent-ix/demo	REQ-a	1	input	current	temperature	i16[-40,125]	pre:check	ambient-temperature
+B	agent-ix/demo	REQ-b	3	input	current	temperature	i16[-40,125]	pre:check	ambient-temperature
+C	agent-ix/demo	REQ-c	1	input	current	temperature	i16[-40,125]	pre:check	motor-temperature
+D	agent-ix/demo	REQ-d	2	state	current	temperature	i16[-40,125]	pre:check	controller-temperature
+E	agent-ix/demo	REQ-e	1	input	current	temperature	boolean	pre:check	temperature-alarm
+F	agent-ix/demo	REQ-f	1	state	pre	mode	enum:Mode	handler:update	previous-mode
+G	agent-ix/demo	REQ-g	4	state	pre	mode	enum:Mode	handler:update	previous-mode
+H	agent-ix/demo	REQ-h	1	state	post	mode	enum:Mode	handler:update	next-mode
+I	agent-ix/demo	REQ-i	1	input	current	active	boolean	pre:check	primary-active
+J	agent-ix/demo	REQ-j	1	input	current	active	boolean	pre:check	secondary-active
+K	agent-ix/demo	REQ-k	1	input	current	pressure	u16[0,1000]	pre:check	pressure
