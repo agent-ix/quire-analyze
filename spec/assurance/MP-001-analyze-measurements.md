@@ -55,6 +55,26 @@ Z3 and cvc5 runs exercise differential behavior; mutation probes exercise eviden
 | M-09 | Local quality gates | fmt, Clippy warnings-as-errors, tests, docs, licenses, unsafe audit, MSRV pass | maintainer |
 | M-10 | Platform campaign | Linux, macOS, and Windows status retained; absent lanes remain limitations | release owner |
 
+## Adapter v1 Quantitative Profile
+
+| Quantity | Ceiling | Collection and decision rule |
+|---|---:|---|
+| solver wall time | 5,000 ms | monotonic spawn-to-terminal duration; timeout is non-conclusive |
+| total process-group cleanup | 1,000 ms | three timeout plus three cancellation repetitions; retain all values and maximum; any survivor or overrun fails M-05 |
+| graceful termination interval | 100 ms | monotonic interval before forced termination; included in total cleanup |
+| monitor interval | 5 ms | code/config census; a larger interval is invalid configuration |
+| query stdin | 16,777,216 bytes | exact boundary and one-byte-over rejection |
+| captured stdout | 16,777,216 bytes | drain after ceiling, mark truncated, never conclusive |
+| captured stderr | 1,048,576 bytes | drain after ceiling, mark truncated, never conclusive |
+| parsed model | 8,388,608 bytes | exact boundary and one-byte-over response fixture |
+| version output | 65,536 bytes | bounded identity probe; excess is tool error |
+| executable identity input | 536,870,912 bytes | metadata check before fixed-buffer SHA-256 streaming |
+| canonical executable path | 4,096 UTF-8 bytes | reject before spawn if absent, relative, non-UTF-8, or excessive |
+
+These are v1 profile ceilings, not performance estimates. TC-005 measures cleanup against the
+declared value on every supported platform run. Later release evidence retains platform-specific
+observations and cannot infer an unexecuted platform result.
+
 ## Retention
 
 Each candidate record identifies source revision and state, commands, toolchain, OS/target, exact IR
