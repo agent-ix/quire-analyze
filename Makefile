@@ -11,6 +11,7 @@ help:
 	@echo "  make fmt-check        - Verify formatting (CI gate)"
 	@echo "  make lint             - Clippy with -D warnings"
 	@echo "  make test             - cargo test"
+	@echo "  make spec             - Quire-validate the specification and plan"
 	@echo "  make build            - Release build"
 	@echo "  make clean            - cargo clean"
 	@echo "  make deny             - cargo deny check licenses"
@@ -36,6 +37,10 @@ lint:
 .PHONY: test
 test:
 	$(CARGO) test
+
+.PHONY: spec
+spec:
+	quire validate --scope . 'spec/**/*.md' 'planning/**/*.md' 'plan/**/*.md'
 
 .PHONY: build
 build:
