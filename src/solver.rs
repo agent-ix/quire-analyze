@@ -421,6 +421,9 @@ pub struct SolverRecord {
     engine: SolverEngine,
     outcome: SolverOutcome,
     identity: Option<ExecutableIdentity>,
+    configured_executable: PathBuf,
+    expected_version: String,
+    expected_executable_sha256: SolverDigest,
     argv: Vec<String>,
     configuration_digest: SolverDigest,
     query_digest: String,
@@ -449,6 +452,18 @@ impl SolverRecord {
 
     pub fn identity(&self) -> Option<&ExecutableIdentity> {
         self.identity.as_ref()
+    }
+
+    pub fn configured_executable(&self) -> &Path {
+        &self.configured_executable
+    }
+
+    pub fn expected_version(&self) -> &str {
+        &self.expected_version
+    }
+
+    pub const fn expected_executable_sha256(&self) -> SolverDigest {
+        self.expected_executable_sha256
     }
 
     pub fn argv(&self) -> &[String] {
@@ -529,6 +544,9 @@ pub fn execute_solver(
         engine: config.engine,
         outcome: SolverOutcome::IdentityError,
         identity: None,
+        configured_executable: config.executable.clone(),
+        expected_version: config.pin.version.clone(),
+        expected_executable_sha256: config.pin.executable_sha256,
         argv: argv.clone(),
         configuration_digest: config_digest,
         query_digest,
@@ -634,6 +652,22 @@ pub fn execute_solver(
         SolverOutcome::StdoutLimit
     } else if stderr_exceeded {
         SolverOutcome::StderrLimit
+    } else if raw.exit.as_ref().is_some_and(|status| !status.success())
+        && config.engine == SolverEngine::Z3
+        && raw.exit.as_ref().and_then(ExitStatus::code) == Some(1)
+        && record.stderr.is_empty()
+    {
+        match parse_response(
+            &record.stdout,
+            config.limits.model_bytes,
+            query.requests_model(),
+        ) {
+            Ok((outcome @ (SolverOutcome::Unsat | SolverOutcome::Unknown), model)) => {
+                record.model = model;
+                outcome
+            }
+            _ => SolverOutcome::NonzeroExit,
+        }
     } else if raw.exit.as_ref().is_some_and(|status| !status.success()) {
         if raw.exit.as_ref().and_then(exit_signal).is_some() {
             SolverOutcome::Signaled
@@ -645,7 +679,11 @@ pub fn execute_solver(
     } else if !record.stderr.is_empty() {
         SolverOutcome::DiagnosticOutput
     } else {
-        match parse_response(&record.stdout, config.limits.model_bytes) {
+        match parse_response(
+            &record.stdout,
+            config.limits.model_bytes,
+            query.requests_model(),
+        ) {
             Ok((outcome, model)) => {
                 record.model = model;
                 outcome
@@ -1161,6 +1199,7 @@ fn group_alive(process_group: i32) -> bool {
 fn parse_response(
     bytes: &[u8],
     model_limit: usize,
+    requests_model: bool,
 ) -> Result<(SolverOutcome, Vec<u8>), SolverOutcome> {
     let text = std::str::from_utf8(bytes).map_err(|_| SolverOutcome::MalformedOutput)?;
     let text = text.trim_start();
@@ -1190,6 +1229,9 @@ fn parse_response(
         return Ok((outcome, Vec::new()));
     }
     if tail.starts_with("(error") && valid_s_expression(tail.as_bytes()) {
+        if requests_model && outcome != SolverOutcome::Sat && model_unavailable_error(tail) {
+            return Ok((outcome, Vec::new()));
+        }
         return Err(SolverOutcome::SolverError);
     }
     if outcome != SolverOutcome::Sat {
@@ -1202,6 +1244,30 @@ fn parse_response(
         return Err(SolverOutcome::MalformedOutput);
     }
     Ok((outcome, tail.as_bytes().to_vec()))
+}
+
+fn model_unavailable_error(text: &str) -> bool {
+    let Some(message) = text
+        .strip_prefix("(error \"")
+        .and_then(|text| text.strip_suffix("\")"))
+    else {
+        return false;
+    };
+    if matches!(
+        message,
+        "model is not available" | "cannot get model unless after a SAT or UNKNOWN response."
+    ) {
+        return true;
+    }
+    let Some(location) = message.strip_suffix(": model is not available") else {
+        return false;
+    };
+    let mut parts = location.split_ascii_whitespace();
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some("line"), Some(line), Some("column"), Some(column), None)
+            if line.parse::<u64>().is_ok() && column.parse::<u64>().is_ok()
+    )
 }
 
 fn valid_s_expression(bytes: &[u8]) -> bool {
@@ -1333,39 +1399,49 @@ mod tests {
 
     #[test]
     fn response_parser_rejects_every_non_exact_shape() {
-        assert_eq!(parse_response(b"sat", 0), Ok((SolverOutcome::Sat, vec![])));
         assert_eq!(
-            parse_response(b"unsat", 0),
+            parse_response(b"sat", 0, false),
+            Ok((SolverOutcome::Sat, vec![]))
+        );
+        assert_eq!(
+            parse_response(b"unsat", 0, false),
             Ok((SolverOutcome::Unsat, vec![]))
         );
         assert_eq!(
-            parse_response(b"unknown", 0),
+            parse_response(b"unknown", 0, false),
             Ok((SolverOutcome::Unknown, vec![]))
         );
-        assert_eq!(parse_response(b"", 1), Err(SolverOutcome::MalformedOutput));
         assert_eq!(
-            parse_response(b"sat\0", 1),
+            parse_response(b"", 1, false),
             Err(SolverOutcome::MalformedOutput)
         );
         assert_eq!(
-            parse_response(&[0xff], 1),
+            parse_response(b"sat\0", 1, false),
             Err(SolverOutcome::MalformedOutput)
         );
         assert_eq!(
-            parse_response(b"unsat (model)", 100),
+            parse_response(&[0xff], 1, false),
             Err(SolverOutcome::MalformedOutput)
         );
         assert_eq!(
-            parse_response(b"sat unknown", 100),
+            parse_response(b"unsat (model)", 100, false),
+            Err(SolverOutcome::MalformedOutput)
+        );
+        assert_eq!(
+            parse_response(b"sat unknown", 100, false),
             Err(SolverOutcome::ContradictoryOutput)
         );
         let model = b"(model (define-fun |x y| () String \"a\"\"b\")) ; comment";
         assert_eq!(
-            parse_response(&[b"sat\n".as_slice(), model].concat(), model.len() + 1),
+            parse_response(
+                &[b"sat\n".as_slice(), model].concat(),
+                model.len() + 1,
+                false,
+            ),
             Ok((SolverOutcome::Sat, model.to_vec()))
         );
         assert_eq!(
-            parse_response(&[b"sat\n".as_slice(), model].concat(), model.len()),
+            parse_response(&[b"sat\n".as_slice(), model].concat(), model.len(), false,),
             Err(SolverOutcome::ModelLimit)
         );
         for malformed in [
@@ -1378,10 +1454,42 @@ mod tests {
             b"sat\n(|unterminated)".as_slice(),
         ] {
             assert_eq!(
-                parse_response(malformed, 1_000),
+                parse_response(malformed, 1_000, false),
                 Err(SolverOutcome::MalformedOutput)
             );
         }
+        assert_eq!(
+            parse_response(b"unsat\n(error \"model is not available\")", 100, true),
+            Ok((SolverOutcome::Unsat, vec![]))
+        );
+        assert_eq!(
+            parse_response(b"unknown\n(error \"model is not available\")", 100, true),
+            Ok((SolverOutcome::Unknown, vec![]))
+        );
+        assert_eq!(
+            parse_response(
+                b"unsat\n(error \"line 8 column 10: model is not available\")",
+                100,
+                true,
+            ),
+            Ok((SolverOutcome::Unsat, vec![]))
+        );
+        assert_eq!(
+            parse_response(
+                b"unsat\n(error \"cannot get model unless after a SAT or UNKNOWN response.\")",
+                100,
+                true,
+            ),
+            Ok((SolverOutcome::Unsat, vec![]))
+        );
+        assert_eq!(
+            parse_response(b"unsat\n(error \"unexpected\")", 100, true),
+            Err(SolverOutcome::SolverError)
+        );
+        assert_eq!(
+            parse_response(b"unsat\n(error \"unexpected\")", 100, false),
+            Err(SolverOutcome::SolverError)
+        );
     }
 
     #[test]

@@ -6,14 +6,18 @@ use std::{
     fs,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use quire_analyze::{
-    classify_analysis, execute_solver, lower_analysis_request, AdapterLimits, AnalysisKind,
-    AnalysisRequest, AnalysisRequestErrorCode, AnalysisStatus, AssertionPolarity, BindingGroup,
-    BindingMember, CancellationToken, ExplanationState, ModelPurpose, QueryBundle, SolverConfig,
-    SolverDigest, SolverEngine, SolverOutcome, SolverPin, StatementInput, StatementRole,
+    classify_analysis, compare_solver_records, execute_differential, execute_solver,
+    lower_analysis_request, publish_report_new, render_differential_report,
+    render_differential_summary, validate_differential_report, validate_report_document,
+    AdapterLimits, AnalysisKind, AnalysisRequest, AnalysisRequestErrorCode, AnalysisStatus,
+    AssertionPolarity, BindingGroup, BindingMember, CancellationToken, DifferentialDisposition,
+    ExplanationState, ModelPurpose, QueryBundle, SolverConfig, SolverDigest, SolverEngine,
+    SolverOutcome, SolverPin, StatementInput, StatementRole,
 };
 use quire_contract_ir::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ContractPackage,
@@ -169,6 +173,22 @@ fn digest(path: &Path) -> SolverDigest {
     SolverDigest::from_bytes(Sha256::digest(fs::read(path).expect("script")).into())
 }
 
+fn reseal_report(mut value: serde_json::Value) -> Vec<u8> {
+    value
+        .as_object_mut()
+        .expect("report object")
+        .remove("reportDigest");
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&value).expect("canonical payload"))
+    );
+    value
+        .as_object_mut()
+        .expect("report object")
+        .insert("reportDigest".to_owned(), serde_json::Value::String(digest));
+    serde_json::to_vec(&value).expect("sealed report")
+}
+
 fn write_solver(directory: &Path, response: &str, slow: bool) -> PathBuf {
     let path = directory.join("solver");
     let action = if slow {
@@ -177,7 +197,7 @@ fn write_solver(directory: &Path, response: &str, slow: bool) -> PathBuf {
         format!("/bin/cat >/dev/null; printf '%s' '{response}'")
     };
     let body = format!(
-        "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf '{VERSION}\\n'; exit 0; fi\n{action}\n"
+        "#!/bin/sh\nif [ \"$1\" = \"-version\" ] || [ \"$1\" = \"--version\" ]; then printf '{VERSION}\\n'; exit 0; fi\n{action}\n"
     );
     fs::write(&path, body).expect("write solver");
     let mut permissions = fs::metadata(&path).expect("metadata").permissions();
@@ -187,10 +207,18 @@ fn write_solver(directory: &Path, response: &str, slow: bool) -> PathBuf {
 }
 
 fn execute_response(query: &QueryBundle, response: &str) -> quire_analyze::SolverRecord {
+    execute_engine_response(query, response, SolverEngine::Z3)
+}
+
+fn execute_engine_response(
+    query: &QueryBundle,
+    response: &str,
+    engine: SolverEngine,
+) -> quire_analyze::SolverRecord {
     let directory = TempDirectory::new("response");
     let executable = write_solver(directory.path(), response, false);
     let config = SolverConfig::new(
-        SolverEngine::Z3,
+        engine,
         &executable,
         SolverPin::new(VERSION, digest(&executable)),
         AdapterLimits::default(),
@@ -633,4 +661,336 @@ fn nonconclusive_adapter_states_remain_nonconclusive() {
         .diagnostic()
         .expect("diagnostic")
         .contains("identity"));
+}
+
+/// FR-005-AC-3: agreement, disagreement, unavailability, and incomplete evidence stay distinct.
+/// Trace: TC-006, FR-005-AC-3, StR-001-VC-2
+#[test]
+fn differential_disposition_requires_two_verified_conclusive_results() {
+    let request = AnalysisRequest::consistency(
+        vec![],
+        vec![statement("differential", value("x"), &["x"])],
+        vec![],
+    )
+    .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+
+    let z3_unsat = execute_engine_response(&query, "unsat\n", SolverEngine::Z3);
+    let cvc5_unsat = execute_engine_response(&query, "unsat\n", SolverEngine::Cvc5);
+    let agreement = compare_solver_records(&query, &z3_unsat, &cvc5_unsat);
+    assert_eq!(agreement.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(agreement.agreed_status(), Some(AnalysisStatus::Refuted));
+    assert!(agreement.is_conclusive());
+
+    let z3_sat = execute_engine_response(&query, &model_response(&query, true), SolverEngine::Z3);
+    let disagreement = compare_solver_records(&query, &z3_sat, &cvc5_unsat);
+    assert_eq!(
+        disagreement.disposition(),
+        DifferentialDisposition::Disagreement
+    );
+    assert!(!disagreement.is_conclusive());
+    assert_eq!(disagreement.z3().solver().outcome(), SolverOutcome::Sat);
+    assert_eq!(disagreement.cvc5().solver().outcome(), SolverOutcome::Unsat);
+
+    let z3_incomplete = execute_engine_response(&query, "sat\n", SolverEngine::Z3);
+    let cvc5_incomplete = execute_engine_response(&query, "sat\n", SolverEngine::Cvc5);
+    let inconclusive = compare_solver_records(&query, &z3_incomplete, &cvc5_incomplete);
+    assert_eq!(
+        inconclusive.disposition(),
+        DifferentialDisposition::Inconclusive
+    );
+
+    let directory = TempDirectory::new("differential-unavailable");
+    let executable = write_solver(directory.path(), "unsat\n", false);
+    let z3_config = SolverConfig::new(
+        SolverEngine::Z3,
+        &executable,
+        SolverPin::new(VERSION, digest(&executable)),
+        AdapterLimits::default(),
+    )
+    .expect("z3 config");
+    let missing = directory.path().join("missing-cvc5");
+    let cvc5_config = SolverConfig::new(
+        SolverEngine::Cvc5,
+        &missing,
+        SolverPin::new(VERSION, SolverDigest::from_bytes([0; 32])),
+        AdapterLimits::default(),
+    )
+    .expect("cvc5 config");
+    let unavailable = execute_differential(
+        &query,
+        &z3_config,
+        &cvc5_config,
+        &CancellationToken::default(),
+    )
+    .expect("differential");
+    assert_eq!(
+        unavailable.disposition(),
+        DifferentialDisposition::Unavailable
+    );
+    assert_eq!(
+        unavailable.cvc5().solver().outcome(),
+        SolverOutcome::MissingExecutable
+    );
+    assert!(execute_differential(
+        &query,
+        &cvc5_config,
+        &z3_config,
+        &CancellationToken::default()
+    )
+    .is_err());
+}
+
+/// FR-005-AC-3: official pinned engines agree on independently selected sat and unsat cases.
+/// Trace: TC-006, FR-005-AC-3, MP-001-M-06
+#[test]
+#[ignore = "requires the pinned official Z3 and cvc5 release assets"]
+fn official_z3_cvc5_differential_corpus_agrees() {
+    let z3_path = PathBuf::from(std::env::var_os("QUIRE_Z3").expect("QUIRE_Z3 is required"));
+    let cvc5_path = PathBuf::from(std::env::var_os("QUIRE_CVC5").expect("QUIRE_CVC5 is required"));
+    let z3_digest = digest(&z3_path);
+    let cvc5_digest = digest(&cvc5_path);
+    assert_eq!(
+        z3_digest.to_string(),
+        "54bae839dd54e262edac6f755fc99659ce2a121301faff20a3e3b94478dcead0"
+    );
+    assert_eq!(
+        cvc5_digest.to_string(),
+        "7562a8b0b835e3eaad5f1a7b4616cd762350cf567b6be03d7e8ee24fa5ced5ee"
+    );
+    let z3_version = String::from_utf8(
+        Command::new(&z3_path)
+            .arg("-version")
+            .output()
+            .expect("Z3 version probe")
+            .stdout,
+    )
+    .expect("Z3 version UTF-8")
+    .trim()
+    .to_owned();
+    let cvc5_version = String::from_utf8(
+        Command::new(&cvc5_path)
+            .arg("--version")
+            .output()
+            .expect("cvc5 version probe")
+            .stdout,
+    )
+    .expect("cvc5 version UTF-8")
+    .trim()
+    .to_owned();
+    assert_eq!(z3_version, "Z3 version 5.1.0 - 64 bit");
+    assert!(cvc5_version.starts_with("cvc5 1.3.4 [git f3b21c4 on branch HEAD]\n"));
+
+    let z3 = SolverConfig::new(
+        SolverEngine::Z3,
+        z3_path,
+        SolverPin::new(z3_version, z3_digest),
+        AdapterLimits::default(),
+    )
+    .expect("Z3 configuration");
+    let cvc5 = SolverConfig::new(
+        SolverEngine::Cvc5,
+        cvc5_path,
+        SolverPin::new(cvc5_version, cvc5_digest),
+        AdapterLimits::default(),
+    )
+    .expect("cvc5 configuration");
+    let corpus = [
+        AnalysisRequest::consistency(
+            vec![],
+            vec![statement("real-sat", value("x"), &["x"])],
+            vec![],
+        )
+        .expect("sat request"),
+        AnalysisRequest::consistency(
+            vec![],
+            vec![statement(
+                "real-unsat",
+                and(value("x"), not(value("x"))),
+                &["x"],
+            )],
+            vec![],
+        )
+        .expect("unsat request"),
+    ];
+    let expected = [AnalysisStatus::Satisfied, AnalysisStatus::Refuted];
+    for (request, expected_status) in corpus.iter().zip(expected) {
+        let query = lower_analysis_request(request).expect("real query");
+        let run = execute_differential(&query, &z3, &cvc5, &CancellationToken::default())
+            .expect("real differential run");
+        assert_eq!(
+            run.disposition(),
+            DifferentialDisposition::Agreement,
+            "real differential failure: {run:#?}"
+        );
+        assert_eq!(run.agreed_status(), Some(expected_status));
+        let report = render_differential_report(&query, &run).expect("render real report");
+        validate_differential_report(&report, &query, &run).expect("real report");
+    }
+}
+
+/// FR-005-AC-1/2/4: one canonical renderer backs validation and no-replace atomic publication.
+/// Trace: TC-007, TC-008, FR-005-AC-1, FR-005-AC-2, FR-005-AC-4
+#[test]
+fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
+    let request =
+        AnalysisRequest::dead_antecedent(vec![], statement("report", literal(false), &[]), vec![])
+            .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let z3 = execute_engine_response(&query, "unsat\n", SolverEngine::Z3);
+    let cvc5 = execute_engine_response(&query, "unsat\n", SolverEngine::Cvc5);
+    let run = compare_solver_records(&query, &z3, &cvc5);
+    let first = render_differential_report(&query, &run).expect("first report");
+    let second = render_differential_report(&query, &run).expect("second report");
+    assert_eq!(first, second);
+    validate_differential_report(&first, &query, &run).expect("valid report");
+    let value: serde_json::Value = serde_json::from_slice(&first).expect("JSON");
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../schemas/differential-report-v1.schema.json"
+    ))
+    .expect("schema JSON");
+    let validator = jsonschema::JSONSchema::options()
+        .with_draft(jsonschema::Draft::Draft7)
+        .compile(&schema)
+        .unwrap_or_else(|error| panic!("schema compile: {error}"));
+    assert!(validator.is_valid(&value));
+    assert_eq!(
+        value["pgm01Envelope"]["status"],
+        serde_json::Value::String("unavailable".to_owned())
+    );
+    assert_eq!(value["engines"].as_array().expect("engines").len(), 2);
+    assert!(render_differential_summary(&run).contains("PGM-01 envelope: unavailable"));
+
+    let mut mutated = value.clone();
+    let mut omitted = mutated.clone();
+    omitted
+        .as_object_mut()
+        .expect("object")
+        .remove("queryDigest");
+    assert!(!validator.is_valid(&omitted));
+    mutated["differential"]["disposition"] = serde_json::Value::String("disagreement".to_owned());
+    let mutated = reseal_report(mutated);
+    assert!(validate_differential_report(&mutated, &query, &run).is_err());
+
+    let mut unknown_field = value.clone();
+    unknown_field["unexpected"] = serde_json::Value::Bool(true);
+    assert!(validate_report_document(&reseal_report(unknown_field)).is_err());
+
+    let mut raw_mismatch = value.clone();
+    raw_mismatch["engines"][0]["stdoutHex"] = serde_json::Value::String("00".to_owned());
+    assert!(validate_report_document(&reseal_report(raw_mismatch)).is_err());
+
+    let mut query_mismatch = value.clone();
+    query_mismatch["queryHex"] = serde_json::Value::String("00".to_owned());
+    assert!(validate_report_document(&reseal_report(query_mismatch)).is_err());
+
+    let mut swapped = value.clone();
+    swapped["engines"]
+        .as_array_mut()
+        .expect("engines")
+        .swap(0, 1);
+    assert!(validate_report_document(&reseal_report(swapped)).is_err());
+
+    let mut false_status = value.clone();
+    false_status["engines"][0]["status"] = serde_json::Value::String("refuted".to_owned());
+    assert!(validate_report_document(&reseal_report(false_status)).is_err());
+
+    let mut noncanonical = first.clone();
+    noncanonical.push(b'\n');
+    assert!(validate_report_document(&noncanonical).is_err());
+
+    let directory = TempDirectory::new("atomic-report");
+    let destination = directory.path().join("report.json");
+    publish_report_new(&destination, &first).expect("publish");
+    assert_eq!(fs::read(&destination).expect("published"), first);
+    let replacement = b"developer-owned";
+    assert!(publish_report_new(&destination, replacement).is_err());
+    assert_eq!(fs::read(&destination).expect("unchanged"), first);
+    assert!(fs::read_dir(directory.path())
+        .expect("directory")
+        .all(|entry| !entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".quire-analyze-report-")));
+
+    let cli_input = directory.path().join("cli-input.json");
+    let cli_output = directory.path().join("cli-output.json");
+    fs::write(&cli_input, &first).expect("CLI input");
+    let cli = Command::new(env!("CARGO_BIN_EXE_quire-analyze"))
+        .args([
+            "publish-report",
+            "--input",
+            cli_input.to_str().expect("UTF-8 input path"),
+            "--output",
+            cli_output.to_str().expect("UTF-8 output path"),
+        ])
+        .output()
+        .expect("CLI execution");
+    assert_eq!(cli.status.code(), Some(0));
+    assert!(cli.stdout.is_empty());
+    assert!(String::from_utf8(cli.stderr)
+        .expect("diagnostic UTF-8")
+        .contains("published"));
+    assert_eq!(fs::read(&cli_output).expect("CLI output"), first);
+
+    let refused = Command::new(env!("CARGO_BIN_EXE_quire-analyze"))
+        .args([
+            "publish-report",
+            "--input",
+            cli_input.to_str().expect("UTF-8 input path"),
+            "--output",
+            cli_output.to_str().expect("UTF-8 output path"),
+        ])
+        .output()
+        .expect("CLI refusal");
+    assert_eq!(refused.status.code(), Some(4));
+    assert_eq!(fs::read(&cli_output).expect("unchanged CLI output"), first);
+
+    let refuted_request = AnalysisRequest::consistency(
+        vec![],
+        vec![statement("cli-refuted", literal(false), &[])],
+        vec![],
+    )
+    .expect("refuted request");
+    let refuted_query = lower_analysis_request(&refuted_request).expect("refuted query");
+    let refuted_run = compare_solver_records(
+        &refuted_query,
+        &execute_engine_response(&refuted_query, "unsat\n", SolverEngine::Z3),
+        &execute_engine_response(&refuted_query, "unsat\n", SolverEngine::Cvc5),
+    );
+    let refuted_input = directory.path().join("cli-refuted-input.json");
+    let refuted_output = directory.path().join("cli-refuted-output.json");
+    fs::write(
+        &refuted_input,
+        render_differential_report(&refuted_query, &refuted_run).expect("refuted report"),
+    )
+    .expect("refuted input");
+    let refuted_cli = Command::new(env!("CARGO_BIN_EXE_quire-analyze"))
+        .args([
+            "publish-report",
+            "--input",
+            refuted_input.to_str().expect("UTF-8 input path"),
+            "--output",
+            refuted_output.to_str().expect("UTF-8 output path"),
+        ])
+        .output()
+        .expect("refuted CLI execution");
+    assert_eq!(refuted_cli.status.code(), Some(1));
+
+    let invalid_input = directory.path().join("invalid.json");
+    let invalid_output = directory.path().join("invalid-output.json");
+    fs::write(&invalid_input, b"{}").expect("invalid input");
+    let invalid_cli = Command::new(env!("CARGO_BIN_EXE_quire-analyze"))
+        .args([
+            "publish-report",
+            "--input",
+            invalid_input.to_str().expect("UTF-8 input path"),
+            "--output",
+            invalid_output.to_str().expect("UTF-8 output path"),
+        ])
+        .output()
+        .expect("invalid CLI execution");
+    assert_eq!(invalid_cli.status.code(), Some(2));
+    assert!(!invalid_output.exists());
 }

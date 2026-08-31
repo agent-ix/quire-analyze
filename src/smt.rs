@@ -495,6 +495,7 @@ pub struct QueryBundle {
     query_digest: AnalysisDigest,
     binding_set_digest: AnalysisDigest,
     analysis_kind: Option<AnalysisKind>,
+    requests_model: bool,
     assertions: Vec<AssertionMap>,
     variables: Vec<VariableMap>,
     replay_assertions: Vec<ReplayAssertion>,
@@ -527,6 +528,10 @@ impl QueryBundle {
 
     pub const fn analysis_kind(&self) -> Option<AnalysisKind> {
         self.analysis_kind
+    }
+
+    pub const fn requests_model(&self) -> bool {
+        self.requests_model
     }
 
     pub fn assertions(&self) -> &[AssertionMap] {
@@ -709,6 +714,10 @@ fn lower_statement_specs(
         });
     }
     query.push_str("(check-sat)\n");
+    let requests_model = analysis_kind.is_some();
+    if requests_model {
+        query.push_str("(get-model)\n");
+    }
     if query.len() > MAX_QUERY_BYTES {
         return Err(vec![LoweringError::new(
             LoweringErrorCode::ResourceLimit,
@@ -732,6 +741,7 @@ fn lower_statement_specs(
         query_digest,
         binding_set_digest,
         analysis_kind,
+        requests_model,
         assertions,
         variables: variables.into_values().collect(),
         replay_assertions,

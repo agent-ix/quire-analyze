@@ -40,10 +40,11 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   `cvc5-Linux-x86_64-static.zip` (archive SHA-256
   `dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6`). Executable SHA-256 and
   complete normalized version output are recorded after extraction and remain adapter pins.
-- The v1 CLI runs the built-in seeded conformance corpus with caller-supplied exact solver pins.
-  Its library entry point accepts the same configuration. Publication creates a new destination
-  through a same-directory temporary file, sync, and atomic rename; an existing destination is a
-  developer-owned file and is refused.
+- The v1 library executes caller-prepared queries with caller-supplied exact solver pins and renders
+  the authoritative report bytes. The v1 CLI validates and publishes those exact bytes; it does not
+  reconstruct authoritative contract packages or solver configurations from JSON. Publication
+  creates a new destination through a same-directory temporary file, sync, and atomic rename; an
+  existing destination is a developer-owned file and is refused.
 - Assurance-run transcription/audit uses Quoin 0.22.5. Until `quire-contract-ir#20` selects the
   shared PGM-01 envelope and integrity component, its status is `unavailable`; no report or local
   gate may translate that absence into schema validation success.
@@ -52,7 +53,7 @@ stable exit classification, and shall retain cross-engine discrepancies without 
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-005-AC-1 | Library and CLI reports are semantically and byte equivalent for identical inputs. | Test (TC-008) |
+| FR-005-AC-1 | CLI publication preserves the authoritative library report byte-for-byte and returns its stable exit class. | Test (TC-008) |
 | FR-005-AC-2 | Every report validates against its versioned schema and PGM-01 evidence envelope. | Test (TC-007) |
 | FR-005-AC-3 | Differential disagreement retains both results and cannot be reported as agreement. | Test (TC-006) |
 | FR-005-AC-4 | Failed publication leaves no partial result or modified developer-owned file. | Test (TC-008) |

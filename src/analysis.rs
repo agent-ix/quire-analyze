@@ -550,12 +550,17 @@ fn verify_model(
     if bytes.is_empty() {
         return Err("solver returned no model".to_owned());
     }
-    let assignments = parse_boolean_model(bytes)?;
     let expected = query
         .variables()
         .iter()
         .map(|variable| variable.symbol.as_str())
         .collect::<BTreeSet<_>>();
+    let assertion_aliases = query
+        .assertions()
+        .iter()
+        .map(|assertion| assertion.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let assignments = parse_boolean_model(bytes, &expected, &assertion_aliases)?;
     let observed = assignments
         .keys()
         .map(String::as_str)
@@ -597,7 +602,11 @@ enum ModelToken {
     Atom(String),
 }
 
-fn parse_boolean_model(bytes: &[u8]) -> Result<BTreeMap<String, bool>, String> {
+fn parse_boolean_model(
+    bytes: &[u8],
+    expected: &BTreeSet<&str>,
+    assertion_aliases: &BTreeSet<&str>,
+) -> Result<BTreeMap<String, bool>, String> {
     let tokens = tokenize_model(bytes)?;
     let mut cursor = 0;
     expect_token(&tokens, &mut cursor, &ModelToken::Open)?;
@@ -612,14 +621,23 @@ fn parse_boolean_model(bytes: &[u8]) -> Result<BTreeMap<String, bool>, String> {
         expect_token(&tokens, &mut cursor, &ModelToken::Open)?;
         expect_token(&tokens, &mut cursor, &ModelToken::Close)?;
         expect_atom(&tokens, &mut cursor, "Bool")?;
-        let value = match take_atom(&tokens, &mut cursor)?.as_str() {
-            "true" => true,
-            "false" => false,
-            _ => return Err("model contains a non-Boolean value".to_owned()),
+        let value = if expected.contains(symbol.as_str()) {
+            Some(match take_atom(&tokens, &mut cursor)?.as_str() {
+                "true" => true,
+                "false" => false,
+                _ => return Err("model contains a non-Boolean value".to_owned()),
+            })
+        } else if assertion_aliases.contains(symbol.as_str()) {
+            skip_model_term(&tokens, &mut cursor)?;
+            None
+        } else {
+            return Err("model defines an unexpected symbol".to_owned());
         };
         expect_token(&tokens, &mut cursor, &ModelToken::Close)?;
-        if assignments.insert(symbol, value).is_some() {
-            return Err("model defines one symbol more than once".to_owned());
+        if let Some(value) = value {
+            if assignments.insert(symbol, value).is_some() {
+                return Err("model defines one symbol more than once".to_owned());
+            }
         }
     }
     expect_token(&tokens, &mut cursor, &ModelToken::Close)?;
@@ -627,6 +645,24 @@ fn parse_boolean_model(bytes: &[u8]) -> Result<BTreeMap<String, bool>, String> {
         return Err("model contains trailing tokens".to_owned());
     }
     Ok(assignments)
+}
+
+fn skip_model_term(tokens: &[ModelToken], cursor: &mut usize) -> Result<(), String> {
+    match tokens.get(*cursor) {
+        Some(ModelToken::Atom(_)) => {
+            *cursor += 1;
+            Ok(())
+        }
+        Some(ModelToken::Open) => {
+            *cursor += 1;
+            while !matches!(tokens.get(*cursor), Some(ModelToken::Close)) {
+                skip_model_term(tokens, cursor)?;
+            }
+            *cursor += 1;
+            Ok(())
+        }
+        _ => Err("model contains an invalid Boolean term".to_owned()),
+    }
 }
 
 fn tokenize_model(bytes: &[u8]) -> Result<Vec<ModelToken>, String> {
@@ -708,13 +744,23 @@ mod tests {
 
     #[test]
     fn boolean_model_parser_accepts_only_the_closed_shape() {
+        let expected = BTreeSet::from(["x"]);
+        let aliases = BTreeSet::from(["assertion"]);
         assert!(
-            parse_boolean_model(b"(model (define-fun x () Bool true))").expect("z3-shaped model")
-                ["x"]
+            parse_boolean_model(b"(model (define-fun x () Bool true))", &expected, &aliases)
+                .expect("z3-shaped model")["x"]
         );
         assert!(
-            !parse_boolean_model(b"((define-fun x () Bool false))").expect("cvc5-shaped model")
-                ["x"]
+            !parse_boolean_model(b"((define-fun x () Bool false))", &expected, &aliases)
+                .expect("cvc5-shaped model")["x"]
+        );
+        assert!(
+            parse_boolean_model(
+                b"(model (define-fun x () Bool true) (define-fun assertion () Bool x))",
+                &expected,
+                &aliases,
+            )
+            .expect("Z3 named-assertion alias")["x"]
         );
         for malformed in [
             b"".as_slice(),
@@ -723,7 +769,7 @@ mod tests {
             b"(model (define-fun |x| () Bool true))".as_slice(),
             b"(model) trailing".as_slice(),
         ] {
-            assert!(parse_boolean_model(malformed).is_err());
+            assert!(parse_boolean_model(malformed, &expected, &aliases).is_err());
         }
     }
 

@@ -27,10 +27,10 @@ type: TestMatrix
 | FR-004 | FR-004-AC-3 | TC-004 | ✅ Boolean v1 mapping complete |
 | FR-004 | FR-004-AC-4 | TC-007 | ✅ Incomplete-state boundary complete |
 | FR-004 | FR-004-AC-5 | TC-005, TC-006 | ✅ Boolean v1 analysis complete |
-| FR-005 | FR-005-AC-1, FR-005-AC-4 | TC-008 | 🚧 Planned |
-| FR-005 | FR-005-AC-2 | TC-007 | 🚧 Planned |
-| FR-005 | FR-005-AC-3 | TC-006 | 🚧 Planned |
-| FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Planned |
+| FR-005 | FR-005-AC-1, FR-005-AC-4 | TC-008 | 🚧 Library report/publisher slice complete; #23/#24 open |
+| FR-005 | FR-005-AC-2 | TC-007 | ⛔ Application schema complete; PGM-01 blocked on contract-ir#20 |
+| FR-005 | FR-005-AC-3 | TC-006 | 🚧 Differential states and real SAT/UNSAT complete; retained full corpus #24 open |
+| FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
 
 ## Nonfunctional and Stakeholder Coverage
 
@@ -53,9 +53,9 @@ type: TestMatrix
 | TC-003 | Capability rejection | Integration | P0 | FR-001, FR-002 | 🚧 Planned |
 | TC-004 | Injective symbols and source mapping | Property | P0 | FR-002, FR-004 | 🚧 Planned |
 | TC-005 | Adapter resource and failure isolation | Integration | P0 | FR-003, NFR-001, NFR-002 | ✅ Linux adapter v1 complete |
-| TC-006 | Engine parity and counterexamples | Analysis | P0 | FR-003, FR-004, FR-005 | 🚧 Planned |
-| TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | 🚧 Planned |
-| TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Planned |
+| TC-006 | Engine parity and counterexamples | Analysis | P0 | FR-003, FR-004, FR-005 | 🚧 Real SAT/UNSAT and controlled states complete; #24 open |
+| TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | ⛔ Application mutations complete; PGM-01 unavailable |
+| TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Publisher parity/no-replace complete; #23/#24 open |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
 

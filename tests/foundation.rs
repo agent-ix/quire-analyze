@@ -125,12 +125,20 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     assert!(PLAN.contains("All implementation children remain Backlog"));
     assert!(TEST_MATRIX.contains("The placeholder"));
     assert!(TEST_MATRIX.contains("satisfy no row"));
-    for semantic_test in ["TC-002", "TC-003", "TC-004", "TC-006", "TC-007", "TC-008"] {
+    for semantic_test in ["TC-002", "TC-003", "TC-004"] {
         let row = TEST_MATRIX
             .lines()
             .find(|line| line.starts_with(&format!("| {semantic_test} |")))
             .expect("semantic test row must exist");
         assert!(row.ends_with("🚧 Planned |"));
+    }
+    for active_test in ["TC-006", "TC-007", "TC-008"] {
+        let row = TEST_MATRIX
+            .lines()
+            .find(|line| line.starts_with(&format!("| {active_test} |")))
+            .expect("active Task-007 test row must exist");
+        assert!(row.contains("| 🚧") || row.contains("| ⛔"));
+        assert!(!row.contains("| ✅"));
     }
     assert!(TEST_MATRIX.contains("| TC-005 | Adapter resource and failure isolation |"));
     assert!(TEST_MATRIX.contains("| ✅ Linux adapter v1 complete |"));

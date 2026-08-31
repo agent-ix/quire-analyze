@@ -529,8 +529,11 @@ dependencies = [
 name = "quire-analyze"
 version = "0.1.0"
 dependencies = [
+ "jsonschema",
  "libc",
  "quire-contract-ir",
+ "serde",
+ "serde_json",
  "serde_yaml",
  "sha2",
 ]

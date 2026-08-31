@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-ix.github.io/quire-analyze/schemas/differential-report-v1.schema.json",
+  "title": "quire.differential-report/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "analysisModelProfile",
+    "analysisKind",
+    "assertions",
+    "bindingSetDigest",
+    "contractIrRevision",
+    "differential",
+    "encodingProfile",
+    "engines",
+    "logic",
+    "pgm01Envelope",
+    "producer",
+    "queryDigest",
+    "queryHex",
+    "querySha256",
+    "reportDigest",
+    "requestDigest",
+    "schema"
+  ],
+  "properties": {
+    "analysisKind": { "enum": ["consistency", "contradiction", "implication", "redundancy", "dead-antecedent"] },
+    "analysisModelProfile": { "const": "quire.analysis-model/v1" },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clause", "clauseDigest", "name", "polarity", "role", "source"],
+        "properties": {
+          "clause": { "type": "string", "minLength": 1 },
+          "clauseDigest": { "$ref": "#/definitions/digest" },
+          "name": { "type": "string", "minLength": 1 },
+          "polarity": { "enum": ["positive", "negated"] },
+          "role": { "enum": ["assumption", "selected", "left", "right", "antecedent", "consequent", "peer", "candidate"] },
+          "source": { "$ref": "#/definitions/source" }
+        }
+      }
+    },
+    "bindingSetDigest": { "$ref": "#/definitions/digest" },
+    "contractIrRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "differential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agreedStatus", "disposition"],
+      "properties": {
+        "agreedStatus": { "enum": ["satisfied", "refuted", null] },
+        "disposition": { "enum": ["agreement", "disagreement", "unavailable", "inconclusive"] }
+      }
+    },
+    "encodingProfile": { "const": "quire.smtlib2/v1" },
+    "engines": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/definitions/engine" }
+    },
+    "logic": { "const": "QF_UF" },
+    "pgm01Envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dependency", "status"],
+      "properties": {
+        "dependency": { "const": "agent-ix/quire-contract-ir#20" },
+        "status": { "const": "unavailable" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "quire-analyze" },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "queryDigest": { "$ref": "#/definitions/digest" },
+    "queryHex": { "$ref": "#/definitions/hexBytes" },
+    "querySha256": { "$ref": "#/definitions/digest" },
+    "reportDigest": { "$ref": "#/definitions/digest" },
+    "requestDigest": { "$ref": "#/definitions/digest" },
+    "schema": { "const": "quire.differential-report/v1" }
+  },
+  "definitions": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hexBytes": { "type": "string", "pattern": "^(?:[0-9a-f]{2})*$" },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["byte", "column", "line"],
+      "properties": {
+        "byte": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 1 },
+        "line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "end", "revision", "start"],
+      "properties": {
+        "document": { "type": "string", "minLength": 1 },
+        "end": { "$ref": "#/definitions/position" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "start": { "$ref": "#/definitions/position" }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "path", "sha256", "version"],
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/definitions/digest" },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cleanupTimeMs", "executableBytes", "gracefulCleanupMs", "modelBytes", "monitorIntervalMs", "pathBytes", "stderrBytes", "stdinBytes", "stdoutBytes", "versionBytes", "wallTimeMs"],
+      "properties": {
+        "cleanupTimeMs": { "type": "integer", "minimum": 1 },
+        "executableBytes": { "type": "integer", "minimum": 1 },
+        "gracefulCleanupMs": { "type": "integer", "minimum": 1 },
+        "modelBytes": { "type": "integer", "minimum": 1 },
+        "monitorIntervalMs": { "type": "integer", "minimum": 1 },
+        "pathBytes": { "type": "integer", "minimum": 1 },
+        "stderrBytes": { "type": "integer", "minimum": 1 },
+        "stdinBytes": { "type": "integer", "minimum": 1 },
+        "stdoutBytes": { "type": "integer", "minimum": 1 },
+        "versionBytes": { "type": "integer", "minimum": 1 },
+        "wallTimeMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "processExit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "signal"],
+      "properties": {
+        "code": { "type": ["integer", "null"] },
+        "signal": { "type": ["integer", "null"] }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["argv", "cleanupMs", "configurationDigest", "configuredExecutable", "diagnostic", "elapsedMs", "engine", "expectedExecutableSha256", "expectedVersion", "explanation", "identity", "limits", "modelHex", "modelSha256", "outcome", "processExit", "profile", "queryDigest", "status", "stderrHex", "stderrSha256", "stdoutHex", "stdoutSha256"],
+      "properties": {
+        "argv": { "type": "array", "items": { "type": "string" } },
+        "cleanupMs": { "type": "integer", "minimum": 0 },
+        "configurationDigest": { "$ref": "#/definitions/digest" },
+        "configuredExecutable": { "type": "string", "minLength": 1 },
+        "diagnostic": { "type": ["string", "null"] },
+        "elapsedMs": { "type": "integer", "minimum": 0 },
+        "engine": { "enum": ["z3", "cvc5"] },
+        "expectedExecutableSha256": { "$ref": "#/definitions/digest" },
+        "expectedVersion": { "type": "string", "minLength": 1 },
+        "explanation": { "enum": ["not-applicable", "incomplete", "verified"] },
+        "identity": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/identity" }] },
+        "limits": { "$ref": "#/definitions/limits" },
+        "modelHex": { "$ref": "#/definitions/hexBytes" },
+        "modelSha256": { "$ref": "#/definitions/digest" },
+        "outcome": { "enum": ["sat", "unsat", "unknown", "timed-out", "cancelled", "missing-executable", "spawn-error", "identity-error", "executable-digest-mismatch", "executable-changed", "version-mismatch", "solver-error", "malformed-output", "contradictory-output", "nonzero-exit", "signaled", "stdin-limit", "stdout-limit", "stderr-limit", "diagnostic-output", "model-limit", "cleanup-failed", "unsupported-platform", "io-error"] },
+        "processExit": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/processExit" }] },
+        "profile": { "const": "quire.solver-process/v1" },
+        "queryDigest": { "$ref": "#/definitions/digest" },
+        "status": { "enum": ["satisfied", "refuted", "unknown", "unsupported", "timeout", "tool-error"] },
+        "stderrHex": { "$ref": "#/definitions/hexBytes" },
+        "stderrSha256": { "$ref": "#/definitions/digest" },
+        "stdoutHex": { "$ref": "#/definitions/hexBytes" },
+        "stdoutSha256": { "$ref": "#/definitions/digest" }
+      }
+    }
+  }
+}

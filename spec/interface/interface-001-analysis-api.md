@@ -30,9 +30,10 @@ operations:
   - name: compare
     output: DifferentialReport
     semantics: retains both engine records; disagreement is non-conclusive until human-reviewed adjudication
-  - name: cli_analyze
-    output: deterministic JSON report, stable exit class, and stderr diagnostics
-    semantics: equivalent to library operation and atomically published
+  - name: cli_publish
+    input: authoritative canonical report rendered by the library
+    output: byte-identical deterministic JSON report, stable exit class, and stderr diagnostics
+    semantics: validates the closed report contract and atomically publishes without reconstructing trusted inputs
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
