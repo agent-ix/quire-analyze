@@ -2,7 +2,7 @@
 id: Task-004
 title: "Deterministic SMT-LIB2 lowering"
 type: Task
-status: in_progress
+status: done
 track: B
 priority: P0
 relationships:

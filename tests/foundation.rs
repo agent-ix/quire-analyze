@@ -117,7 +117,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         assert!(PLAN.contains(issue));
     }
 
-    assert!(PLAN.contains("| Task-004 | #7 deterministic SMT lowering | in_progress |"));
+    assert!(PLAN.contains("| Task-004 | #7 deterministic SMT lowering | done |"));
     for row in [
         "| Task-005 | #3 bounded solver adapters | not_started |",
         "| Task-006 | #4 analyses/counterexamples | not_started |",
@@ -254,8 +254,14 @@ fn retained_evidence_is_censused_and_cannot_claim_machine_verification() {
         assert_eq!(actual, expected, "changed evidence artifact {relative}");
         let text =
             String::from_utf8(fs::read(path).expect("text evidence")).expect("UTF-8 evidence");
-        assert!(text.contains("Legacy narrative only"));
-        assert!(text.contains("discharges no\n> acceptance criterion"));
+        if relative.contains("smt-lowering-0da1747") {
+            assert!(text.contains("Producer validation attestation"));
+            assert!(text.contains("no raw command transcript"));
+            assert!(text.contains("independent review"));
+        } else {
+            assert!(text.contains("Legacy narrative only"));
+            assert!(text.contains("discharges no\n> acceptance criterion"));
+        }
     }
     assert_eq!(
         observed, declared,
