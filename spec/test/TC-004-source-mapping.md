@@ -17,9 +17,11 @@ Verify generated identities cannot collide and source/model maps round-trip exac
 ## Test Procedure
 
 Construct collision families for punctuation, Unicode, prefixes, package IDs, revisions,
-declarations, observations, and spans. Round-trip every assertion and model symbol through the map.
+declarations, observations, and spans. Round-trip every assertion and Boolean model symbol through
+the map, including explicit binding groups and every analysis role.
 
 ## Expected Results
 
 No unequal complete identity collides. Every decoded value and assertion resolves to its exact
-package, clause, revision, declaration, observation, execution point, and source span.
+package, clause, revision, declaration, observation, execution point, source span, role, and
+polarity. No incomplete or unknown model assignment is published as verified.

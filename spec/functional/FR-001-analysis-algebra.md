@@ -52,8 +52,18 @@ digests.
   dependency kind, observation,
   non-identical execution point, unresolved member, duplicate member, or member assigned to two
   groups. V0.1 reports cross-execution-point binding unsupported.
-- The model preserves contract-IR short-circuit, total Boolean, definedness, bounded arithmetic,
-  option, record, collection, and observation semantics.
+- The v0.1 analysis surface accepts exactly the Boolean constructs supported by
+  `quire.smtlib2/v1`. It preserves contract-IR short-circuit/total Boolean and observation identity;
+  every arithmetic, option, record, collection, or other unsupported construct rejects before a
+  query instead of being approximated.
+- Five dedicated constructors make group roles unambiguous. Assumptions may be empty. Consistency
+  requires a non-empty selected group; contradiction requires non-empty left and right groups;
+  implication requires non-empty antecedents and exactly one consequent; redundancy requires
+  non-empty peers and exactly one candidate; dead-antecedent requires exactly one antecedent.
+  A clause may occupy only one role in a request.
+- Query assertions preserve their assumption/selected/left/right/antecedent/consequent/peer/candidate
+  role and positive or negated polarity. Negation is introduced only for implication consequents and
+  redundancy candidates.
 - Canonical request and statement identities bind the source package digest, clause revisions,
   normalized selection order, analysis kind, bounds, and encoding version.
 - Ill-typed, stale, ambiguous, empty, or non-Boolean selections are rejected before SMT lowering.
@@ -62,7 +72,7 @@ digests.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-001-AC-1 | All five analysis truth conditions and assumption sets are explicit and independently executable. | Test (TC-001) |
+| FR-001-AC-1 | All five analysis truth conditions, group cardinalities, roles, polarities, and assumption sets are explicit and independently executable. | Test (TC-001) |
 | FR-001-AC-2 | Default singleton identity and explicit binding groups neither alias same-named unequal scopes nor split accepted equal members; incompatible groups reject. | Test (TC-001, TC-009) |
 | FR-001-AC-3 | Request and statement hashes change for every material semantic input, binding, analysis-model profile, or encoding-profile identity and ignore irrelevant input ordering. | Test (TC-002, TC-009) |
 | FR-001-AC-4 | Invalid or ambiguous requests fail before query generation with stable diagnostics. | Test (TC-003) |

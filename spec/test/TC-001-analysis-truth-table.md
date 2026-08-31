@@ -16,12 +16,14 @@ Verify the analysis algebra, shared-variable identity, and conclusion truth tabl
 
 ## Test Procedure
 
-Evaluate seeded finite Boolean and bounded-numeric models with an independent enumerator. Compare
-consistency, contradiction, implication, redundancy, and dead-antecedent classifications across all
-ten sat/unsat cases and explicit assumption groups. Exercise equal and near-collision variable
-identities across packages, declarations, observations, and execution points.
+Evaluate seeded finite Boolean models with an independent enumerator. Compare consistency,
+contradiction, implication, redundancy, and dead-antecedent classifications across all ten
+sat/unsat cases and explicit assumption groups. Assert each dedicated constructor's group
+cardinality, role, polarity, duplicate, and ordering rules. Exercise equal and near-collision
+variable identities across packages, declarations, observations, and execution points.
 
 ## Expected Results
 
 Every classification matches enumeration, equal complete identities share one variable, and every
-unequal identity remains distinct.
+unequal identity remains distinct. No unsupported contract expression or malformed role assignment
+produces a query.
