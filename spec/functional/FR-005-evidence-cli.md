@@ -26,6 +26,11 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   discrepancy and passes only with its reviewed disposition.
 - CLI output is deterministic JSON; human-readable diagnostics go to stderr and do not alter it.
 - Output publication is all-or-nothing and never edits developer-owned files.
+- Linux publication does not report success until the staged file and parent directory have both
+  been synchronized. A failure before atomic rename reports `destination-unmodified`; a parent
+  directory sync failure after rename reports `published-durability-unknown`, because complete
+  destination bytes can already be visible. Callers do not delete or retry that state as though the
+  destination were absent.
 - Runtime product output uses `quire.analysis-report/v1` and
   `quire.differential-report/v1`. Canonical JSON is UTF-8, compact, recursively key-sorted, and has
   no insignificant whitespace. `reportDigest` is SHA-256 over the canonical object with that field
@@ -44,7 +49,10 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   the authoritative report bytes. The v1 CLI validates and publishes those exact bytes; it does not
   reconstruct authoritative contract packages or solver configurations from JSON. Publication
   creates a new destination through a same-directory temporary file, sync, and atomic rename; an
-  existing destination is a developer-owned file and is refused.
+  existing destination is a developer-owned file and is refused. Recoverable pre-rename failures
+  close and remove their staging file and synchronize that removal. An uncatchable process
+  termination can leave a private staging file but never exposes partial destination bytes; the
+  file name identifies it as non-authoritative staging rather than a report.
 - Assurance-run transcription/audit uses Quoin 0.22.5. Until `quire-contract-ir#20` selects the
   shared PGM-01 envelope and integrity component, its status is `unavailable`; no report or local
   gate may translate that absence into schema validation success.

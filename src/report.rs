@@ -1,8 +1,8 @@
 use std::{
     collections::BTreeSet,
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, Write},
-    path::{Path, PathBuf},
+    path::Path,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -19,6 +19,77 @@ pub const DIFFERENTIAL_REPORT_SCHEMA: &str = "quire.differential-report/v1";
 pub const PGM01_ENVELOPE_DEPENDENCY: &str = "agent-ix/quire-contract-ir#20";
 pub const MAX_REPORT_BYTES: usize = 64 * 1024 * 1024;
 static PUBLICATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationStage {
+    DestinationValidation,
+    StagingCreate,
+    StagingWrite,
+    StagingSync,
+    AtomicRename,
+    DirectorySync,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationState {
+    DestinationUnmodified,
+    PublishedDurabilityUnknown,
+}
+
+#[derive(Debug)]
+pub struct PublicationError {
+    stage: PublicationStage,
+    state: PublicationState,
+    source: io::Error,
+    cleanup_error: Option<io::Error>,
+}
+
+impl PublicationError {
+    fn new(stage: PublicationStage, state: PublicationState, source: io::Error) -> Self {
+        Self {
+            stage,
+            state,
+            source,
+            cleanup_error: None,
+        }
+    }
+
+    pub const fn stage(&self) -> PublicationStage {
+        self.stage
+    }
+
+    pub const fn state(&self) -> PublicationState {
+        self.state
+    }
+
+    pub fn kind(&self) -> io::ErrorKind {
+        self.source.kind()
+    }
+
+    pub fn cleanup_error(&self) -> Option<&io::Error> {
+        self.cleanup_error.as_ref()
+    }
+}
+
+impl std::fmt::Display for PublicationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "report publication failed at {:?} ({:?}): {}",
+            self.stage, self.state, self.source
+        )?;
+        if let Some(cleanup_error) = &self.cleanup_error {
+            write!(formatter, "; staging cleanup also failed: {cleanup_error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for PublicationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DifferentialDisposition {
@@ -440,46 +511,179 @@ pub fn render_differential_summary(run: &DifferentialRun) -> String {
 }
 
 #[cfg(target_os = "linux")]
-pub fn publish_report_new(destination: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn publish_report_new(destination: &Path, bytes: &[u8]) -> Result<(), PublicationError> {
+    publish_report_with(destination, bytes, &mut RealPublicationIo::default())
+}
+
+#[cfg(target_os = "linux")]
+fn publish_report_with(
+    destination: &Path,
+    bytes: &[u8],
+    publication: &mut impl PublicationIo,
+) -> Result<(), PublicationError> {
     if destination.file_name().is_none() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "report destination requires a file name",
+        return Err(PublicationError::new(
+            PublicationStage::DestinationValidation,
+            PublicationState::DestinationUnmodified,
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "report destination requires a file name",
+            ),
         ));
     }
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let counter = PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let staging = parent.join(format!(
         ".quire-analyze-report-{}-{counter}.tmp",
         std::process::id()
     ));
-    let mut cleanup = StagingFile(Some(staging.clone()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&staging)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    drop(file);
-    rename_no_replace(&staging, destination)?;
-    cleanup.0 = None;
+
+    publication.create_staging(&staging).map_err(|error| {
+        PublicationError::new(
+            PublicationStage::StagingCreate,
+            PublicationState::DestinationUnmodified,
+            error,
+        )
+    })?;
+    publication_test_termination("after-create");
+
+    let before_rename: Result<(), PublicationError> = (|| {
+        publication.write_staging(bytes).map_err(|error| {
+            PublicationError::new(
+                PublicationStage::StagingWrite,
+                PublicationState::DestinationUnmodified,
+                error,
+            )
+        })?;
+        publication_test_termination("after-write");
+        publication.sync_staging().map_err(|error| {
+            PublicationError::new(
+                PublicationStage::StagingSync,
+                PublicationState::DestinationUnmodified,
+                error,
+            )
+        })?;
+        publication_test_termination("after-file-sync");
+        publication.close_staging();
+        publication
+            .rename_no_replace(&staging, destination)
+            .map_err(|error| {
+                PublicationError::new(
+                    PublicationStage::AtomicRename,
+                    PublicationState::DestinationUnmodified,
+                    error,
+                )
+            })?;
+        publication_test_termination("after-rename");
+        Ok(())
+    })();
+
+    if let Err(mut error) = before_rename {
+        publication.close_staging();
+        match publication.remove_staging(&staging) {
+            Ok(()) => {
+                if let Err(cleanup_error) = publication.sync_parent(parent) {
+                    error.cleanup_error = Some(cleanup_error);
+                }
+            }
+            Err(cleanup_error) => {
+                error.cleanup_error = Some(cleanup_error);
+            }
+        }
+        return Err(error);
+    }
+
+    publication.sync_parent(parent).map_err(|error| {
+        PublicationError::new(
+            PublicationStage::DirectorySync,
+            PublicationState::PublishedDurabilityUnknown,
+            error,
+        )
+    })?;
+    publication_test_termination("after-directory-sync");
     Ok(())
 }
 
+#[cfg(test)]
+fn publication_test_termination(point: &str) {
+    if std::env::var("QUIRE_ANALYZE_TEST_PUBLICATION_TERMINATE").as_deref() == Ok(point) {
+        std::process::exit(86);
+    }
+}
+
+#[cfg(not(test))]
+const fn publication_test_termination(_point: &str) {}
+
 #[cfg(not(target_os = "linux"))]
-pub fn publish_report_new(_destination: &Path, _bytes: &[u8]) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "atomic no-replace report publication is implemented for Linux",
+pub fn publish_report_new(_destination: &Path, _bytes: &[u8]) -> Result<(), PublicationError> {
+    Err(PublicationError::new(
+        PublicationStage::DestinationValidation,
+        PublicationState::DestinationUnmodified,
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "atomic no-replace report publication is implemented for Linux",
+        ),
     ))
 }
 
-struct StagingFile(Option<PathBuf>);
+#[cfg(target_os = "linux")]
+trait PublicationIo {
+    fn create_staging(&mut self, path: &Path) -> io::Result<()>;
+    fn write_staging(&mut self, bytes: &[u8]) -> io::Result<()>;
+    fn sync_staging(&mut self) -> io::Result<()>;
+    fn close_staging(&mut self);
+    fn rename_no_replace(&mut self, source: &Path, destination: &Path) -> io::Result<()>;
+    fn sync_parent(&mut self, parent: &Path) -> io::Result<()>;
+    fn remove_staging(&mut self, path: &Path) -> io::Result<()>;
+}
 
-impl Drop for StagingFile {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = fs::remove_file(path);
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct RealPublicationIo {
+    staging: Option<File>,
+}
+
+#[cfg(target_os = "linux")]
+impl PublicationIo for RealPublicationIo {
+    fn create_staging(&mut self, path: &Path) -> io::Result<()> {
+        self.staging = Some(OpenOptions::new().write(true).create_new(true).open(path)?);
+        Ok(())
+    }
+
+    fn write_staging(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.staging
+            .as_mut()
+            .expect("staging file exists after successful creation")
+            .write_all(bytes)
+    }
+
+    fn sync_staging(&mut self) -> io::Result<()> {
+        self.staging
+            .as_ref()
+            .expect("staging file exists after successful creation")
+            .sync_all()
+    }
+
+    fn close_staging(&mut self) {
+        self.staging = None;
+    }
+
+    fn rename_no_replace(&mut self, source: &Path, destination: &Path) -> io::Result<()> {
+        rename_no_replace(source, destination)
+    }
+
+    fn sync_parent(&mut self, parent: &Path) -> io::Result<()> {
+        File::open(parent)?.sync_all()
+    }
+
+    fn remove_staging(&mut self, path: &Path) -> io::Result<()> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
         }
     }
 }
@@ -673,6 +877,113 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{path::PathBuf, process::Command};
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum InjectedFault {
+        Create,
+        PartialWrite,
+        FileSync,
+        Rename,
+        DirectorySync,
+    }
+
+    #[derive(Default)]
+    struct FakePublicationIo {
+        fault: Option<InjectedFault>,
+        cleanup_fails: bool,
+        staging: Option<Vec<u8>>,
+        destination: Option<Vec<u8>>,
+        staging_open: bool,
+        parent_synced: bool,
+        synced_parent: Option<PathBuf>,
+    }
+
+    impl FakePublicationIo {
+        fn with_fault(fault: InjectedFault, destination: Option<Vec<u8>>) -> Self {
+            Self {
+                fault: Some(fault),
+                destination,
+                ..Self::default()
+            }
+        }
+
+        fn fault(&self, expected: InjectedFault) -> io::Result<()> {
+            if self.fault == Some(expected) {
+                Err(io::Error::other(format!("injected {expected:?} failure")))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl PublicationIo for FakePublicationIo {
+        fn create_staging(&mut self, _path: &Path) -> io::Result<()> {
+            self.fault(InjectedFault::Create)?;
+            if self.staging.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "stale staging file",
+                ));
+            }
+            self.staging = Some(Vec::new());
+            self.staging_open = true;
+            Ok(())
+        }
+
+        fn write_staging(&mut self, bytes: &[u8]) -> io::Result<()> {
+            if self.fault == Some(InjectedFault::PartialWrite) {
+                self.staging
+                    .as_mut()
+                    .expect("created staging")
+                    .extend_from_slice(&bytes[..bytes.len() / 2]);
+                return self.fault(InjectedFault::PartialWrite);
+            }
+            self.staging
+                .as_mut()
+                .expect("created staging")
+                .extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn sync_staging(&mut self) -> io::Result<()> {
+            self.fault(InjectedFault::FileSync)
+        }
+
+        fn close_staging(&mut self) {
+            self.staging_open = false;
+        }
+
+        fn rename_no_replace(&mut self, _source: &Path, _destination: &Path) -> io::Result<()> {
+            self.fault(InjectedFault::Rename)?;
+            if self.destination.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "destination exists",
+                ));
+            }
+            self.destination = self.staging.take();
+            Ok(())
+        }
+
+        fn sync_parent(&mut self, parent: &Path) -> io::Result<()> {
+            self.fault(InjectedFault::DirectorySync)?;
+            self.parent_synced = true;
+            self.synced_parent = Some(parent.to_owned());
+            Ok(())
+        }
+
+        fn remove_staging(&mut self, _path: &Path) -> io::Result<()> {
+            if self.cleanup_fails {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "injected cleanup failure",
+                ));
+            }
+            self.staging = None;
+            Ok(())
+        }
+    }
 
     #[test]
     fn differential_disposition_census_is_closed() {
@@ -704,5 +1015,149 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
+    }
+
+    /// TC-008: every recoverable pre-rename fault preserves the destination and removes staging.
+    #[test]
+    fn publication_pre_rename_faults_are_atomic_and_clean() {
+        let existing = b"developer-owned".to_vec();
+        for (fault, stage) in [
+            (InjectedFault::Create, PublicationStage::StagingCreate),
+            (InjectedFault::PartialWrite, PublicationStage::StagingWrite),
+            (InjectedFault::FileSync, PublicationStage::StagingSync),
+            (InjectedFault::Rename, PublicationStage::AtomicRename),
+        ] {
+            let mut publication = FakePublicationIo::with_fault(fault, Some(existing.clone()));
+            let error = publish_report_with(Path::new("report.json"), b"new", &mut publication)
+                .expect_err("injected failure");
+            assert_eq!(error.stage(), stage);
+            assert_eq!(error.state(), PublicationState::DestinationUnmodified);
+            assert_eq!(publication.destination, Some(existing.clone()));
+            assert!(publication.staging.is_none());
+            assert!(!publication.staging_open);
+            assert!(error.cleanup_error().is_none());
+        }
+    }
+
+    /// TC-008: a cleanup failure is never hidden behind the primary publication failure.
+    #[test]
+    fn publication_cleanup_failure_is_explicit() {
+        let mut publication =
+            FakePublicationIo::with_fault(InjectedFault::PartialWrite, Some(b"old".to_vec()));
+        publication.cleanup_fails = true;
+        let error = publish_report_with(Path::new("report.json"), b"new", &mut publication)
+            .expect_err("write and cleanup failure");
+        assert_eq!(error.stage(), PublicationStage::StagingWrite);
+        assert_eq!(error.state(), PublicationState::DestinationUnmodified);
+        assert!(error.cleanup_error().is_some());
+        assert_eq!(publication.destination, Some(b"old".to_vec()));
+        assert_eq!(publication.staging, Some(b"n".to_vec()));
+        assert!(!publication.staging_open);
+    }
+
+    /// TC-008: after atomic rename, a directory-sync error reports a complete but uncertain result.
+    #[test]
+    fn publication_directory_sync_failure_reports_post_rename_state() {
+        let mut publication = FakePublicationIo::with_fault(InjectedFault::DirectorySync, None);
+        let error = publish_report_with(Path::new("report.json"), b"new", &mut publication)
+            .expect_err("directory sync failure");
+        assert_eq!(error.stage(), PublicationStage::DirectorySync);
+        assert_eq!(error.state(), PublicationState::PublishedDurabilityUnknown);
+        assert_eq!(publication.destination, Some(b"new".to_vec()));
+        assert!(publication.staging.is_none());
+        assert!(!publication.parent_synced);
+    }
+
+    /// TC-008: an unknown stale staging path is never deleted or mistaken for this attempt's file.
+    #[test]
+    fn publication_refuses_stale_staging_without_claiming_ownership() {
+        let mut publication = FakePublicationIo {
+            staging: Some(b"stale-owner".to_vec()),
+            ..FakePublicationIo::default()
+        };
+        let error = publish_report_with(Path::new("report.json"), b"new", &mut publication)
+            .expect_err("stale staging collision");
+        assert_eq!(error.stage(), PublicationStage::StagingCreate);
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(publication.destination, None);
+        assert_eq!(publication.staging, Some(b"stale-owner".to_vec()));
+    }
+
+    /// TC-008: success is not reported until the parent directory has been synchronized.
+    #[test]
+    fn publication_success_syncs_complete_bytes_and_parent() {
+        let mut publication = FakePublicationIo::default();
+        publish_report_with(Path::new("report.json"), b"new", &mut publication)
+            .expect("publication");
+        assert_eq!(publication.destination, Some(b"new".to_vec()));
+        assert!(publication.staging.is_none());
+        assert!(publication.parent_synced);
+        assert_eq!(publication.synced_parent, Some(PathBuf::from(".")));
+    }
+
+    #[test]
+    fn publication_termination_helper() {
+        let Some(destination) = std::env::var_os("QUIRE_ANALYZE_TEST_PUBLICATION_DESTINATION")
+        else {
+            return;
+        };
+        publish_report_new(Path::new(&destination), b"complete-report")
+            .expect("termination point must exit before this returns");
+        panic!("configured termination point was not reached");
+    }
+
+    /// TC-008: abrupt termination never exposes partial destination bytes; each residue is explicit.
+    #[test]
+    fn publication_process_termination_boundaries_have_defined_state() {
+        let root = std::env::temp_dir().join(format!(
+            "quire-publication-crash-{}-{}",
+            std::process::id(),
+            PUBLICATION_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("crash test root");
+        for point in [
+            "after-create",
+            "after-write",
+            "after-file-sync",
+            "after-rename",
+            "after-directory-sync",
+        ] {
+            let directory = root.join(point);
+            fs::create_dir(&directory).expect("crash boundary directory");
+            let destination = directory.join("report.json");
+            let status = Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "report::tests::publication_termination_helper",
+                    "--nocapture",
+                ])
+                .env("QUIRE_ANALYZE_TEST_PUBLICATION_TERMINATE", point)
+                .env("QUIRE_ANALYZE_TEST_PUBLICATION_DESTINATION", &destination)
+                .status()
+                .expect("termination subprocess");
+            assert_eq!(status.code(), Some(86), "termination point {point}");
+
+            let staging = fs::read_dir(&directory)
+                .expect("crash directory")
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".quire-analyze-report-")
+                })
+                .collect::<Vec<_>>();
+            if matches!(point, "after-create" | "after-write" | "after-file-sync") {
+                assert!(!destination.exists());
+                assert_eq!(staging.len(), 1, "private crash residue at {point}");
+            } else {
+                assert_eq!(
+                    fs::read(&destination).expect("complete destination"),
+                    b"complete-report"
+                );
+                assert!(staging.is_empty());
+            }
+        }
+        fs::remove_dir_all(root).expect("remove crash test root");
     }
 }

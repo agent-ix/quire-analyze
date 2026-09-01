@@ -7,7 +7,11 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Barrier,
+    },
+    thread,
 };
 
 use quire_analyze::{
@@ -908,6 +912,42 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
     assert_eq!(fs::read(&destination).expect("unchanged"), first);
     assert!(fs::read_dir(directory.path())
         .expect("directory")
+        .all(|entry| !entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".quire-analyze-report-")));
+
+    let race_directory = TempDirectory::new("atomic-report-race");
+    let race_destination = race_directory.path().join("winner.json");
+    let barrier = Arc::new(Barrier::new(8));
+    let publishers = (0..8)
+        .map(|publisher| {
+            let barrier = Arc::clone(&barrier);
+            let destination = race_destination.clone();
+            thread::spawn(move || {
+                let bytes = format!("publisher-{publisher}").into_bytes();
+                barrier.wait();
+                let result = publish_report_new(&destination, &bytes);
+                (bytes, result)
+            })
+        })
+        .collect::<Vec<_>>();
+    let outcomes = publishers
+        .into_iter()
+        .map(|publisher| publisher.join().expect("publisher thread"))
+        .collect::<Vec<_>>();
+    let winners = outcomes
+        .iter()
+        .filter(|(_, result)| result.is_ok())
+        .collect::<Vec<_>>();
+    assert_eq!(winners.len(), 1);
+    assert_eq!(
+        fs::read(&race_destination).expect("race winner"),
+        winners[0].0
+    );
+    assert!(fs::read_dir(race_directory.path())
+        .expect("race directory")
         .all(|entry| !entry
             .expect("entry")
             .file_name()
