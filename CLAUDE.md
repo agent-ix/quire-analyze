@@ -22,9 +22,8 @@ make ci             # every local gate, including the shared assurance lane
 make assurance-env      # build .venv-assurance from requirements-assurance.txt
 make assurance-inputs   # THE ONLY TARGET THAT RUNS A PRODUCER
 make pins               # classify the installed toolchain against the upstream matrix
-make compat-view        # read retained evidence + run the mutation probes
 make assurance-chain    # quoin seal / intake / receipt over already-produced bytes
-make assurance          # pins + compat-view + assurance-chain
+make assurance          # pins + assurance-chain
 ```
 
 Everything downstream of `assurance-inputs` consumes files and refuses to create

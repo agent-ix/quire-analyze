@@ -1,6 +1,6 @@
 {
   "schema_version": "quire-analyze.change-assurance-declaration/v1",
-  "purpose": "What this repository states about the change under issue #25, in the shape Quoin's FR-063 record requires. Quoin owns the record schema, its digest, and its retention; this file is the author's statement that gets sealed into one.",
+  "purpose": "What this repository states about its shared-assurance lane, in the shape Quoin's FR-063 record requires. Established under issue #25 and amended under issue #29, when agent-ix/engineering-assurance#7 released the evidence-preservation constraint for the pre-stable phase and the retained records, their reader and their compatibility proof were deleted. Quoin owns the record schema, its digest, and its retention; this file is the author's statement that gets sealed into one.",
   "not_an_envelope": "Quoin's packaged change-assurance-record-v1, proof-attestation-v1 and verification-receipt-v1 schemas are the shapes. This file projects into the record body Quoin requires and derives nothing beyond the digests its own derived_fields names. It is not a local evidence envelope, it retains nothing, and it computes no verdict.",
   "derived_fields": [
     "subject.base_revision and impact_snapshot.revision come from the candidate revision the caller names.",
@@ -38,7 +38,6 @@
         "spec",
         "tests",
         "assurance",
-        "evidence",
         "Makefile"
       ]
     },
@@ -107,14 +106,6 @@
           ]
         },
         {
-          "id": "FR-006-AC-4",
-          "statement": "Retained evidence bytes are read through the Engineering Assurance compatibility mapping and are not modified, and the mapping's answer is reported without collapsing it into pass or fail.",
-          "source_ids": [
-            "FR-006",
-            "NFR-002"
-          ]
-        },
-        {
           "id": "FR-006-AC-5",
           "statement": "Every non-conclusive solver state stays distinct from a conclusion and from every other non-conclusive state across the intake path: a solver that could not decide is never reported as a solver that decided.",
           "source_ids": [
@@ -162,14 +153,6 @@
           "statement": "Report publication stays all-or-nothing: a pre-rename failure reports destination-unmodified, a post-rename directory-sync failure reports published-durability-unknown, and an existing developer-owned destination is refused rather than replaced.",
           "source_ids": [
             "FR-005"
-          ]
-        },
-        {
-          "id": "PRESERVE-legacy-bytes",
-          "statement": "Retained evidence is read-only to the assurance path: the compatibility view opens every record read-only, re-hashes it against evidence/manifest.sha256, and reports drift rather than rewriting a record to make a check pass. One declared exception, recorded below, was made outside that path by this change and is pinned by both digests. The exception is evidence/publication-faults-1e69613/validation-summary.md, whose pre-correction SHA-256 was 9f15af504c8776782ba67c9f8595c776a77cdd3f13315483113de373bc36fc01. The record's attestation banner omitted two disclaimers the retained-evidence gate requires, so committing it made cargo test and make ci fail at the inherited head 2d99ef0. The banner was corrected, the correction stated inside the record, and the manifest line re-derived for this one file. No measurement, gate result or count was altered. This is a correction made by a human-reviewed commit and visible in git history \u2014 it is NOT the compatibility view updating its own oracle, which it cannot do.",
-          "source_ids": [
-            "NFR-002",
-            "FR-006"
           ]
         },
         {
@@ -263,28 +246,6 @@
           ]
         },
         {
-          "proof_id": "PROOF-legacy-compatibility",
-          "statement": "All eight retained evidence records are read through the pinned Engineering Assurance mapping with their manifest digests bound, their bytes are unchanged, and the mapping's answer for each is reported as it stands. Five derived fixtures demonstrate incompatible, unreadable and stale against a pinned positive control.",
-          "obligation_ids": [
-            "FR-006-AC-4",
-            "FR-006-AC-5"
-          ],
-          "evidence_kind": "Static",
-          "command": {
-            "argv": [
-              ".venv-assurance/bin/python",
-              "scripts/legacy_evidence_view.py",
-              "--json"
-            ],
-            "working_directory": "."
-          },
-          "tool_identity": "quire-analyze/legacy_evidence_view",
-          "configuration": "tests/fixtures/legacy-compat/expectations.json",
-          "accepted_results": [
-            "passed"
-          ]
-        },
-        {
           "proof_id": "PROOF-quire-static-export",
           "statement": "The authoritative static specification, obligation and coverage facts for this revision are the Quire export, which executes no producer.",
           "obligation_ids": [
@@ -338,12 +299,6 @@
         {
           "id": "UNKNOWN-ea-acceptance-not-in-a-release",
           "statement": "engineering-assurance v0.2.0 records accepted.state = pending_human_acceptance and ships no human_acceptance_recorded predicate; the human acceptance exists only on that repository's main at ae50e13. This repository reports the state the release records and gates only on version compatibility. Filed as agent-ix/engineering-assurance#20.",
-          "disposition": "open",
-          "owner": "agent-ix/engineering-assurance"
-        },
-        {
-          "id": "UNKNOWN-retained-evidence-is-not-pgm01",
-          "statement": "map_pgm01_bytes at the pinned release reads quire.pgm01-evidence v1 and v2. Every retained record in this repository is a Markdown validation summary, not JSON envelopes of any version, so the mapping answers unreadable for every one. That refusal is reported as the compatibility result; no local mapper was written to make it read as a pass. Filed as agent-ix/engineering-assurance#21.",
           "disposition": "open",
           "owner": "agent-ix/engineering-assurance"
         },

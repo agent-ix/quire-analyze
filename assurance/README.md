@@ -6,8 +6,9 @@ What this directory is, and — more usefully — what it is not.
 
 Two declarations and nothing executable.
 
-- `change-assurance.json` is what this repository *states* about the change under
-  issue #25: its subject, the requirements and preservation constraints it claims
+- `change-assurance.json` is what this repository *states* about its
+  shared-assurance lane, established under issue #25 and amended under issue #29:
+  its subject, the requirements and preservation constraints it claims
   to hold, the proof obligations it offers, and the things it does not know. It
   is projected into the record body Quoin's FR-063 schema requires, and the only
   values derived at seal time are the digests its own `derived_fields` list
@@ -45,7 +46,6 @@ otherwise the same observation.
 make assurance-env      # build .venv-assurance from requirements-assurance.txt
 make assurance-inputs   # the only target that runs a producer
 make pins               # classify the installed toolchain upstream
-make compat-view        # read retained evidence, then run the mutation probes
 make assurance-chain    # seal, intake, receipt — over bytes already produced
 make assurance          # all of the above
 ```
@@ -56,7 +56,7 @@ imports it and appears to work, because the code paths needing a 4.x validator
 are exactly the ones a refusing record never reaches. Two jobs, two
 environments.
 
-## Two known gaps, reported rather than papered over
+## One known gap, reported rather than papered over
 
 - The pinned `engineering-assurance` v0.2.0 records
   `accepted.state = pending_human_acceptance` and ships no
@@ -64,7 +64,14 @@ environments.
   repository's `main` at `ae50e13`, after the tag, and no v0.2.1 exists. This
   lane reports the state the pinned release records and gates only on version
   compatibility. `agent-ix/engineering-assurance#20`.
-- `map_pgm01_bytes` reads `quire.pgm01-evidence` v1 and v2. This repository's
-  eight retained records are Markdown validation summaries, so the mapping
-  answers `unreadable` for every one. That refusal is the reported compatibility
-  result. `agent-ix/engineering-assurance#21`.
+
+## What this lane no longer carries
+
+The retained `evidence/` tree, `scripts/legacy_evidence_view.py`, the
+`compat-view` target, the `legacy-compat` fixtures and the
+`PROOF-legacy-compatibility` obligation were deleted under
+`agent-ix/engineering-assurance#7`, whose "Preservation constraint released for
+the pre-stable phase" section records the repository owner's 2026-09-02 decision.
+The records are deleted, not rewritten or re-sealed, and nothing here claims they
+still verify anything. The constraint re-applies unchanged at the move toward
+stable releases.

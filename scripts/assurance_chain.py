@@ -17,8 +17,9 @@ It is not a verdict. It runs `quoin` and reports what `quoin` said. Where a
 scenario expects a refusal, the refusal is the expected result and the run is
 green because the tool refused, not because the tool agreed.
 
-It is not a retention store. Nothing is written under `evidence/`, nothing is
-committed, and the Quoin store it uses lives under `target/`, which is ignored.
+It is not a retention store. This repository retains nothing of its own, nothing
+is committed, and the Quoin store it uses lives under `target/`, which is
+ignored.
 
 Exit status: 0 when every scenario, control and probe matched, 1 when one did
 not, 2 on a usage or environment error — which is a different fact from a
@@ -57,7 +58,6 @@ INPUTS: dict[str, tuple[str, str]] = {
     "PROOF-solver-state-census": ("solver-state-census.json", "application/json"),
     "PROOF-engine-availability": ("engine-availability.json", "application/json"),
     "PROOF-shared-pins": ("shared-pins.json", "application/json"),
-    "PROOF-legacy-compatibility": ("legacy-compatibility.json", "application/json"),
     "PROOF-quire-static-export": ("quire-static-export.json", "application/json"),
     "PROOF-msrv": ("msrv.jsonl", "application/x-ndjson"),
 }
