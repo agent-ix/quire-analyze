@@ -26,6 +26,16 @@ or counterexample.
   constraints before publication.
 - An invalid, incomplete, or undecodable model keeps the logical response but marks the requested
   counterexample evidence incomplete; it never fabricates a source value.
+- The closed public statuses are `satisfied`, `refuted`, `unknown`, `unsupported`, `timeout`, and
+  `tool-error`; only the first two are conclusive. Solver `unknown` maps to `unknown`; wall timeout
+  and cancellation map to `timeout` with the exact adapter outcome retained; unsupported platform
+  maps to `unsupported`; every other adapter failure maps to `tool-error`.
+- A verified Boolean model must define every declared query symbol exactly once, define no unknown
+  symbol, use only Boolean constants, and make every asserted replay expression true. Published
+  values preserve every complete origin identity and explicit binding group from the query map.
+- Every conclusion retains the analysis kind, canonical analysis request and query identities,
+  ordered role/source maps, the sealed solver record, and either a replay-verified model or an
+  explicit absent/incomplete explanation state.
 - Unsat cores and proofs are optional evidence and never replace the checked primary response.
 
 ## Acceptance Criteria
@@ -33,9 +43,9 @@ or counterexample.
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-004-AC-1 | All ten sat/unsat-by-analysis-kind classifications match the independent truth table. | Test (TC-001) |
-| FR-004-AC-2 | Every published counterexample re-evaluates against the authoritative semantics. | Test (TC-006) |
+| FR-004-AC-2 | Every published Boolean model/counterexample defines the complete symbol set and re-evaluates every asserted expression true; incomplete or invalid models are never represented as verified. | Test (TC-006) |
 | FR-004-AC-3 | Source mapping preserves package, clause, revision, declaration, observation, and span identity. | Test (TC-004) |
-| FR-004-AC-4 | Missing optional explanation data cannot be represented as present or verified. | Test (TC-007) |
+| FR-004-AC-4 | Missing optional explanation data cannot be represented as present or verified, while the exact logical status and adapter outcome remain available. | Test (TC-007) |
 | FR-004-AC-5 | Seeded contradictions and dead antecedents are detected without false success on timeout. | Test (TC-005, TC-006) |
 
 ## Dependencies

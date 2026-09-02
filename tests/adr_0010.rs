@@ -96,6 +96,7 @@ fn measure(rows: &[Row<'_>], candidate: impl Fn(&Row<'_>) -> String) -> (usize, 
 }
 
 /// FR-001-AC-2 and TC-009: quantify the cost of implicit alias rules.
+/// Trace: TC-009, FR-001-AC-2
 #[test]
 fn candidate_identity_rules_match_the_retained_measurement() {
     let rows = rows();
@@ -124,6 +125,7 @@ fn candidate_identity_rules_match_the_retained_measurement() {
 }
 
 /// FR-001-AC-2 and TC-009: explicit binding groups fail closed on structural mismatch.
+/// Trace: TC-009, FR-001-AC-2
 #[test]
 fn explicit_bindings_reject_incompatible_members() {
     let rows = rows();
@@ -137,6 +139,7 @@ fn explicit_bindings_reject_incompatible_members() {
 }
 
 /// FR-001-AC-3/5 and TC-009: the binding decision and invalidation rules are normative.
+/// Trace: TC-009, FR-001-AC-3, FR-001-AC-5
 #[test]
 fn adr_binds_versions_hashes_and_supersession() {
     for required in [

@@ -18,7 +18,16 @@ wildcards = "warn"
 
 [advisories]
 version = 2
+# RUSTSEC-2026-0009 affects only time's RFC 2822 parser. jsonschema 0.17.1 uses
+# time solely for RFC 3339/date validation and contains no Rfc2822 reference;
+# quire-analyze exposes only contract IR value types. The patched time release
+# requires edition 2024/Rust 1.88, while this crate's contract is Rust 1.75.
+# Keep the exact exception visible until agent-ix/quire-contract-ir#37 removes
+# the dependency or raises the shared MSRV.
+ignore = ["RUSTSEC-2026-0009"]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# The dependency manifest and lockfile pin one reviewed commit from this first-party repository.
+allow-git = ["https://github.com/agent-ix/quire-contract-ir"]

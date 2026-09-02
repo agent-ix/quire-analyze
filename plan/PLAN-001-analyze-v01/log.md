@@ -20,3 +20,11 @@ title: "PLAN-001 update log"
   retain the reproduced spike and measured alternatives.
 - Completed Task-003 after REV-005/REV-006 closed eight findings, all local and MSRV gates passed,
   and source-bound issue #6 evidence was retained. Issue #7 remains the next unstarted DAG task.
+- Implemented the dependency-independent Task-007 slice: canonical differential reports, production
+  schema/mutation validation, stable publisher CLI, pinned Z3/cvc5 SAT/UNSAT execution, and exact
+  handling of the two real-engine protocol differences. REV-019 through REV-021 retain review,
+  gaps, and QA. Task-007 remains in progress on the explicit PGM-01 guard; QA residuals are #23/#24.
+- Added the issue #23 publication fault seam, parent-directory durability sync, explicit pre/post
+  rename failure states, recoverable cleanup, competing-publisher coverage, stale-staging ownership,
+  and subprocess termination probes. Abrupt pre-rename termination truthfully retains a private
+  staging residue limitation pending review rather than claiming code ran after process death.

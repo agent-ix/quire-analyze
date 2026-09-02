@@ -1,5 +1,15 @@
 //! SMT-backed consistency and implication analysis for versioned requirement contracts.
 
+mod analysis;
+mod report;
+mod smt;
+mod solver;
+
+pub use analysis::*;
+pub use report::*;
+pub use smt::*;
+pub use solver::*;
+
 /// Placeholder entry point.
 pub fn hello() -> &'static str {
     "hello from quire_analyze"

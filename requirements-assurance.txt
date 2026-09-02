@@ -1,0 +1,17 @@
+# Assurance lane dependencies (issue #25).
+#
+# This lane is deliberately separate from any other Python on the machine.
+# `engineering-assurance` declares `jsonschema>=4.23,<5`, and this repository's
+# Rust crate validates its own reports against Draft 7 through the `jsonschema`
+# *crate*. Those are different validators with different contracts, and the two
+# must not be resolved into one environment: a Draft-7 governance lane pinned to
+# jsonschema 3.2.0 will import `engineering_assurance` and appear to work,
+# because the code paths that need a 4.x validator are exactly the ones a
+# refusing record never reaches. See `make assurance-venv`.
+#
+# Every pin is the version the accepted FR-012 compatibility matrix names.
+# `npm.ix` must not appear here, in any lockfile, or in any `.npmrc`.
+
+engineering-assurance @ git+https://github.com/agent-ix/engineering-assurance@v0.2.0
+jsonschema>=4.23,<5
+PyYAML>=6.0,<7

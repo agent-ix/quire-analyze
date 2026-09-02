@@ -20,6 +20,11 @@ Validate every report and envelope against pinned schemas. Remove and mutate eac
 artifact, digest, status, limitation, engine field, and output. Contradict raw responses and declared
 outcomes, and alter the artifact census.
 
+Runtime report validation re-derives canonical JSON, report digest, raw stdout/stderr/model digests,
+query/configuration identities, and differential disposition. Shared run transcription is audited by
+Quoin 0.23.1. The PGM-01 envelope lane must return unavailable until the component selected by
+`quire-contract-ir#20` is adopted.
+
 ## Expected Results
 
 The valid corpus passes. Every omission, mutation, contradiction, or census change fails closed with

@@ -1,0 +1,87 @@
+{
+  "collectedAt": "2030-01-01T00:00:00Z",
+  "collector": {
+    "configuredCommand": "fictional-collector",
+    "id": "fictional-collector",
+    "resolvedPath": "/fictional/bin/collector",
+    "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "version": "1.0.0"
+  },
+  "commands": [
+    {
+      "argv": [
+        "fictional-checker",
+        "--json"
+      ],
+      "corroboration": {
+        "matchedPatterns": [],
+        "minimumTestCount": 1,
+        "observedTestCount": 0,
+        "passed": false,
+        "requiredPatterns": [
+          "passed"
+        ],
+        "silentSuccess": false
+      },
+      "elapsedMs": 12,
+      "exitCode": 1,
+      "id": "fictional-check",
+      "status": "failed",
+      "stderr": {
+        "bytes": 32,
+        "path": "stderr.txt",
+        "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "stdout": {
+        "bytes": 64,
+        "path": "stdout.json",
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "tools": [
+        "fictional-checker"
+      ]
+    }
+  ],
+  "historicalDisposition": "retracted",
+  "limitations": [
+    "This is a fictional compatibility fixture."
+  ],
+  "overallStatus": "failed",
+  "parameters": {
+    "paths": [
+      "spec/fictional.md"
+    ],
+    "roots": [
+      "."
+    ],
+    "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "profile": {
+    "bytes": 128,
+    "path": "profile.json",
+    "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "quoin": {
+    "detail": "fictional intake",
+    "status": "recorded",
+    "version": "0.22.5"
+  },
+  "recordId": "pgm-02-abcdefabcdef-123456789abc",
+  "repository": "ix://fictional/contract-ir",
+  "schemaDigests": {
+    "authority": "3333333333333333333333333333333333333333333333333333333333333333",
+    "profile": "1111111111111111111111111111111111111111111111111111111111111111",
+    "record": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "schemaVersion": "quire.pgm01-evidence/v2",
+  "subjectRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "tools": [
+    {
+      "configuredCommand": "fictional-checker",
+      "id": "fictional-checker",
+      "resolvedPath": "/fictional/bin/checker",
+      "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "version": "2.0.0"
+    }
+  ]
+}

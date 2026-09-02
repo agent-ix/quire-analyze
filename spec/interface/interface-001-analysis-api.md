@@ -30,9 +30,10 @@ operations:
   - name: compare
     output: DifferentialReport
     semantics: retains both engine records; disagreement is non-conclusive until human-reviewed adjudication
-  - name: cli_analyze
-    output: deterministic JSON report, stable exit class, and stderr diagnostics
-    semantics: equivalent to library operation and atomically published
+  - name: cli_publish
+    input: authoritative canonical report rendered by the library
+    output: byte-identical deterministic JSON report, stable exit class, and stderr diagnostics
+    semantics: validates the closed report contract and atomically publishes without reconstructing trusted inputs
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
@@ -47,7 +48,14 @@ identity_envelope:
   schema: quire.derivation-evidence/v1
   required: [producer, inputs, backend, outputs, parameters, dependencies, environment, provenance, result]
 resource_limits:
-  required: [wall_time_ms, cleanup_time_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes]
+  lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
+  adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, executable_bytes, path_bytes]
+lowering_v1:
+  request_kind: boolean_conjunction
+  logic: QF_UF
+  identities: [binding_set_digest, analysis_request_digest, query_digest]
+  maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding]
+  unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
   exact_source_revision: required for development

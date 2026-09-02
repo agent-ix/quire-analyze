@@ -1,0 +1,375 @@
+{
+  "schema_version": "quire-analyze.change-assurance-declaration/v1",
+  "purpose": "What this repository states about the change under issue #25, in the shape Quoin's FR-063 record requires. Quoin owns the record schema, its digest, and its retention; this file is the author's statement that gets sealed into one.",
+  "not_an_envelope": "Quoin's packaged change-assurance-record-v1, proof-attestation-v1 and verification-receipt-v1 schemas are the shapes. This file projects into the record body Quoin requires and derives nothing beyond the digests its own derived_fields names. It is not a local evidence envelope, it retains nothing, and it computes no verdict.",
+  "derived_fields": [
+    "subject.base_revision and impact_snapshot.revision come from the candidate revision the caller names.",
+    "source_connections[].revision is that same candidate revision; source_connections[].digest is read from the bytes at the declared path in `sources`.",
+    "proof_obligations[].configuration_digest is read from the bytes at that proof's declared `configuration` path; the `configuration` key itself is replaced by that digest.",
+    "impact_snapshot.digest is read from the bytes of the Quire static export.",
+    "record.digest is computed and written by quoin at seal time; this file never states it.",
+    "Nothing else is filled in, defaulted, or discovered. A field this file does not state is a validation failure at seal time, which is the behaviour that makes the record a statement rather than a guess.",
+    "Each proof's attested result must be one of its declared accepted_results. A result outside that set is a chain mismatch, not a quieter shade of green: only PROOF-engine-availability may be unavailable, and only because an absent pinned engine is a fact about the host rather than about this change.",
+    "impact_snapshot.completeness, .truncated and .gaps are derived from the Quire static export document, not stated. A claim of completeness about a file nobody read is a claim about nothing."
+  ],
+  "sources": {
+    "FR-003": "spec/functional/FR-003-bounded-adapters.md",
+    "FR-004": "spec/functional/FR-004-conclusions.md",
+    "FR-005": "spec/functional/FR-005-evidence-cli.md",
+    "FR-006": "spec/functional/FR-006-shared-assurance-intake.md",
+    "NFR-001": "spec/nonfunctional/NFR-001-determinism-bounds.md",
+    "NFR-002": "spec/nonfunctional/NFR-002-evidence-authority.md",
+    "TM-001": "spec/test-matrix.md",
+    "assurance-pins": "assurance/pins.json"
+  },
+  "record": {
+    "schema_version": 1,
+    "record_type": "change_assurance",
+    "record_id": "quire-analyze/issue-25",
+    "revision": 1,
+    "parent_digest": null,
+    "subject": {
+      "repository": "agent-ix/quire-analyze",
+      "scope": [
+        "src",
+        "examples",
+        "schemas",
+        "scripts",
+        "spec",
+        "tests",
+        "assurance",
+        "evidence",
+        "Makefile"
+      ]
+    },
+    "source_connections": [
+      {
+        "source_id": "FR-003",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "FR-004",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "FR-005",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "FR-006",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "NFR-001",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "NFR-002",
+        "kind": "requirement"
+      },
+      {
+        "source_id": "TM-001",
+        "kind": "test"
+      },
+      {
+        "source_id": "assurance-pins",
+        "kind": "other"
+      }
+    ],
+    "impact_snapshot": {
+      "identity": "quire-static-export"
+    },
+    "definition": {
+      "requirements": [
+        {
+          "id": "FR-006-AC-1",
+          "statement": "The adopted component versions are classified by the packaged Engineering Assurance compatibility matrix, not by a local restatement of it.",
+          "source_ids": [
+            "FR-006",
+            "assurance-pins"
+          ]
+        },
+        {
+          "id": "FR-006-AC-2",
+          "statement": "Solver execution, analysis classification and differential comparison are produced by this repository's own tools in a declared structured format and transcribed by Quoin without Quoin executing the producer.",
+          "source_ids": [
+            "FR-006",
+            "FR-003",
+            "FR-004"
+          ]
+        },
+        {
+          "id": "FR-006-AC-3",
+          "statement": "Static specification, obligation and coverage facts come from a Quire export, and Quire does not execute a producer.",
+          "source_ids": [
+            "FR-006",
+            "TM-001"
+          ]
+        },
+        {
+          "id": "FR-006-AC-4",
+          "statement": "Retained evidence bytes are read through the Engineering Assurance compatibility mapping and are not modified, and the mapping's answer is reported without collapsing it into pass or fail.",
+          "source_ids": [
+            "FR-006",
+            "NFR-002"
+          ]
+        },
+        {
+          "id": "FR-006-AC-5",
+          "statement": "Every non-conclusive solver state stays distinct from a conclusion and from every other non-conclusive state across the intake path: a solver that could not decide is never reported as a solver that decided.",
+          "source_ids": [
+            "FR-006",
+            "FR-003",
+            "NFR-002"
+          ]
+        },
+        {
+          "id": "FR-006-AC-6",
+          "statement": "No repository-local generic runner, evidence envelope, manifest, identity framework, retention store, audit store, anchor file or aggregate verdict remains in the execution path.",
+          "source_ids": [
+            "FR-006",
+            "NFR-002"
+          ]
+        }
+      ],
+      "preservation_constraints": [
+        {
+          "id": "PRESERVE-solver-state-census",
+          "statement": "Twenty-four SolverOutcome values, six AnalysisStatus values and four DifferentialDisposition values remain distinct and separately reachable. sat and unsat are the only conclusive outcomes; unknown, timed-out, cancelled, unsupported-platform, version-mismatch, executable-digest-mismatch, executable-changed, missing-executable, identity-error, malformed-output, contradictory-output, solver-error, nonzero-exit, signaled, stdin-limit, stdout-limit, stderr-limit, model-limit, diagnostic-output, cleanup-failed, spawn-error and io-error each remain their own answer.",
+          "source_ids": [
+            "FR-003",
+            "NFR-002"
+          ]
+        },
+        {
+          "id": "PRESERVE-analysis-algebra",
+          "statement": "Consistency, contradiction, implication, redundancy and dead-antecedent keep their exact Boolean semantics, their independent finite-model truth table, and their source-mapped counterexamples. A sat result is only conclusive for agreement when its model replays.",
+          "source_ids": [
+            "FR-004",
+            "NFR-001"
+          ]
+        },
+        {
+          "id": "PRESERVE-report-identity",
+          "statement": "quire.differential-report/v1 stays byte-canonical and reconstructible: validation re-derives the authoritative bytes, and a tampered semantic field, a tampered retained stream, a stale report digest and a truncated document are each refused.",
+          "source_ids": [
+            "FR-005",
+            "NFR-002"
+          ]
+        },
+        {
+          "id": "PRESERVE-publication-atomicity",
+          "statement": "Report publication stays all-or-nothing: a pre-rename failure reports destination-unmodified, a post-rename directory-sync failure reports published-durability-unknown, and an existing developer-owned destination is refused rather than replaced.",
+          "source_ids": [
+            "FR-005"
+          ]
+        },
+        {
+          "id": "PRESERVE-legacy-bytes",
+          "statement": "Retained evidence is read-only to the assurance path: the compatibility view opens every record read-only, re-hashes it against evidence/manifest.sha256, and reports drift rather than rewriting a record to make a check pass. One declared exception, recorded below, was made outside that path by this change and is pinned by both digests. The exception is evidence/publication-faults-1e69613/validation-summary.md, whose pre-correction SHA-256 was 9f15af504c8776782ba67c9f8595c776a77cdd3f13315483113de373bc36fc01. The record's attestation banner omitted two disclaimers the retained-evidence gate requires, so committing it made cargo test and make ci fail at the inherited head 2d99ef0. The banner was corrected, the correction stated inside the record, and the manifest line re-derived for this one file. No measurement, gate result or count was altered. This is a correction made by a human-reviewed commit and visible in git history \u2014 it is NOT the compatibility view updating its own oracle, which it cannot do.",
+          "source_ids": [
+            "NFR-002",
+            "FR-006"
+          ]
+        },
+        {
+          "id": "PRESERVE-no-runtime-assurance-dependency",
+          "statement": "The crate gains no runtime dependency on Quire, Quoin or engineering-assurance. The assurance lane is scripts, examples and a virtualenv, none of which the library links.",
+          "source_ids": [
+            "NFR-002"
+          ]
+        },
+        {
+          "id": "PRESERVE-manual-ci",
+          "statement": "Hosted CI remains workflow_dispatch only and is not dispatched by this change.",
+          "source_ids": [
+            "NFR-002"
+          ]
+        }
+      ],
+      "proof_obligations": [
+        {
+          "proof_id": "PROOF-solver-state-census",
+          "statement": "Every provoked solver condition produces the outcome it was built to provoke, each maps to its declared analysis status, all four differential dispositions are reachable, and the authoritative differential report bytes are accepted while four tampered variants and one truncated variant are refused.",
+          "obligation_ids": [
+            "FR-006-AC-2",
+            "FR-006-AC-5"
+          ],
+          "evidence_kind": "Integration",
+          "command": {
+            "argv": [
+              "cargo",
+              "run",
+              "--quiet",
+              "--example",
+              "solver_state_census",
+              "--",
+              "--json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "quire-analyze-solver-state-census",
+          "configuration": "examples/solver_state_census.rs",
+          "accepted_results": [
+            "passed"
+          ]
+        },
+        {
+          "proof_id": "PROOF-engine-availability",
+          "statement": "The pinned Z3 5.1.0 and cvc5 1.3.4 release assets are located by QUIRE_Z3 and QUIRE_CVC5 and checked against their pinned executable digests. When they are absent the real-engine differential corpus is reported unavailable, which is not a pass and not a failure.",
+          "obligation_ids": [
+            "FR-006-AC-2",
+            "FR-006-AC-5"
+          ],
+          "evidence_kind": "Integration",
+          "command": {
+            "argv": [
+              "cargo",
+              "run",
+              "--quiet",
+              "--example",
+              "engine_availability",
+              "--",
+              "--json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "quire-analyze-engine-availability",
+          "configuration": "examples/engine_availability.rs",
+          "accepted_results": [
+            "passed",
+            "unavailable"
+          ]
+        },
+        {
+          "proof_id": "PROOF-shared-pins",
+          "statement": "Every adopted component version is classified by the packaged Engineering Assurance compatibility matrix, every upstream artifact this repository pins by digest still hashes to that digest, and no installable line names the internal npm mirror.",
+          "obligation_ids": [
+            "FR-006-AC-1"
+          ],
+          "evidence_kind": "Static",
+          "command": {
+            "argv": [
+              ".venv-assurance/bin/python",
+              "scripts/check_shared_pins.py",
+              "--json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "quire-analyze/check_shared_pins",
+          "configuration": "assurance/pins.json",
+          "accepted_results": [
+            "passed"
+          ]
+        },
+        {
+          "proof_id": "PROOF-legacy-compatibility",
+          "statement": "All eight retained evidence records are read through the pinned Engineering Assurance mapping with their manifest digests bound, their bytes are unchanged, and the mapping's answer for each is reported as it stands. Five derived fixtures demonstrate incompatible, unreadable and stale against a pinned positive control.",
+          "obligation_ids": [
+            "FR-006-AC-4",
+            "FR-006-AC-5"
+          ],
+          "evidence_kind": "Static",
+          "command": {
+            "argv": [
+              ".venv-assurance/bin/python",
+              "scripts/legacy_evidence_view.py",
+              "--json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "quire-analyze/legacy_evidence_view",
+          "configuration": "tests/fixtures/legacy-compat/expectations.json",
+          "accepted_results": [
+            "passed"
+          ]
+        },
+        {
+          "proof_id": "PROOF-quire-static-export",
+          "statement": "The authoritative static specification, obligation and coverage facts for this revision are the Quire export, which executes no producer.",
+          "obligation_ids": [
+            "FR-006-AC-3"
+          ],
+          "evidence_kind": "Static",
+          "command": {
+            "argv": [
+              "quire",
+              "coverage",
+              "--scope",
+              ".",
+              "--json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "quire",
+          "configuration": "spec/test-matrix.md",
+          "accepted_results": [
+            "passed"
+          ]
+        },
+        {
+          "proof_id": "PROOF-msrv",
+          "statement": "The declared MSRV compiles every target of this crate at this candidate revision against the locked dependency graph, and reports it in cargo's own JSON message stream.",
+          "obligation_ids": [
+            "FR-006-AC-2"
+          ],
+          "evidence_kind": "Static",
+          "command": {
+            "argv": [
+              "rustup",
+              "run",
+              "1.75.0",
+              "cargo",
+              "check",
+              "--locked",
+              "--all-targets",
+              "--message-format=json"
+            ],
+            "working_directory": "."
+          },
+          "tool_identity": "cargo",
+          "configuration": "rust-toolchain.toml",
+          "accepted_results": [
+            "passed"
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "UNKNOWN-ea-acceptance-not-in-a-release",
+          "statement": "engineering-assurance v0.2.0 records accepted.state = pending_human_acceptance and ships no human_acceptance_recorded predicate; the human acceptance exists only on that repository's main at ae50e13. This repository reports the state the release records and gates only on version compatibility. Filed as agent-ix/engineering-assurance#20.",
+          "disposition": "open",
+          "owner": "agent-ix/engineering-assurance"
+        },
+        {
+          "id": "UNKNOWN-retained-evidence-is-not-pgm01",
+          "statement": "map_pgm01_bytes at the pinned release reads quire.pgm01-evidence v1 and v2. Every retained record in this repository is a Markdown validation summary, not JSON envelopes of any version, so the mapping answers unreadable for every one. That refusal is reported as the compatibility result; no local mapper was written to make it read as a pass. Filed as agent-ix/engineering-assurance#21.",
+          "disposition": "open",
+          "owner": "agent-ix/engineering-assurance"
+        },
+        {
+          "id": "UNKNOWN-real-engine-corpus-unavailable",
+          "statement": "The pinned Z3 5.1.0 and cvc5 1.3.4 assets are not installed on the producing host, so the real-engine differential corpus did not run and nothing about it was decided. It is attested unavailable rather than passed or failed, and TC-006's real-engine row stays incomplete. Tracked as agent-ix/quire-analyze#24.",
+          "disposition": "open",
+          "owner": "@kreneskyp"
+        },
+        {
+          "id": "UNKNOWN-analysis-status-is-a-lossy-projection",
+          "statement": "AnalysisStatus::ToolError is the image of fifteen distinct SolverOutcome values, so the analysis-status column alone cannot tell an unavailable engine from a malformed response. The distinction is preserved: SolverOutcome is retained verbatim in every report and DifferentialDisposition::Unavailable recovers unavailability at the comparison level. Recorded because a reader of the status column alone would not know this.",
+          "disposition": "accepted",
+          "owner": "@kreneskyp"
+        },
+        {
+          "id": "UNKNOWN-human-decision-absent",
+          "statement": "No ix-flow decision event exists for this change. Only the repository owner may create one, and none was synthesized, so the receipt is expected to read incomplete with a missing decision rather than valid.",
+          "disposition": "open",
+          "owner": "@kreneskyp"
+        }
+      ]
+    },
+    "review_workflow": {
+      "run_id": "quire-analyze-issue-25",
+      "decision_event_kind": "change_assurance.review_decided"
+    }
+  }
+}

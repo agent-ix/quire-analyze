@@ -14,8 +14,15 @@ name = "quire_analyze"
 path = "src/lib.rs"
 
 [dependencies]
+jsonschema = { version = "=0.17.1", default-features = false }
+libc = "=0.2.189"
+quire-contract-ir = { git = "https://github.com/agent-ix/quire-contract-ir", rev = "bb5d30cbb1519b7ac286250114c96ba967661cba", version = "=0.1.0" }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.10.9"
 
 [dev-dependencies]
+serde_yaml = "=0.9.34"
 
 [profile.release]
 lto = "thin"
