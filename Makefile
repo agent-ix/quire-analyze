@@ -75,7 +75,7 @@ test:
 
 .PHONY: spec
 spec:
-	quire validate --scope . 'spec/**/*.md' 'planning/**/*.md' 'plan/**/*.md'
+	quire validate --scope . 'spec/**/*.md' 'planning/**/*.md' 'plan/**/*.md' 'reviews/**/*.md'
 
 .PHONY: msrv
 msrv:
