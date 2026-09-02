@@ -13,12 +13,13 @@ const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 const MAKEFILE: &str = include_str!("../Makefile");
 const EVIDENCE_MANIFEST: &str = include_str!("../evidence/manifest.sha256");
 const MASTER_SPEC: &str = include_str!("../spec/index.md");
-const FUNCTIONAL_REQUIREMENTS: [&str; 5] = [
+const FUNCTIONAL_REQUIREMENTS: [&str; 6] = [
     include_str!("../spec/functional/FR-001-analysis-algebra.md"),
     include_str!("../spec/functional/FR-002-smt-lowering.md"),
     include_str!("../spec/functional/FR-003-bounded-adapters.md"),
     include_str!("../spec/functional/FR-004-conclusions.md"),
     include_str!("../spec/functional/FR-005-evidence-cli.md"),
+    include_str!("../spec/functional/FR-006-shared-assurance-intake.md"),
 ];
 const INTERFACE: &str = include_str!("../spec/interface/interface-001-analysis-api.md");
 const TEST_MATRIX: &str = include_str!("../spec/test-matrix.md");
@@ -54,8 +55,8 @@ fn foundation_keeps_license_publication_and_ci_authority_bounded() {
 /// Trace: NFR-002-AC-2
 #[test]
 fn foundation_defines_closed_requirements_and_non_conclusive_states() {
-    assert!(MASTER_SPEC.contains("FR-001 through FR-005"));
-    for (requirement, artifact) in ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005"]
+    assert!(MASTER_SPEC.contains("FR-001 through FR-006"));
+    for (requirement, artifact) in ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006"]
         .into_iter()
         .zip(FUNCTIONAL_REQUIREMENTS)
     {
@@ -152,7 +153,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .collect();
     assert_eq!(
         complete_rows.len(),
-        24,
+        30,
         "a new complete matrix row requires an executable trace binding"
     );
     assert_eq!(
@@ -189,6 +190,16 @@ fn foundation_plan_advances_only_first_unblocked_child() {
     assert!(complete_rows
         .iter()
         .any(|line| line.starts_with("| TC-010 |")));
+    assert!(complete_rows
+        .iter()
+        .any(|line| line.starts_with("| TC-011 |")));
+    assert_eq!(
+        complete_rows
+            .iter()
+            .filter(|line| line.starts_with("| FR-006 |"))
+            .count(),
+        5
+    );
     assert_eq!(TEST_MATRIX.matches("Coverage Status |").count(), 2);
 }
 
@@ -208,7 +219,12 @@ fn make_ci_has_a_closed_unsuppressed_gate_census() {
         .find(|line| line.starts_with("ci:"))
         .expect("ci target");
     let actual: BTreeSet<_> = ci.trim_start_matches("ci:").split_whitespace().collect();
+    // The census is exact on purpose: a gate added to the Makefile and not to
+    // this list, or removed from the Makefile and left here, is a difference
+    // between what `make ci` runs and what this repository says it runs.
     let expected = BTreeSet::from([
+        "assurance",
+        "assurance-inputs",
         "audit-unsafe",
         "coverage",
         "deny",

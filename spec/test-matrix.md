@@ -31,6 +31,12 @@ type: TestMatrix
 | FR-005 | FR-005-AC-2 | TC-007 | ⛔ Application schema complete; PGM-01 blocked on contract-ir#20 |
 | FR-005 | FR-005-AC-3 | TC-006 | 🚧 Differential states and real SAT/UNSAT complete; retained full corpus #24 open |
 | FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
+| FR-006 | FR-006-AC-1 | TC-011 | ✅ Shared pin classification complete |
+| FR-006 | FR-006-AC-2 | TC-011 | ✅ Producer isolation and result derivation complete |
+| FR-006 | FR-006-AC-3 | TC-011 | ✅ Quire static export complete |
+| FR-006 | FR-006-AC-4 | TC-012 | ✅ Read-only compatibility view complete |
+| FR-006 | FR-006-AC-5 | TC-011, TC-012 | ✅ Non-conclusive state separation complete |
+| FR-006 | FR-006-AC-6 | TC-012 | 🚧 Shared path proven; local verifier removal pending the dual-run record |
 
 ## Nonfunctional and Stakeholder Coverage
 
@@ -58,12 +64,16 @@ type: TestMatrix
 | TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Fault boundaries, concurrency, durability, and crash states covered; #24 and crash-residue signoff open |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
+| TC-011 | Shared assurance intake and result derivation | Integration | P0 | FR-006, NFR-002 | ✅ Complete |
+| TC-012 | Read-only legacy compatibility view | Integration | P0 | FR-006, NFR-002 | 🚧 View and fixtures complete; local verifier removal pending |
 
 TC-001 completes the Boolean-v1 analysis algebra and independent finite truth table. TC-002 through
 TC-004 and TC-006 through TC-008 remain planned as complete campaigns; issue #4 closes their exact
 request, mapping, replay, and incomplete-state slices without claiming real-engine differential or
 evidence publication. TC-005 completes the Linux adapter v1 boundary. TC-009 is completed architecture
-research. TC-010 completes only Boolean-v1 lowering. The placeholder crate tests count only as
+research. TC-010 completes only Boolean-v1 lowering. TC-011 completes the shared assurance intake path,
+producer isolation and result derivation; TC-012 completes the read-only compatibility view and its
+derived fixture corpus, and stays incomplete until the superseded local evidence verifier is removed. The placeholder crate tests count only as
 scaffold health and satisfy no row. A row may become complete only when its entire acceptance scope
 runs; ignored, skipped, unavailable, or platform-deferred cases remain visible and not complete.
 

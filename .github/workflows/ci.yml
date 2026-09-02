@@ -30,7 +30,7 @@ jobs:
 
       - name: Install specification tools and modules
         run: |
-          npm install --global '@agent-ix/quire-cli@0.31.0' '@agent-ix/quoin@0.22.5'
+          npm install --global '@agent-ix/quire-cli@0.31.0' '@agent-ix/quoin@0.23.1' '@agent-ix/ix-flow@0.0.4'
           quoin module ensure-defaults
 
       - name: Run the complete local gate

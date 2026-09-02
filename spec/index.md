@@ -51,9 +51,10 @@ versioned dependencies and a named human retains release authority.
 
 ## Requirements Architecture
 
-StR-001 is refined by FR-001 through FR-005 and constrained by NFR-001 and NFR-002.
+StR-001 is refined by FR-001 through FR-006 and constrained by NFR-001 and NFR-002.
 `interface-001` defines the request, response, outcome, diagnostic, and evidence boundary. TC-001
-through TC-010 form the verification matrix. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
+through TC-012 form the verification matrix. FR-006 adopts the shared Engineering Assurance, Quire
+and Quoin contracts and owns no local evidence machinery. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
 assurance boundary. PLAN-001 maps this foundation and native issues #6, #7, #3, #4, and #5.
 
 ## Authoritative Inputs

@@ -1,8 +1,19 @@
 # Issue #23 atomic publication fault validation summary
 
-> **Producer validation attestation.** This record binds the exact source revision and observed
-> local commands. It does not claim independent approval, PGM-01 derivation authority, source
-> release, or that an uncatchable terminated process removed its own named staging file.
+> **Producer validation attestation.** The source revision and commands below are immutable and
+> reproducible, but no raw command transcript or machine-signed verdict is retained. This record
+> does not claim independent review, derivation-evidence authority, a release decision, PGM-01
+> derivation authority, source release, or that an uncatchable terminated process removed its own
+> named staging file.
+
+> **Correction, issue #25.** As originally written this record's banner omitted the two
+> disclaimers that `retained_evidence_is_censused_and_cannot_claim_machine_verification`
+> requires of any record claiming a producer validation attestation, so committing it made
+> `cargo test` — and therefore `make ci` — fail. The "Observed Local Validation" table below
+> was collected before this file existed and is unchanged; the claim that `make ci` exited zero
+> was true of the tree it measured and was not true of the tree that contained this record. The
+> banner is corrected here and `evidence/manifest.sha256` is re-derived for this one file. No
+> measurement, gate result or count was altered.
 
 ## Subject
 

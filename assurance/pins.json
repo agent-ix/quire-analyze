@@ -1,0 +1,55 @@
+{
+  "schema_version": "quire-analyze.assurance-pins/v1",
+  "purpose": "The exact upstream artifacts this repository's assurance lane reads, pinned by digest so a change upstream is a visible failure here rather than a silent change of meaning.",
+  "not_an_authority": "This file pins artifacts. It does not restate component versions: the packaged Engineering Assurance compatibility matrix is the only authority on which versions are accepted, and scripts/check_shared_pins.py delegates every version verdict to it. A local copy of those numbers would be a second matrix that can drift from the one the acceptance decision was made against.",
+  "engineering_assurance": {
+    "version": "0.2.0",
+    "requirement": "engineering-assurance @ git+https://github.com/agent-ix/engineering-assurance@v0.2.0",
+    "release_form": "git tag",
+    "note": "The tag is the released artifact. It must not be replaced by a branch head, and no v0.2.1 exists to reach for."
+  },
+  "registry": {
+    "channel": "public npm registry (registry.npmjs.org)",
+    "rule": "Every npm pin resolves from the public registry. npm.ix must not appear in any requirement, pin, lockfile or .npmrc in this repository, and is not an oracle for whether a release landed."
+  },
+  "consumed_artifacts": [
+    {
+      "path": "engineering_assurance/verification_semantics.py",
+      "sha256": "af9f92fcec60463fe3e9398a5ce0c1acde76b738816b10baf1b94e123c9b50bc",
+      "why": "Supplies map_pgm01_bytes, the only mapping this repository is permitted to read retained evidence through."
+    },
+    {
+      "path": "engineering_assurance/schemas/pgm01-compatibility-view-v1.schema.json",
+      "sha256": "317294d04e430f26612a6c7cbde937e06d9e655585a59de1f1e4a0dd66855ca6",
+      "why": "The shape every compatibility view is validated against upstream."
+    },
+    {
+      "path": "engineering_assurance/fixtures/verification-semantics/pgm01-v1.json",
+      "sha256": "ab20a39d307a0d3e7d2eda9d50e295ba43de34b527c8f514484cd48af6b7b7f5",
+      "why": "The positive control. Every negative fixture in tests/fixtures/legacy-compat is one named edit to these exact bytes, and a refusal never seen to accept anything proves nothing."
+    },
+    {
+      "path": "engineering_assurance/fixtures/verification-semantics/pgm01-v2.json",
+      "sha256": "947baf2f16a11809ca488935cb8b89fb75015eae2204293eac049b5789bd17bc",
+      "why": "The v2 positive control, for the schema-version branch v1 does not exercise."
+    }
+  ],
+  "deliberately_unpinned": [
+    {
+      "path": "engineering_assurance/compatibility-matrix.json",
+      "why": "Pinning its bytes here would make this repository a second acceptance authority. The installed matrix decides; this repository reports what it decided."
+    }
+  ],
+  "known_drift": [
+    {
+      "id": "ea-acceptance-not-in-a-release",
+      "statement": "engineering-assurance v0.2.0 records accepted.state = pending_human_acceptance and ships no human_acceptance_recorded predicate. Both landed on that repository's main at ae50e13 after the tag, and no v0.2.1 was released. This repository reports the state the pinned release records, gates only on version compatibility, and does not synthesize an acceptance.",
+      "tracked_as": "agent-ix/engineering-assurance#20"
+    },
+    {
+      "id": "retained-evidence-is-not-pgm01",
+      "statement": "map_pgm01_bytes at the pinned release reads quire.pgm01-evidence v1 and v2. This repository retains eight Markdown validation-summary narratives, which are not JSON envelopes of any version, so the mapping answers `unreadable` for every one. That refusal is reported as the compatibility result; no local mapper was written to make it read as a pass.",
+      "tracked_as": "agent-ix/engineering-assurance#21"
+    }
+  ]
+}

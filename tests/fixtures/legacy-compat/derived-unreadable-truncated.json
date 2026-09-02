@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "quire.pgm01-evidence/v1",
+  "schemaIdentity": {"path": "schemas/pgm01-evidence-v1.schema.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "recordId": "pgm-01-abcdef0",
+  "subjectRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "repository": "ix://fictional/contract-ir",
+  "collectedAt": "2030-01-01T00:00:00Z",
+  "collector": {"method": "fictional local verification", "implementation": "fictional collector", "implementationRevision": "cccccccccccccccccccccccccccccccccccccccc"},
+  "environment": {
+    "platform": "fictional-linux",
+    "rustc": "sha256:ddddddddddddddddddddddddddddddddd
