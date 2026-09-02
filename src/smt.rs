@@ -1256,3 +1256,25 @@ fn hex(bytes: &[u8]) -> String {
     }
     out
 }
+
+/// Re-derive a query digest from the two identities a report retains.
+///
+/// `queryDigest` is `hash_fields("query", [profile, requestDigest, query])`, and
+/// a differential report carries both `requestDigest` and the query bytes. That
+/// makes the binding checkable from the document alone, so report validation
+/// checks it rather than trusting a field that names itself.
+pub(crate) fn derive_query_digest(
+    request_digest_hex: &str,
+    query: &[u8],
+) -> Result<String, String> {
+    if request_digest_hex.len() != 64 || !request_digest_hex.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("request digest is not a SHA-256 digest".to_owned());
+    }
+    let mut request = [0_u8; 32];
+    for (index, slot) in request.iter_mut().enumerate() {
+        let pair = &request_digest_hex[index * 2..index * 2 + 2];
+        *slot = u8::from_str_radix(pair, 16).map_err(|_| "request digest is not hex".to_owned())?;
+    }
+    Ok(hash_fields("query", &[SMTLIB2_PROFILE.as_bytes(), &request, query]).to_string())
+}

@@ -1034,3 +1034,94 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
     assert_eq!(invalid_cli.status.code(), Some(2));
     assert!(!invalid_output.exists());
 }
+
+/// A report's conclusion must be re-derivable from the evidence it retains.
+///
+/// Regression for SR-001 H2. Validation proved `stdoutHex` matched
+/// `stdoutSha256` and that `reportDigest` covered the payload — all
+/// self-consistency, which an author editing both halves together satisfies. It
+/// never asked the retained stdout whether it agreed with the claimed outcome,
+/// nor re-derived `queryDigest` from the `requestDigest` and query bytes the
+/// document already carries. A `refuted` report could be forged into a
+/// `satisfied` one, resealed, and validated — and the CLI turned that into exit
+/// zero.
+///
+/// Trace: TC-007, FR-005-AC-2, NFR-002-AC-1, NFR-002-AC-3
+#[test]
+fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
+    let request =
+        AnalysisRequest::dead_antecedent(vec![], statement("forge", literal(false), &[]), vec![])
+            .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let z3 = execute_engine_response(&query, "unsat\n", SolverEngine::Z3);
+    let cvc5 = execute_engine_response(&query, "unsat\n", SolverEngine::Cvc5);
+    let run = compare_solver_records(&query, &z3, &cvc5);
+    let authoritative = render_differential_report(&query, &run).expect("report");
+
+    // Positive control. Every refusal below is meaningless without it.
+    let disposition =
+        validate_report_document(&authoritative).expect("the authoritative report validates");
+    assert_eq!(disposition, DifferentialDisposition::Agreement);
+
+    let value: serde_json::Value = serde_json::from_slice(&authoritative).expect("JSON");
+
+    // The retained stdout says `unsat`. Claiming `sat` — with the paired status
+    // and the differential rewritten so the document stays internally
+    // consistent — must be refused, because stdout is the evidence.
+    let mut forged = value.clone();
+    for index in 0..2 {
+        forged["engines"][index]["outcome"] = serde_json::Value::String("sat".to_owned());
+        forged["engines"][index]["status"] = serde_json::Value::String("refuted".to_owned());
+        forged["engines"][index]["explanation"] = serde_json::Value::String("verified".to_owned());
+    }
+    forged["differential"]["agreedStatus"] = serde_json::Value::String("refuted".to_owned());
+    let forged = reseal_report(forged);
+    assert!(
+        validate_report_document(&forged).is_err(),
+        "a report whose retained stdout says unsat validated as sat"
+    );
+
+    // The same attack in the other direction: leave the outcome alone and swap
+    // the retained bytes for a `sat` transcript, fixing the paired digest so the
+    // self-consistency check passes.
+    let mut swapped_evidence = value.clone();
+    let sat_bytes = b"sat\n";
+    let sat_hex = sat_bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    swapped_evidence["engines"][0]["stdoutHex"] = serde_json::Value::String(sat_hex);
+    swapped_evidence["engines"][0]["stdoutSha256"] =
+        serde_json::Value::String(format!("{:x}", Sha256::digest(sat_bytes)));
+    assert!(
+        validate_report_document(&reseal_report(swapped_evidence)).is_err(),
+        "retained stdout was replaced wholesale, digest and all, and still validated"
+    );
+
+    // `queryDigest` must be re-derived from `requestDigest` and the query bytes,
+    // both of which the document carries. Replacing the query with a different
+    // program and its paired digest must not pass.
+    let mut relabelled_query = value.clone();
+    let other = b"(set-logic QF_UF)\n(check-sat)\n";
+    relabelled_query["queryHex"] = serde_json::Value::String(
+        other
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    );
+    relabelled_query["querySha256"] =
+        serde_json::Value::String(format!("{:x}", Sha256::digest(other)));
+    assert!(
+        validate_report_document(&reseal_report(relabelled_query)).is_err(),
+        "the query bytes were replaced and queryDigest still validated against them"
+    );
+
+    // A report produced under a different contract-IR revision was produced
+    // under different clause-digest semantics.
+    let mut other_revision = value.clone();
+    other_revision["contractIrRevision"] = serde_json::Value::String("0".repeat(40));
+    assert!(
+        validate_report_document(&reseal_report(other_revision)).is_err(),
+        "a foreign contract-IR revision validated"
+    );
+}

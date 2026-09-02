@@ -36,8 +36,8 @@ source; a single altered byte must change the mapped source identity; a committe
 fixture must equal its re-derivation; an unknown schema version must be
 `incompatible`; and this repository's own retained bytes must be `unreadable`.
 
-Scan `scripts/` for a repository-local generic collector, envelope builder,
-manifest verifier, tool-identity module or evidence store, and confirm `make ci`
+Assert `scripts/` against a closed allow-list of the scripts this repository
+declares, rather than a blocklist of names a suffix defeats, and confirm `make ci`
 runs no repository-local evidence verifier.
 
 ## Expected Results
@@ -48,8 +48,9 @@ Markdown validation summaries, so the answer is `unreadable` for all of them;
 that refusal is the reported compatibility result and is not converted into a
 pass, a failure, or `incompatible`.
 
-`incompatible`, `unreadable` and a readable control remain three distinguishable
-answers, each demonstrated by a case that ran and matched, and each negative
+`incompatible`, `unreadable`, `stale` and a readable control remain four
+distinguishable answers — `stale` discriminated by the mapped evidence state, since
+a retracted record stays readable and shares its control's outcome — each demonstrated by a case that ran and matched, and each negative
 paired with a positive control that was observed to be accepted. A control naming
 a case that did not run is refused rather than passing vacuously.
 

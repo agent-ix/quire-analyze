@@ -87,11 +87,19 @@ fn chain_report() -> &'static Value {
 /// never run look identical from the outside, so the shims write down every call
 /// and the test reads the file rather than assuming.
 ///
-/// `--version` is answered rather than refused, and deliberately so. Asking a
-/// tool its version is an observation — it is what the compatibility matrix's own
-/// `observe` column does — and it is not the thing this test forbids. What is
-/// forbidden is asking a tool to build, compile, test, or replay anything. Every
-/// such invocation is logged and the log must be empty.
+/// A version query is answered rather than refused, and deliberately so. Asking
+/// a tool its version is an observation — it is what the compatibility matrix's
+/// own `observe` column does — and it is not the thing this test forbids. What
+/// is forbidden is asking a tool to build, compile, test, or replay anything.
+/// Every such invocation is logged and the log must be empty.
+///
+/// The exemption is "some argument is a version flag", not "the first one is",
+/// because the MSRV proof must attest the pinned toolchain and the only way to
+/// read it is `rustup run 1.75.0 cargo --version`. Selecting a toolchain and
+/// then asking for a version is still asking for a version. The widening costs
+/// nothing: `cargo build`, `cargo check` and `quire coverage` carry no version
+/// flag, so they are still logged — verified by injecting both into the driver
+/// and watching this test fail with their invocations named.
 fn producer_shims(directory: &Path, names: &[&str]) -> PathBuf {
     fs::create_dir_all(directory).unwrap();
     let log = directory.join("invocations.log");
@@ -102,9 +110,11 @@ fn producer_shims(directory: &Path, names: &[&str]) -> PathBuf {
             &path,
             format!(
                 "#!/bin/sh\n\
-                 case \"$1\" in\n\
-                 --version|-V) echo \"{name} 9.9.9 (shim)\"; exit 0 ;;\n\
-                 esac\n\
+                 for argument in \"$@\"; do\n\
+                   case \"$argument\" in\n\
+                   --version|-V) echo \"{name} 9.9.9 (shim)\"; exit 0 ;;\n\
+                   esac\n\
+                 done\n\
                  echo \"$0 $@\" >> {}\n\
                  exit 97\n",
                 log.display()
@@ -276,7 +286,45 @@ fn every_non_conclusive_solver_state_stays_its_own_answer() {
             matches!(outcome, "sat" | "unsat"),
             "{outcome} is reported as conclusive={conclusive}, which is not its meaning"
         );
+
+        // The analysis status is checked against what the row declared, not
+        // merely recorded next to it. Recording it unchecked is how every
+        // timed-out, signaled or version-mismatched solver could report the
+        // status of a decided analysis with nothing noticing.
+        let expected = state["expectedAnalysisStatus"]
+            .as_str()
+            .expect("every row declares the status its outcome must produce");
+        let observed = state["analysisStatus"].as_str().expect("analysis status");
+        assert_eq!(
+            observed, expected,
+            "{outcome} produced analysis status {observed}, not the declared {expected}"
+        );
+        assert_eq!(
+            observed == "satisfied" || observed == "refuted",
+            matches!(outcome, "sat" | "unsat"),
+            "{outcome} produced the analysis status of a decided analysis ({observed})"
+        );
     }
+
+    // The denominator is published and checked. A bare count of distinct
+    // outcomes cannot be read as coverage without knowing how many there are.
+    let total = census["totalOutcomes"].as_u64().expect("total outcomes");
+    let distinct = census["distinctOutcomes"]
+        .as_u64()
+        .expect("distinct outcomes");
+    let unexercised = census["unexercisedOutcomes"]
+        .as_array()
+        .expect("unexercised outcomes");
+    assert_eq!(
+        distinct + unexercised.len() as u64,
+        total,
+        "the census arithmetic does not close: {distinct} + {} != {total}",
+        unexercised.len()
+    );
+    assert!(
+        distinct >= 20,
+        "the census reached only {distinct} of {total} solver outcomes"
+    );
 
     // All four differential dispositions must be reachable. A disposition that
     // cannot be produced is a disposition that cannot be distinguished.
@@ -400,21 +448,141 @@ fn no_local_generic_machinery_remains() {
             names.insert(path.file_name().unwrap().to_string_lossy().into_owned());
         }
     }
-    // A census, not a spot check: a new generic collector, envelope builder or
-    // verifier appearing here is the thing this migration exists to prevent.
-    for forbidden in [
-        "verify_evidence.py",
-        "build_evidence_envelope.py",
-        "collect_evidence.sh",
-        "finalize_collection.py",
-        "tool_identity.py",
-        "verify_evidence_manifest.py",
-    ] {
-        assert!(
-            !names.contains(forbidden),
-            "a generic evidence script reappeared: {forbidden}"
+    // A closed allow-list, because a blocklist is not a census. A blocklist of
+    // six names is defeated by a `.py` extension or a `_v2` suffix; this fails
+    // on any script the repository has not declared, which is the actual claim.
+    let allowed = BTreeSet::from([
+        "assurance_chain.py",
+        "check_shared_pins.py",
+        "check_unsafe_comments.sh",
+        "legacy_evidence_view.py",
+        "unsafe_comment_baseline.txt",
+    ]);
+    let names: BTreeSet<&str> = names.iter().map(String::as_str).collect();
+    assert_eq!(
+        names, allowed,
+        "scripts/ is not what this repository declares it to be; an undeclared \
+         script is how a generic collector, envelope builder or verifier returns"
+    );
+}
+
+/// TC-011: a producer that reports failure, or nothing readable, stops the chain.
+///
+/// These are the two steps TC-011 declares and nothing implemented — which is
+/// how FG-01 survived: the one declared step that would have caught a chain
+/// reporting `passed` over degraded proofs was the one never automated.
+///
+/// Each case runs against a mutated COPY of producer output, so the real
+/// producer results are never touched and the driver still creates nothing.
+///
+/// Trace: TC-011, FR-006-AC-2, FR-006-AC-5
+#[test]
+fn a_producer_that_did_not_pass_cannot_produce_a_green_chain() {
+    let source = root().join("target/assurance");
+    assert!(
+        source.is_dir(),
+        "target/assurance is absent. Run `make assurance-inputs`."
+    );
+
+    // Positive control first. The same harness, unmutated, must go green — or
+    // every refusal below is just the harness being broken.
+    let (code, _) = chain_against(&source, "control", |_| {});
+    assert_eq!(
+        code,
+        Some(0),
+        "the unmutated copy did not pass, so nothing below means anything"
+    );
+
+    // Every producer reports failure. Exit must be non-zero.
+    let (code, output) = chain_against(&source, "all-failed", |directory| {
+        for name in [
+            "solver-state-census.json",
+            "engine-availability.json",
+            "shared-pins.json",
+            "legacy-compatibility.json",
+        ] {
+            rewrite_outcome(&directory.join(name), "failed");
+        }
+    });
+    assert_ne!(
+        code,
+        Some(0),
+        "every producer reported failure and the chain was green:\n{output}"
+    );
+
+    // Results that are neither pass nor failure — the states FG-01 let through.
+    for degraded in ["inconclusive", "not_computed", "unavailable"] {
+        let (code, output) = chain_against(&source, degraded, |directory| {
+            rewrite_outcome(&directory.join("solver-state-census.json"), degraded);
+        });
+        assert_ne!(
+            code,
+            Some(0),
+            "the census established nothing ({degraded}) and the chain was green:\n{output}"
         );
     }
+
+    // Producer output that is not readable at all must exit 2 — an environment
+    // fact, distinct from a proof that ran and did not match.
+    let (code, output) = chain_against(&source, "unreadable", |directory| {
+        fs::write(
+            directory.join("solver-state-census.json"),
+            b"not json at all",
+        )
+        .unwrap();
+    });
+    assert_eq!(
+        code,
+        Some(2),
+        "unreadable producer output did not exit 2:\n{output}"
+    );
+
+    // An outcome the adapter's table does not name must be refused, not defaulted.
+    let (code, output) = chain_against(&source, "unlisted", |directory| {
+        rewrite_outcome(&directory.join("shared-pins.json"), "probably-fine");
+    });
+    assert_eq!(
+        code,
+        Some(2),
+        "an unlisted outcome was not refused:\n{output}"
+    );
+}
+
+fn rewrite_outcome(path: &Path, outcome: &str) {
+    let mut document: Value =
+        serde_json::from_slice(&fs::read(path).expect("producer output")).expect("JSON");
+    document["outcome"] = Value::String(outcome.to_owned());
+    fs::write(path, serde_json::to_vec(&document).expect("rewritten")).unwrap();
+}
+
+/// Copy producer output, mutate the copy, and run the chain against it.
+fn chain_against(source: &Path, label: &str, mutate: impl FnOnce(&Path)) -> (Option<i32>, String) {
+    let directory = root().join("target/assurance-probes").join(label);
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir_all(&directory).unwrap();
+    for entry in fs::read_dir(source).expect("producer output") {
+        let entry = entry.expect("entry");
+        if entry.path().is_file() {
+            fs::copy(entry.path(), directory.join(entry.file_name())).unwrap();
+        }
+    }
+    mutate(&directory);
+    let output = Command::new("python3")
+        .args([
+            "scripts/assurance_chain.py",
+            "--candidate-revision",
+            &head_revision(),
+        ])
+        .current_dir(root())
+        .env("QUIRE_ANALYZE_ASSURANCE_DIR", &directory)
+        .output()
+        .expect("assurance chain");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (output.status.code(), combined)
 }
 
 /// TC-011: the declaration states what it derives, and derives nothing else.
@@ -532,31 +700,56 @@ fn each_demonstrated_state_is_backed_by_a_case_that_matched() {
         .filter_map(Value::as_str)
         .collect();
 
-    // Every claimed state must be traceable to a case that both ran and matched.
-    // A scenario that demonstrated nothing carries null and contributes nothing,
-    // rather than borrowing the label it was aiming at.
-    let mut backed = BTreeSet::new();
-    for case in report["scenarios"]
+    // Assert against an independent list of state -> the case that must produce
+    // it. Recomputing `statesDemonstrated` with the same expression the driver
+    // used would be a tautology: it cannot fail, and it would accept a case
+    // claiming a state no case produced.
+    let required: [(&str, &str); 6] = [
+        ("passed", "honest-PROOF-solver-state-census"),
+        ("unavailable", "honest-PROOF-engine-availability"),
+        ("tampered", "tampered-retained-bytes-refused"),
+        ("malformed", "presupplied-record-digest-refused"),
+        ("unsupported", "unlisted-producer-outcome-refused"),
+        ("inconclusive", "receipt-without-a-human-decision"),
+    ];
+    let cases: Vec<&Value> = report["scenarios"]
         .as_array()
         .expect("scenarios")
         .iter()
         .chain(report["controls"].as_array().expect("controls"))
-    {
-        if case["matched"] == Value::Bool(true) {
-            if let Some(state) = case["demonstrates"].as_str() {
-                backed.insert(state);
-            }
-        }
-    }
-    assert_eq!(
-        demonstrated, backed,
-        "a state was reported as demonstrated without a matching case behind it"
-    );
-
-    for required in ["unavailable", "tampered", "inconclusive"] {
+        .collect();
+    for (state, scenario) in required {
+        let case = cases
+            .iter()
+            .find(|case| case["scenario"] == scenario)
+            .unwrap_or_else(|| panic!("{scenario} did not run, so {state} rests on nothing"));
+        assert_eq!(
+            case["matched"],
+            Value::Bool(true),
+            "{scenario} did not match, so {state} is not demonstrated"
+        );
+        assert_eq!(
+            case["demonstrates"].as_str(),
+            Some(state),
+            "{scenario} was supposed to demonstrate {state}"
+        );
         assert!(
-            demonstrated.contains(required),
-            "{required} was not demonstrated by any case: {demonstrated:?}"
+            demonstrated.contains(state),
+            "{state} is missing from the reported states: {demonstrated:?}"
+        );
+    }
+
+    // Nothing may be claimed that is not on the list above or produced by an
+    // honest proof result, so a fabricated label cannot slip into the report.
+    let allowed: BTreeSet<&str> = required
+        .iter()
+        .map(|(state, _)| *state)
+        .chain(["not_computed", "failed", "partial"])
+        .collect();
+    for state in &demonstrated {
+        assert!(
+            allowed.contains(state),
+            "{state} is claimed as demonstrated but is not a state this chain defines"
         );
     }
 }

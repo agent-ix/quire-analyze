@@ -7,10 +7,12 @@
 //!
 //! What it is measuring is the thing this repository is not allowed to lose. A
 //! solver that could not decide is not a solver that decided "no", and there are
-//! twenty-two distinct ways for it to fail to decide. Each row below runs one of
-//! them through `execute_solver`, classifies it through `classify_analysis`, and
-//! records the `SolverOutcome`, the `AnalysisStatus` and the
-//! `DifferentialDisposition` it produced. A row whose outcome differs from the
+//! many distinct ways for it to fail to decide. Each row below runs one of them
+//! through `execute_solver`, classifies it through `classify_analysis`, and checks
+//! the `SolverOutcome` AND the `AnalysisStatus` against what that row declared.
+//! The report states how many of the enum's outcomes were reached and names the
+//! ones that were not, because a count without a denominator is not a
+//! measurement. A row whose outcome differs from the
 //! one it was built to provoke is reported as a mismatch and makes the whole
 //! census fail — it is not quietly relabelled to whatever happened.
 //!
@@ -54,10 +56,16 @@ const VERSION: &str = "fake-solver 1.0";
 /// that records whatever it observed would agree with a broken adapter as
 /// readily as with a correct one.
 struct Row {
-    /// The fake solver behaviour to install, or `None` for a condition that is
-    /// provoked by configuration rather than by the child process.
-    mode: Option<&'static str>,
+    /// The fake solver behaviour to install.
+    mode: &'static str,
     expected: SolverOutcome,
+    /// The analysis status this outcome must produce for a consistency query.
+    ///
+    /// Stated per row, not read back from the run. Recording whatever status
+    /// turned up would agree with a classifier that called every timed-out,
+    /// signaled or version-mismatched solver `satisfied` — which is exactly the
+    /// collapse this census exists to detect.
+    expected_status: AnalysisStatus,
     /// Why this row exists, in the vocabulary a reviewer reads.
     note: &'static str,
 }
@@ -65,81 +73,191 @@ struct Row {
 fn rows() -> Vec<Row> {
     vec![
         Row {
-            mode: Some("sat"),
+            mode: "sat",
+            expected_status: AnalysisStatus::Satisfied,
             expected: SolverOutcome::Sat,
             note: "conclusive: the solver decided satisfiable",
         },
         Row {
-            mode: Some("unsat"),
+            mode: "unsat",
+            expected_status: AnalysisStatus::Refuted,
             expected: SolverOutcome::Unsat,
             note: "conclusive: the solver decided unsatisfiable",
         },
         Row {
-            mode: Some("unknown"),
+            mode: "unknown",
+            expected_status: AnalysisStatus::Unknown,
             expected: SolverOutcome::Unknown,
             note: "non-conclusive: the solver ran and declined to decide",
         },
         Row {
-            mode: Some("malformed"),
+            mode: "malformed",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::MalformedOutput,
             note: "non-conclusive: the response is not a recognised SMT-LIB status",
         },
         Row {
-            mode: Some("solver_error"),
+            mode: "solver_error",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::SolverError,
             note: "non-conclusive: the solver reported its own error",
         },
         Row {
-            mode: Some("contradictory"),
+            mode: "contradictory",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::ContradictoryOutput,
             note: "non-conclusive: two statuses in one response decide nothing",
         },
         Row {
-            mode: Some("nonzero_diagnostic"),
+            mode: "nonzero_diagnostic",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::NonzeroExit,
             note: "non-conclusive: the process failed without a status",
         },
         Row {
-            mode: Some("signaled"),
+            mode: "signaled",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::Signaled,
             note: "non-conclusive: the process was killed by a signal",
         },
         Row {
-            mode: Some("diagnostic"),
+            mode: "diagnostic",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::DiagnosticOutput,
             note: "non-conclusive: a status accompanied by stderr is not trusted",
         },
         Row {
-            mode: Some("large_stdout"),
+            mode: "large_stdout",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::StdoutLimit,
             note: "non-conclusive: the response exceeded the capture bound",
         },
         Row {
-            mode: Some("large_stderr"),
+            mode: "large_stderr",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::StderrLimit,
             note: "non-conclusive: the diagnostic stream exceeded its bound",
         },
         Row {
-            mode: Some("slow"),
+            mode: "slow",
+            expected_status: AnalysisStatus::Timeout,
             expected: SolverOutcome::TimedOut,
             note: "non-conclusive: the wall-time bound elapsed",
         },
         Row {
-            mode: Some("version_nonzero"),
+            mode: "version_nonzero",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::IdentityError,
             note: "unavailable: the identity probe could not establish the engine",
         },
         Row {
-            mode: Some("version_mutates"),
+            mode: "version_mutates",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::ExecutableChanged,
             note: "unavailable: the executable changed under the adapter",
         },
         Row {
-            mode: Some("version_other"),
+            mode: "version_other",
+            expected_status: AnalysisStatus::ToolError,
             expected: SolverOutcome::VersionMismatch,
             note: "unavailable: the engine is not the pinned version",
         },
+        Row {
+            mode: "missing",
+            expected_status: AnalysisStatus::ToolError,
+            expected: SolverOutcome::MissingExecutable,
+            note: "unavailable: the engine is not installed at all",
+        },
+        Row {
+            mode: "digest_other",
+            expected_status: AnalysisStatus::ToolError,
+            expected: SolverOutcome::ExecutableDigestMismatch,
+            note: "unavailable: the executable is not the pinned bytes",
+        },
+        Row {
+            mode: "cancelled",
+            expected_status: AnalysisStatus::Timeout,
+            expected: SolverOutcome::Cancelled,
+            note: "non-conclusive: the caller withdrew the request",
+        },
+        Row {
+            mode: "oversized_stdin",
+            expected_status: AnalysisStatus::ToolError,
+            expected: SolverOutcome::StdinLimit,
+            note: "non-conclusive: the query exceeded the input bound and was never sent",
+        },
+        Row {
+            mode: "large_model",
+            expected_status: AnalysisStatus::ToolError,
+            expected: SolverOutcome::ModelLimit,
+            note: "non-conclusive: the model exceeded the capture bound",
+        },
     ]
+}
+
+/// Every `SolverOutcome` this build knows about.
+///
+/// Written as an exhaustive `match` so that adding a variant fails the build
+/// here rather than silently shrinking the denominator. A hand-maintained array
+/// would let a twenty-fifth outcome go uncounted and unmentioned.
+fn all_outcomes() -> Vec<SolverOutcome> {
+    use SolverOutcome::*;
+    let every = [
+        Sat,
+        Unsat,
+        Unknown,
+        TimedOut,
+        Cancelled,
+        MissingExecutable,
+        SpawnError,
+        IdentityError,
+        ExecutableDigestMismatch,
+        ExecutableChanged,
+        VersionMismatch,
+        SolverError,
+        MalformedOutput,
+        ContradictoryOutput,
+        NonzeroExit,
+        Signaled,
+        StdinLimit,
+        StdoutLimit,
+        StderrLimit,
+        DiagnosticOutput,
+        ModelLimit,
+        CleanupFailed,
+        UnsupportedPlatform,
+        IoError,
+    ];
+    for outcome in every {
+        // Exhaustiveness guard: a new variant makes this match non-exhaustive.
+        match outcome {
+            Sat
+            | Unsat
+            | Unknown
+            | TimedOut
+            | Cancelled
+            | MissingExecutable
+            | SpawnError
+            | IdentityError
+            | ExecutableDigestMismatch
+            | ExecutableChanged
+            | VersionMismatch
+            | SolverError
+            | MalformedOutput
+            | ContradictoryOutput
+            | NonzeroExit
+            | Signaled
+            | StdinLimit
+            | StdoutLimit
+            | StderrLimit
+            | DiagnosticOutput
+            | ModelLimit
+            | CleanupFailed
+            | UnsupportedPlatform
+            | IoError => {}
+        }
+    }
+    every.to_vec()
 }
 
 fn main() -> ExitCode {
@@ -152,9 +270,7 @@ fn main() -> ExitCode {
     let mut mismatches = Vec::new();
 
     for row in rows() {
-        let mode = row
-            .mode
-            .expect("every v1 census row provokes a child process");
+        let mode = row.mode;
         let record = execute_mode(workspace.path(), mode, &query);
         let observed = record.outcome();
         if observed != row.expected {
@@ -165,12 +281,22 @@ fn main() -> ExitCode {
             ));
         }
         let conclusion = classify_analysis(&query, &record);
+        // The status is checked, not merely recorded. An unchecked column is a
+        // column a reader trusts and nothing verifies.
+        if conclusion.status() != row.expected_status {
+            mismatches.push(format!(
+                "{mode}: expected analysis status {} and observed {}",
+                row.expected_status.as_str(),
+                conclusion.status().as_str()
+            ));
+        }
         entries.push(json!({
             "mode": mode,
             "expectedOutcome": row.expected.as_str(),
             "observedOutcome": observed.as_str(),
-            "matched": observed == row.expected,
+            "expectedAnalysisStatus": row.expected_status.as_str(),
             "analysisStatus": conclusion.status().as_str(),
+            "matched": observed == row.expected && conclusion.status() == row.expected_status,
             "conclusive": conclusion.is_conclusive(),
             "note": row.note,
         }));
@@ -292,11 +418,24 @@ fn main() -> ExitCode {
     // provoked conditions collapsed onto one outcome, this shrinks.
     let distinct_outcomes: BTreeSet<&str> = entries
         .iter()
+        .filter(|entry| entry["matched"] == Value::Bool(true))
         .filter_map(|entry| entry["observedOutcome"].as_str())
         .collect();
     let distinct_statuses: BTreeSet<&str> = entries
         .iter()
+        .filter(|entry| entry["matched"] == Value::Bool(true))
         .filter_map(|entry| entry["analysisStatus"].as_str())
+        .collect();
+
+    // A count with no denominator is not a measurement. The outcomes this census
+    // does NOT provoke are named, so the gap is legible instead of implied by a
+    // bare `15`.
+    let every = all_outcomes();
+    let covered: BTreeSet<&str> = distinct_outcomes.iter().copied().collect();
+    let unexercised: Vec<&str> = every
+        .iter()
+        .map(|outcome| outcome.as_str())
+        .filter(|name| !covered.contains(name))
         .collect();
 
     let matched = entries
@@ -327,6 +466,8 @@ fn main() -> ExitCode {
         "matched": matched,
         "total": total,
         "distinctOutcomes": distinct_outcomes.len(),
+        "totalOutcomes": every.len(),
+        "unexercisedOutcomes": unexercised,
         "distinctAnalysisStatuses": distinct_statuses.len(),
         "mismatches": mismatches,
         "solverStates": entries,
@@ -468,7 +609,9 @@ fn script_body(mode: &str) -> String {
                 .to_owned()
         }
         "slow" => "/bin/sleep 30".to_owned(),
-        "version_nonzero" | "version_mutates" | "version_other" => "printf 'sat\\n'".to_owned(),
+        "version_nonzero" | "version_mutates" | "version_other" | "digest_other" | "missing"
+        | "cancelled" | "oversized_stdin" => "printf 'sat\\n'".to_owned(),
+        "large_model" => "printf 'sat\\n(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)\\n'".to_owned(),
         other => panic!("unknown fake mode {other}"),
     };
     format!(
@@ -500,20 +643,32 @@ fn execute_mode_engine(
     engine: SolverEngine,
 ) -> SolverRecord {
     let executable = make_script(directory, &format!("{}-{mode}", engine.as_str()), mode);
-    let config = SolverConfig::new(
-        engine,
-        &executable,
-        SolverPin::new(VERSION, digest(&executable)),
-        AdapterLimits {
-            wall_time_ms: 250,
-            stdout_bytes: 64,
-            stderr_bytes: 64,
-            model_bytes: 64,
-            ..AdapterLimits::default()
-        },
-    )
-    .expect("solver config");
-    execute_solver(query, &config, &CancellationToken::default())
+    let mut limits = AdapterLimits {
+        wall_time_ms: 250,
+        stdout_bytes: 64,
+        stderr_bytes: 64,
+        model_bytes: 64,
+        ..AdapterLimits::default()
+    };
+
+    // Four conditions are provoked by configuration rather than by the child.
+    // They are the ones a fake solver cannot stage: an engine that is not there,
+    // bytes that are not the pinned ones, a caller that withdrew, and a query
+    // too large to send.
+    let mut pin = SolverPin::new(VERSION, digest(&executable));
+    let mut path = executable.clone();
+    let cancellation = CancellationToken::default();
+    match mode {
+        "missing" => path = directory.join("no-such-solver"),
+        "digest_other" => pin = SolverPin::new(VERSION, SolverDigest::from_bytes([0x11; 32])),
+        "cancelled" => cancellation.cancel(),
+        "oversized_stdin" => limits.stdin_bytes = 1,
+        "large_model" => limits.model_bytes = 8,
+        _ => {}
+    }
+
+    let config = SolverConfig::new(engine, &path, pin, limits).expect("solver config");
+    execute_solver(query, &config, &cancellation)
 }
 
 fn span() -> SourceSpan {

@@ -148,6 +148,10 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "flood" => "/bin/dd if=/dev/zero bs=131072 count=1 2>/dev/null & /bin/dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null; wait".to_owned(),
         "slow" => "/bin/sleep 30".to_owned(),
         "mutate_query" => "printf '# changed\\n' >> \"$0\"; printf 'sat\\n'".to_owned(),
+        // SR-001 H1: a status with a failed exit and no error text at all.
+        "unsat_exit_one" => "printf 'unsat\\n'; exit 1".to_owned(),
+        "unknown_exit_one" => "printf 'unknown\\n'; exit 1".to_owned(),
+        "contradictory_exit_one" => "printf 'unsat\\nsat\\n'; exit 1".to_owned(),
         "version_empty"
         | "version_nonzero"
         | "version_invalid"
@@ -766,4 +770,67 @@ fn timeout_and_cancellation_cleanup_are_measured() {
     let maximum = *durations.iter().max().expect("measurement");
     eprintln!("TC-005 cleanup_ms={durations:?} maximum_ms={maximum}");
     assert!(maximum <= 1_000);
+}
+
+/// A failed process is never a decision, whatever its exit code means to Z3.
+///
+/// Regression for SR-001 H1. The Z3 exit-code-1 exception exists for one shape:
+/// Z3 answers a non-`sat` status, then fails the `(get-model)` the query asked
+/// for, and exits 1. As originally written the branch required neither that the
+/// query request a model nor that the response contain the model-unavailable
+/// error, so a bare `unsat\n` with a failed exit and empty stderr was read as a
+/// conclusive `unsat` — under `Z3` only, while the identical bytes under `cvc5`
+/// were correctly `nonzero-exit`.
+///
+/// Trace: TC-005, FR-003-AC-2, FR-003-AC-4, NFR-002-AC-2
+#[test]
+fn a_nonzero_exit_is_not_a_conclusion_for_either_engine() {
+    let directory = TempDirectory::new("exit-one");
+
+    // The query here is a bare lowering: it emits no `(get-model)`, so an exit
+    // of 1 can only mean the run failed.
+    for (mode, engine) in [
+        ("unsat_exit_one", SolverEngine::Z3),
+        ("unsat_exit_one", SolverEngine::Cvc5),
+        ("unknown_exit_one", SolverEngine::Z3),
+        ("contradictory_exit_one", SolverEngine::Z3),
+    ] {
+        let executable = make_script(
+            directory.path(),
+            &format!("{}-{mode}", engine.as_str()),
+            mode,
+            None,
+        );
+        let record = execute_solver(
+            &query(),
+            &config(engine, &executable, AdapterLimits::default()),
+            &CancellationToken::default(),
+        );
+        assert!(
+            !record.is_conclusive_candidate(),
+            "{engine:?} read {mode} as the conclusive {:?}; a process that reported \
+             failure decided nothing",
+            record.outcome()
+        );
+    }
+
+    // Both engines must agree. An outcome that depends on which engine label the
+    // adapter was handed is not a property of the response.
+    let z3 = make_script(directory.path(), "pair-z3", "unsat_exit_one", None);
+    let cvc5 = make_script(directory.path(), "pair-cvc5", "unsat_exit_one", None);
+    assert_eq!(
+        execute_solver(
+            &query(),
+            &config(SolverEngine::Z3, &z3, AdapterLimits::default()),
+            &CancellationToken::default(),
+        )
+        .outcome(),
+        execute_solver(
+            &query(),
+            &config(SolverEngine::Cvc5, &cvc5, AdapterLimits::default()),
+            &CancellationToken::default(),
+        )
+        .outcome(),
+        "the same bytes and the same exit produced different outcomes for the two engines"
+    );
 }

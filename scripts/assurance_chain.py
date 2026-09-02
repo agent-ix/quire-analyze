@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -42,7 +43,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 DECLARATION = ROOT / "assurance" / "change-assurance.json"
-ASSURANCE_DIR = ROOT / "target" / "assurance"
+# Overridable so a test can drive the chain against a mutated COPY of producer
+# output without touching the real one. The driver still never writes here.
+ASSURANCE_DIR = Path(
+    os.environ.get("QUIRE_ANALYZE_ASSURANCE_DIR", ROOT / "target" / "assurance")
+)
 STORE_ROOT = ROOT / "target" / "assurance-store"
 
 # Every proof obligation's retained result, and the media type its producer
@@ -93,7 +98,7 @@ def quoin(*arguments: str, stdin: str | None = None) -> subprocess.CompletedProc
     )
 
 
-def tool_version(identity: str) -> str:
+def tool_version(identity: str, pinned_toolchain: str | None = None) -> str:
     """Observe a tool's version, or refuse.
 
     There is no default. A fabricated `0.0.0` in a sealed attestation is a lie
@@ -106,6 +111,29 @@ def tool_version(identity: str) -> str:
     That is a reading of the tool's own self-report, not a substitution: a tool
     that prints no semver at all raises rather than being given one.
     """
+    if identity == "cargo" and pinned_toolchain is not None:
+        # The MSRV proof runs `rustup run 1.75.0 cargo check`. Asking the default
+        # `cargo` its version attests a compiler that did not produce the stream —
+        # observed as 1.94.1 against a stream built by 1.75.0. The toolchain is
+        # read out of the declared argv so the two can never drift apart.
+        if shutil.which("rustup") is None:
+            raise ChainError("rustup is not on PATH, so the pinned toolchain cannot be observed")
+        completed = subprocess.run(
+            ["rustup", "run", pinned_toolchain, "cargo", "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ChainError(
+                f"rustup run {pinned_toolchain} cargo --version failed; refusing to attest "
+                "the default toolchain in its place"
+            )
+        match = SEMVER.search(completed.stdout)
+        if match is None:
+            raise ChainError(f"toolchain {pinned_toolchain} printed no semantic version")
+        return match.group(1)
+
     if identity == "quire":
         # `--version`, not `provenance`. Both report the same number, but only one
         # of them is unambiguously an identity question: `provenance` is a
@@ -195,6 +223,21 @@ def derive_result(proof_id: str, path: Path) -> str:
         finished = [item for item in messages if item.get("reason") == "build-finished"]
         if not finished:
             return "not_computed"
+        # `{"reason":"build-finished","success":true}` on its own is a one-line
+        # file anybody can write. A real check of this crate emits an artifact
+        # message for it, so the stream is required to contain one; without this
+        # the MSRV proof establishes nothing about the MSRV.
+        compiled = {
+            item.get("target", {}).get("name")
+            for item in messages
+            if item.get("reason") == "compiler-artifact"
+            and "quire-analyze" in str(item.get("package_id", ""))
+        }
+        if not compiled:
+            raise ChainError(
+                f"{path.name} contains no compiler-artifact for quire-analyze. A "
+                "build-finished line on its own is not a compilation."
+            )
         if any(
             item.get("reason") == "compiler-message"
             and item.get("message", {}).get("level") == "error"
@@ -239,6 +282,13 @@ def digest_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def pinned_toolchain(argv: list[str]) -> str | None:
+    """The rustup toolchain a declared command runs under, if it names one."""
+    if len(argv) >= 3 and argv[0] == "rustup" and argv[1] == "run":
+        return argv[2]
+    return None
+
+
 class Chain:
     """Thin wrappers over the pinned Quoin CLI. No wrapper decides anything."""
 
@@ -264,6 +314,11 @@ class Chain:
             connection["digest"] = digest_of(path)
 
         for obligation in body["definition"]["proof_obligations"]:
+            # Declaration-local fields. The declaration is deliberately richer
+            # than Quoin's record body — `accepted_results` is this repository's
+            # own gate and has no place in the sealed record, whose schema
+            # refuses fields it does not define.
+            obligation.pop("accepted_results", None)
             configuration = obligation.pop("configuration")
             path = ROOT / configuration
             if not path.is_file():
@@ -273,10 +328,36 @@ class Chain:
                 )
             obligation["configuration_digest"] = digest_of(path)
 
-        export = ASSURANCE_DIR / INPUTS["PROOF-quire-static-export"][0]
-        body["impact_snapshot"]["revision"] = self.candidate_revision
-        body["impact_snapshot"]["digest"] = digest_of(export)
+        export_path = ASSURANCE_DIR / INPUTS["PROOF-quire-static-export"][0]
+        body["impact_snapshot"].update(self.impact_snapshot(export_path))
         return body
+
+    def impact_snapshot(self, export_path: Path) -> dict[str, Any]:
+        """Read the export and say what it actually contains.
+
+        `completeness`, `truncated` and `gaps` used to be stated in the
+        declaration as `complete` / `false` / `[]` about a file nothing ever
+        opened — so an empty export sealed a record asserting a complete,
+        ungapped snapshot over `{}`. They are read here instead.
+        """
+        export = json.loads(export_path.read_text(encoding="utf-8"))
+        if not isinstance(export, dict):
+            raise ChainError("the Quire static export is not a document")
+        populated = {
+            key: value
+            for key, value in export.items()
+            if isinstance(value, (list, dict)) and value
+        }
+        gaps = sorted(key for key, value in export.items() if not value)
+        return {
+            "revision": self.candidate_revision,
+            "digest": digest_of(export_path),
+            # Quoin's enum is complete|incomplete. An export with an empty
+            # section is incomplete, and that is a fact worth sealing.
+            "completeness": "complete" if populated and not gaps else "incomplete",
+            "truncated": not populated,
+            "gaps": gaps,
+        }
 
     def seal_record(self, body: dict[str, Any]) -> str:
         completed = quoin(
@@ -306,7 +387,9 @@ class Chain:
             "command": obligation["command"],
             "tool": {
                 "identity": obligation["tool_identity"],
-                "version": tool_version(obligation["tool_identity"]),
+                "version": tool_version(
+                    obligation["tool_identity"], pinned_toolchain(obligation["command"]["argv"])
+                ),
                 "configuration_digest": obligation["configuration_digest"],
             },
             "environment": {
@@ -394,10 +477,16 @@ def run(candidate_revision: str, keep_store: bool) -> dict[str, Any]:
 
     body = chain.record_body()
     record_digest = chain.seal_record(body)
+    # Read from the projected body for the sealed fields, and from the
+    # declaration for this repository's own gate, which is never sealed.
     obligations = {
         obligation["proof_id"]: obligation
         for obligation in body["definition"]["proof_obligations"]
     }
+    for obligation in chain.declaration["record"]["definition"]["proof_obligations"]:
+        obligations[obligation["proof_id"]]["accepted_results"] = obligation[
+            "accepted_results"
+        ]
 
     # ------------------------------------------------------------------
     # The honest path. Every result is read out of the producer's bytes.
@@ -408,6 +497,8 @@ def run(candidate_revision: str, keep_store: bool) -> dict[str, Any]:
         media_type = INPUTS[proof_id][1]
         observed = derive_result(proof_id, path)
         observed_results[proof_id] = observed
+        accepted = obligations[proof_id]["accepted_results"]
+        acceptable = observed in accepted
 
         attestation = chain.attestation_body(
             record_digest, proof_id, observed, obligations[proof_id]
@@ -426,15 +517,25 @@ def run(candidate_revision: str, keep_store: bool) -> dict[str, Any]:
         retained = retained_directory / "output.bin"
         identical = retained.is_file() and retained.read_bytes() == path.read_bytes()
         selections[proof_id] = json.loads(sealed_json)["digest"]
+        # Both halves are required. Byte identity says Quoin retained what the
+        # producer wrote; acceptability says the producer established what this
+        # proof exists to establish. Checking only the first is how a run in
+        # which three proofs declared `inconclusive`, `not_computed` and
+        # `unavailable` still reported `outcome: passed` and exit 0.
         scenarios.append(
             {
                 "scenario": f"honest-{proof_id}",
                 "proof": proof_id,
-                "expected": "intake retains the exact producer bytes",
+                "expected": (
+                    f"intake retains the exact producer bytes and the result is one of "
+                    f"{accepted}"
+                ),
                 "observedResult": observed,
+                "acceptedResults": accepted,
+                "resultAcceptable": acceptable,
                 "retainedBytesIdentical": identical,
-                "matched": identical,
-                "demonstrates": observed if identical else None,
+                "matched": identical and acceptable,
+                "demonstrates": observed if identical and acceptable else None,
             }
         )
 
@@ -613,6 +714,7 @@ def run(candidate_revision: str, keep_store: bool) -> dict[str, Any]:
         "observedResults": observed_results,
         "scenarios": scenarios,
         "controls": controls,
+        "proofResultRollUp": worst(list(observed_results.values())),
         "casesMatched": len(cases) - len(mismatches),
         "casesTotal": len(cases),
         "statesDemonstrated": demonstrated,

@@ -3,7 +3,7 @@
   "purpose": "What the pinned Engineering Assurance mapping must answer for each case, stated before the run rather than read back from it.",
   "derivation_rule": "Every `derived` case is ONE named edit to the pinned release's own fixture bytes, re-derived by scripts/legacy_evidence_view.py at run time. A committed fixture that is not equal to its declared derivation is a failure, not a fixture: a hand-written blob can be made to fail for reasons that have nothing to do with the check under test.",
   "control_rule": "Every negative names the positive control it is paired with. A refusal never observed to accept anything is indistinguishable from a validator that refuses everything, and proves nothing about either.",
-  "discrimination": "Each case is separated from the others by a field the view reports — outcome, source schema version, or source record id — and not by upstream free text alone.",
+  "discrimination": "Each case is separated from the others by a field the view reports \u2014 outcome, source schema version, source record id, or a mapped state \u2014 and not by upstream free text alone. The stale case is discriminated by its mapped state, since its outcome equals its control's.",
   "cases": [
     {
       "fixture": "pgm01-v1.json",
@@ -24,7 +24,7 @@
       "kind": "derived",
       "pairs_with": "pgm01-v1.json",
       "outcome": "incompatible",
-      "why": "One edit: schemaVersion set to a version the mapping has never seen. Must be `incompatible` — the bytes parsed, so this is not `unreadable`, and an unknown schema must never be treated as empty or current."
+      "why": "One edit: schemaVersion set to a version the mapping has never seen. Must be `incompatible` \u2014 the bytes parsed, so this is not `unreadable`, and an unknown schema must never be treated as empty or current."
     },
     {
       "fixture": "derived-malformed.json",
@@ -38,7 +38,8 @@
       "kind": "derived",
       "pairs_with": "pgm01-v2.json",
       "outcome": "lossy",
-      "why": "One edit: historicalDisposition set to retracted. The record stays readable and its staleness is mapped as evidence state rather than making it disappear or read as a current pass."
+      "why": "One edit: historicalDisposition set to retracted. The outcome stays `lossy` \u2014 identical to its control, because a retracted record is still readable \u2014 so the discriminator is the mapped evidence state `stale`, which the view records from the mapper's own `mappings`. Asserting on the outcome alone would prove nothing.",
+      "demonstrates_mapped_state": "stale"
     },
     {
       "fixture": "derived-unreadable-truncated.json",

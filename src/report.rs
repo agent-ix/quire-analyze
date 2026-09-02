@@ -352,6 +352,11 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             ("analysisModelProfile", "quire.analysis-model/v1"),
             ("encodingProfile", "quire.smtlib2/v1"),
             ("logic", "QF_UF"),
+            // Pinned like the profiles above. A report produced under a
+            // different contract-IR revision was produced under different
+            // clause-digest semantics, and a bare 40-hex shape check does not
+            // notice that.
+            ("contractIrRevision", CONTRACT_IR_REVISION),
         ] {
             if object.get(field).and_then(Value::as_str) != Some(expected) {
                 return Err(format!("report {field} is absent or unsupported"));
@@ -461,6 +466,7 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
                 "engine identity",
             )?;
         }
+        let mut streams = std::collections::BTreeMap::new();
         for field in ["stdout", "stderr", "model"] {
             let encoded = engine
                 .get(format!("{field}Hex"))
@@ -474,7 +480,61 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             if sha256(&bytes) != digest {
                 return Err(format!("engine {field} digest mismatch"));
             }
+            streams.insert(field, bytes);
         }
+
+        // Re-derive the conclusion from the raw response the report retains.
+        //
+        // Checking `stdoutHex` against `stdoutSha256` only proves the record is
+        // self-consistent: an author who edits both fields together passes it.
+        // The retained bytes are the evidence for the claim, so for the three
+        // outcomes where stdout *is* that evidence the claim is re-parsed from
+        // it. Without this, a report whose stdout says `unsat` can declare `sat`
+        // and validate, and the CLI turns that into exit 0.
+        //
+        // Only the conclusive-and-unknown outcomes are re-derived. The failure
+        // outcomes are decided by process state the report also records — an
+        // exit code, a signal, a capture bound — which stdout alone cannot
+        // witness, so requiring stdout to agree with them would reject honest
+        // records.
+        if matches!(outcome, "sat" | "unsat" | "unknown") {
+            let model_bytes = engine
+                .get("limits")
+                .and_then(|limits| limits.get("modelBytes"))
+                .and_then(Value::as_u64)
+                .ok_or_else(|| "engine model byte bound is absent".to_owned())?;
+            let stdout = streams.get("stdout").expect("stdout retained above");
+            let reparsed = crate::reparse_solver_status(
+                stdout,
+                usize::try_from(model_bytes).unwrap_or(usize::MAX),
+            );
+            if reparsed != Some(outcome) {
+                return Err(format!(
+                    "engine {expected_engine} outcome {outcome} is not what its retained \
+                     stdout says"
+                ));
+            }
+        }
+    }
+
+    // Re-derive the query identity from the two inputs the report carries.
+    //
+    // `querySha256` covers the retained query bytes and `reportDigest` covers
+    // the whole payload, but neither ties `queryDigest` to what it is supposed
+    // to be a digest *of*. Both of its inputs are fields of this document, so
+    // the binding is checkable and is checked.
+    let request_digest = object
+        .get("requestDigest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "request digest is absent".to_owned())?;
+    let declared_query_digest = object
+        .get("queryDigest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "query digest is absent".to_owned())?;
+    if crate::derive_query_digest(request_digest, &query_bytes)?.as_str() != declared_query_digest {
+        return Err(
+            "query digest does not match the retained request identity and query bytes".to_owned(),
+        );
     }
     let derived = disposition_from_values(&engines[0], &engines[1])?;
     let differential = object

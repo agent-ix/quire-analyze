@@ -32,9 +32,12 @@ the chain to exit non-zero. Replace a producer document with bytes that are not
 JSON and require exit 2. Declare an outcome the adapter's table does not name and
 require exit 2.
 
-Exercise the solver-state census: every provoked condition must produce the
-outcome it was built to provoke, `sat` and `unsat` must be the only conclusive
-outcomes, and all four differential dispositions must be reachable. Validate the
+Exercise the solver-state census: every provoked condition must produce both the
+outcome AND the analysis status it was built to provoke, `sat` and `unsat` must be
+the only conclusive outcomes, no non-conclusive outcome may carry the analysis
+status of a decided analysis, and all four differential dispositions must be
+reachable. The census must publish how many of the enum's outcomes it reached out
+of how many exist, and name the ones it did not. Validate the
 authoritative differential report bytes, then require each tampered semantic
 field, tampered retained stream, stale report digest and truncated document to be
 refused.
@@ -59,3 +62,9 @@ attestation.
 The receipt reads `incomplete` with a missing decision — not valid and not
 invalid — and an engine that was not installed reaches the receipt as
 `result_unavailable`, never as passed and never as failed.
+
+
+Each proof declares the results it accepts. Only `PROOF-engine-availability` may
+be `unavailable`, because an absent pinned engine is a fact about the host rather
+than about this change. A result outside a proof's declared set is a mismatch and
+not a quieter shade of green.

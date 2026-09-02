@@ -656,6 +656,16 @@ pub fn execute_solver(
         && config.engine == SolverEngine::Z3
         && raw.exit.as_ref().and_then(ExitStatus::code) == Some(1)
         && record.stderr.is_empty()
+        // The exception exists for exactly one shape: Z3 answers a non-`sat`
+        // status, then fails the `(get-model)` the query asked for, and exits 1.
+        // Both extra conditions are load-bearing. Without `requests_model` the
+        // branch fires on queries that emit no `(get-model)` at all, where an
+        // exit of 1 can only be a real error; without the response check it
+        // accepts a bare `unsat\n` with a failed exit and no error text as
+        // conclusive. Either way a process that told us it failed would be read
+        // as a decision, which is the one thing this crate must never do.
+        && query.requests_model()
+        && is_model_unavailable_response(&record.stdout)
     {
         match parse_response(
             &record.stdout,
@@ -666,7 +676,11 @@ pub fn execute_solver(
                 record.model = model;
                 outcome
             }
-            _ => SolverOutcome::NonzeroExit,
+            // Keep the more specific non-conclusive verdict when the parse found
+            // one. Collapsing `contradictory-output` or `malformed-output` into
+            // `nonzero-exit` is fail-closed but loses which failure it was.
+            Err(outcome) => outcome,
+            Ok(_) => SolverOutcome::NonzeroExit,
         }
     } else if raw.exit.as_ref().is_some_and(|status| !status.success()) {
         if raw.exit.as_ref().and_then(exit_signal).is_some() {
@@ -1244,6 +1258,48 @@ fn parse_response(
         return Err(SolverOutcome::MalformedOutput);
     }
     Ok((outcome, tail.as_bytes().to_vec()))
+}
+
+/// Re-derive the normalized status a retained stdout stream actually carries.
+///
+/// Used by report validation to check a claimed outcome against the bytes the
+/// report retains as evidence for it. Returns `None` when the stream does not
+/// parse to a status at all, which is itself a disagreement with any claim of
+/// `sat`, `unsat` or `unknown`.
+///
+/// `requests_model` is passed as `true` so that a retained `unsat` followed by a
+/// model-unavailable error still reads as `unsat`. That is the lenient
+/// direction: it accepts honest records, and it cannot manufacture a status the
+/// bytes do not contain.
+pub(crate) fn reparse_solver_status(stdout: &[u8], model_bytes: usize) -> Option<&'static str> {
+    match parse_response(stdout, model_bytes, true) {
+        Ok((outcome, _)) => Some(outcome.as_str()),
+        Err(_) => None,
+    }
+}
+
+/// Whether a response is a non-`sat` status followed by a model-unavailable error.
+///
+/// This is the only response shape that may be read as conclusive despite a
+/// failed process exit, so it is recognised explicitly rather than inferred from
+/// `parse_response` returning `Ok`. `parse_response` answers `Ok` for a bare
+/// `unsat\n` too, and a bare `unsat` with a nonzero exit is a failed run, not an
+/// answer.
+fn is_model_unavailable_response(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let text = text.trim_start();
+    let (head, tail) = text
+        .find(char::is_whitespace)
+        .map_or((text, ""), |index| (&text[..index], &text[index..]));
+    if !matches!(head, "unsat" | "unknown") {
+        return false;
+    }
+    let tail = tail.trim();
+    tail.starts_with("(error")
+        && valid_s_expression(tail.as_bytes())
+        && model_unavailable_error(tail)
 }
 
 fn model_unavailable_error(text: &str) -> bool {

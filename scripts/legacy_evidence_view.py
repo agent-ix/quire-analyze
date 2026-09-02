@@ -9,8 +9,8 @@ makes of them, not to improve the answer.
 
 The answer for this repository is a refusal, and that is the honest result.
 `map_pgm01_bytes` reads `quire.pgm01-evidence` v1 and v2. What `evidence/` holds
-is eight Markdown validation summaries: narrative records, not JSON envelopes of
-any version. The mapping therefore answers `unreadable` for every one. No local
+is Markdown validation summaries: narrative records, not JSON envelopes of any
+version. The count is read from the census below rather than restated here. The mapping therefore answers `unreadable` for every one. No local
 mapper was written to turn that into a pass, because a mapping invented here
 would be this repository deciding what upstream evidence means. Tracked as
 `agent-ix/engineering-assurance#21`, which records 142 such envelopes across six
@@ -227,6 +227,26 @@ def view_retained(mapper: Callable[..., dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def evidence_states(view: dict[str, Any]) -> set[str]:
+    """The evidence states the mapping assigned, from its own `mappings`.
+
+    Restricted to the `evidence` concept on purpose. A legacy record also carries
+    per-command `check_result` states, and counting those as states this view
+    demonstrated would let it claim `passed` and `failed` coverage it did not
+    establish.
+
+    This is how the stale case discriminates at all: a retracted record stays
+    readable, so its `outcome` is identical to its control's, and only the mapped
+    `/historicalDisposition -> evidence.state = "stale"` tells them apart.
+    """
+    return {
+        str(mapping.get("value"))
+        for mapping in view.get("mappings", [])
+        if mapping.get("target_concept") == "evidence"
+        and mapping.get("target_field") == "state"
+    }
+
+
 def view_fixtures(mapper: Callable[..., dict[str, Any]]) -> dict[str, Any]:
     expectations = json.loads(EXPECTATIONS.read_text(encoding="utf-8"))
     derived = rederive_all()
@@ -268,6 +288,10 @@ def view_fixtures(mapper: Callable[..., dict[str, Any]]) -> dict[str, Any]:
         # the label it was aiming at.
         if matched:
             demonstrated.add(case["outcome"])
+            # A case may also demonstrate a mapped state, which is how `stale`
+            # is shown: its outcome is identical to its control's, so an outcome
+            # alone would prove the fixture changed nothing.
+            demonstrated.update(evidence_states(view))
         cases.append(
             {
                 "fixture": name,
@@ -277,8 +301,13 @@ def view_fixtures(mapper: Callable[..., dict[str, Any]]) -> dict[str, Any]:
                 "observedOutcome": observed,
                 "matched": matched,
                 "demonstrates": case["outcome"] if matched else None,
-                "sourceRecordId": view.get("record_id"),
-                "sourceSchemaVersion": view.get("schema_version"),
+                "sourceRecordId": view.get("source_record_id"),
+                "sourceSchemaVersion": view.get("source_schema_version"),
+                # The mapper surfaces staleness in `mappings`, not in `outcome`:
+                # a retracted record is still readable. Recording the mapped
+                # concept is what lets the stale case differ from its control,
+                # which by outcome alone it does not.
+                "mappedStates": sorted(evidence_states(view)),
                 "derivationDrift": drift,
             }
         )
@@ -354,15 +383,19 @@ def mutation_probes() -> list[dict[str, Any]]:
         }
     )
 
-    # A single altered byte in the retained bytes must not map as though intact.
+    # A single altered byte, checked against the digest the record was retained
+    # under, must read as a tampered source. The earlier form of this probe
+    # compared two source digests of two different inputs — which asserts that
+    # SHA-256 is a hash, not that the mapping binds an identity to anything.
     altered = bytearray(v1)
     altered[-2] = altered[-2] ^ 0x20
+    intact_digest = hashlib.sha256(v1).hexdigest()
     probes.append(
         {
-            "probe": "single-altered-byte-changes-source-identity",
-            "expects": "the mapped source digest follows the altered bytes",
-            "detected": mapper(bytes(altered))["source_digest"]
-            != mapper(v1)["source_digest"],
+            "probe": "single-altered-byte-against-its-retained-digest-is-tampered",
+            "expects": "incompatible, with no field of the altered source interpreted",
+            "detected": mapper(bytes(altered), expected_digest=intact_digest)["outcome"]
+            == "incompatible",
         }
     )
 

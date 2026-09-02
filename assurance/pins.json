@@ -48,7 +48,7 @@
     },
     {
       "id": "retained-evidence-is-not-pgm01",
-      "statement": "map_pgm01_bytes at the pinned release reads quire.pgm01-evidence v1 and v2. This repository retains eight Markdown validation-summary narratives, which are not JSON envelopes of any version, so the mapping answers `unreadable` for every one. That refusal is reported as the compatibility result; no local mapper was written to make it read as a pass.",
+      "statement": "map_pgm01_bytes at the pinned release reads quire.pgm01-evidence v1 and v2. Every record this repository retains is a Markdown validation-summary narrative, not a JSON envelope of any version, so the mapping answers `unreadable` for all of them; the count is read from the census rather than restated here. That refusal is reported as the compatibility result; no local mapper was written to make it read as a pass.",
       "tracked_as": "agent-ix/engineering-assurance#21"
     }
   ]
