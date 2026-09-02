@@ -31,7 +31,6 @@ ASSURANCE_DIR := target/assurance
 CENSUS_RESULT := $(ASSURANCE_DIR)/solver-state-census.json
 ENGINES_RESULT := $(ASSURANCE_DIR)/engine-availability.json
 PINS_RESULT := $(ASSURANCE_DIR)/shared-pins.json
-COMPAT_RESULT := $(ASSURANCE_DIR)/legacy-compatibility.json
 QUIRE_EXPORT := $(ASSURANCE_DIR)/quire-static-export.json
 MSRV_RESULT := $(ASSURANCE_DIR)/msrv.jsonl
 REVISION ?= $(shell git rev-parse HEAD)
@@ -144,7 +143,6 @@ assurance-inputs: assurance-env
 	$(CARGO) run --quiet --example solver_state_census -- --json > $(CENSUS_RESULT)
 	$(CARGO) run --quiet --example engine_availability -- --json > $(ENGINES_RESULT)
 	$(ASSURANCE_PYTHON) scripts/check_shared_pins.py --json > $(PINS_RESULT)
-	$(ASSURANCE_PYTHON) scripts/legacy_evidence_view.py --json > $(COMPAT_RESULT)
 	$(QUIRE) coverage --scope . --json > $(QUIRE_EXPORT)
 	rustup run 1.75.0 $(CARGO) check --locked --all-targets --message-format=json > $(MSRV_RESULT)
 
@@ -152,21 +150,12 @@ assurance-inputs: assurance-env
 pins: assurance-env
 	$(ASSURANCE_PYTHON) scripts/check_shared_pins.py
 
-.PHONY: compat-view
-compat-view: assurance-env
-	$(ASSURANCE_PYTHON) scripts/legacy_evidence_view.py
-	$(ASSURANCE_PYTHON) scripts/legacy_evidence_view.py --mutation-probes
-
-.PHONY: compat-fixtures
-compat-fixtures: assurance-env
-	$(ASSURANCE_PYTHON) scripts/legacy_evidence_view.py --write-fixtures
-
 .PHONY: assurance-chain
 assurance-chain: assurance-inputs
 	$(PYTHON) scripts/assurance_chain.py --candidate-revision $(REVISION)
 
 .PHONY: assurance
-assurance: pins compat-view assurance-chain
+assurance: pins assurance-chain
 
 # =============================================================================
 # Composite

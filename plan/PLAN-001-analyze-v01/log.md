@@ -28,3 +28,11 @@ title: "PLAN-001 update log"
   rename failure states, recoverable cleanup, competing-publisher coverage, stale-staging ownership,
   and subprocess termination probes. Abrupt pre-rename termination truthfully retains a private
   staging residue limitation pending review rather than claiming code ran after process death.
+- **2026-09-02** - Deleted the retained `evidence/` tree, its reader, its compatibility proof
+  obligation and its fixtures under issue #29. The authority is
+  `agent-ix/engineering-assurance#7`, whose "Preservation constraint released for the pre-stable
+  phase" section records the repository owner's decision that early-development evidence is not yet
+  something to protect. Every earlier entry above that says a record "is retained" describes what was
+  true when it was written; those records no longer exist, they were deleted rather than rewritten or
+  re-sealed, and nothing in this repository now claims they verify anything. The constraint
+  re-applies unchanged at the move toward stable releases.

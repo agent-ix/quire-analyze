@@ -1,17 +1,10 @@
 //! Requirement-backed tests for the specification and assurance foundation.
 
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::{Path, PathBuf},
-};
-
-use sha2::{Digest as _, Sha256};
+use std::collections::BTreeSet;
 
 const CARGO_MANIFEST: &str = include_str!("../Cargo.toml");
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 const MAKEFILE: &str = include_str!("../Makefile");
-const EVIDENCE_MANIFEST: &str = include_str!("../evidence/manifest.sha256");
 const MASTER_SPEC: &str = include_str!("../spec/index.md");
 const FUNCTIONAL_REQUIREMENTS: [&str; 6] = [
     include_str!("../spec/functional/FR-001-analysis-algebra.md"),
@@ -153,7 +146,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .collect();
     assert_eq!(
         complete_rows.len(),
-        32,
+        31,
         "a new complete matrix row requires an executable trace binding"
     );
     assert_eq!(
@@ -198,7 +191,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
             .iter()
             .filter(|line| line.starts_with("| FR-006 |"))
             .count(),
-        6
+        5
     );
     assert_eq!(TEST_MATRIX.matches("Coverage Status |").count(), 2);
 }
@@ -254,58 +247,4 @@ fn make_ci_has_a_closed_unsuppressed_gate_census() {
             }
         }
     }
-}
-
-/// Retained legacy records have set-equal SHA-256 coverage and no evidence authority.
-#[test]
-fn retained_evidence_is_censused_and_cannot_claim_machine_verification() {
-    fn visit(directory: &Path, files: &mut BTreeSet<PathBuf>) {
-        for entry in fs::read_dir(directory).expect("read evidence directory") {
-            let entry = entry.expect("evidence entry");
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).expect("evidence metadata");
-            assert!(
-                !metadata.file_type().is_symlink(),
-                "evidence symlink: {path:?}"
-            );
-            if metadata.is_dir() {
-                visit(&path, files);
-            } else {
-                assert!(metadata.is_file(), "unexpected evidence object: {path:?}");
-                files.insert(path);
-            }
-        }
-    }
-
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let evidence_root = root.join("evidence");
-    let manifest_path = evidence_root.join("manifest.sha256");
-    let mut observed = BTreeSet::new();
-    visit(&evidence_root, &mut observed);
-    observed.remove(&manifest_path);
-
-    let mut declared = BTreeSet::new();
-    for line in EVIDENCE_MANIFEST.lines() {
-        let (expected, relative) = line.split_once("  ").expect("checksum manifest row");
-        assert_eq!(expected.len(), 64);
-        assert!(expected.bytes().all(|byte| byte.is_ascii_hexdigit()));
-        let path = root.join(relative);
-        assert!(declared.insert(path.clone()), "duplicate manifest path");
-        let bytes = fs::read(&path).expect("manifest artifact");
-        let actual = format!("{:x}", Sha256::digest(bytes));
-        assert_eq!(actual, expected, "changed evidence artifact {relative}");
-        let text =
-            String::from_utf8(fs::read(path).expect("text evidence")).expect("UTF-8 evidence");
-        if text.contains("Producer validation attestation") {
-            assert!(text.contains("no raw command transcript"));
-            assert!(text.contains("independent review"));
-        } else {
-            assert!(text.contains("Legacy narrative only"));
-            assert!(text.contains("discharges no\n> acceptance criterion"));
-        }
-    }
-    assert_eq!(
-        observed, declared,
-        "evidence file census differs from manifest"
-    );
 }

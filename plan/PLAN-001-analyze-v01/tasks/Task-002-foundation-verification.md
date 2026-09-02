@@ -22,6 +22,7 @@ Hosted CI is manual-only and shall not be dispatched. Local success is not a hos
 
 ## Completion Evidence
 
-`evidence/foundation-d589a13/validation-summary.md` retains exact inputs, tool identities, local and
-MSRV outcomes, the initial sandbox target-directory failure, branch protection, review scope, zero
-semantic coverage, and open limitations.
+None retained. The record this task pointed at was deleted under
+`agent-ix/engineering-assurance#7`, which released the evidence-preservation constraint for the
+pre-stable phase on 2026-09-02. It is deleted rather than rewritten, and no weaker claim replaces it:
+what this task did is what its commits show, and nothing retained here attests to it.

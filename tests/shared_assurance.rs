@@ -195,7 +195,7 @@ fn attestation_results_are_read_from_producer_output() {
     let observed = report["observedResults"]
         .as_object()
         .expect("observed results object");
-    assert_eq!(observed.len(), 6, "every declared proof reports a result");
+    assert_eq!(observed.len(), 5, "every declared proof reports a result");
 
     // Each result must equal the verdict the producer's own document states, so
     // a result that was assumed rather than read cannot agree by accident.
@@ -210,9 +210,9 @@ fn attestation_results_are_read_from_producer_output() {
         "the engine attestation must state what the availability document says"
     );
     assert_eq!(
-        observed["PROOF-legacy-compatibility"],
-        producer_json("legacy-compatibility.json")["outcome"],
-        "the compatibility attestation must state what the view document says"
+        observed["PROOF-shared-pins"],
+        producer_json("shared-pins.json")["outcome"],
+        "the pin attestation must state what the pin document says"
     );
 
     // Not every result may be `passed`. A chain in which nothing can be anything
@@ -363,81 +363,22 @@ fn report_identity_accepts_the_real_bytes_and_refuses_every_tamper() {
     }
 }
 
-/// TC-012: retained evidence is read unmodified and the mapping's answer stands.
-/// Trace: TC-012, FR-006-AC-4, NFR-002-AC-3
-#[test]
-fn retained_evidence_is_read_through_the_pinned_mapping_without_being_changed() {
-    let view = producer_json("legacy-compatibility.json");
-    assert_eq!(
-        view["outcome"], "passed",
-        "the compatibility view did not match: {view}"
-    );
-
-    let retained = &view["retained"];
-    assert_eq!(
-        retained["censusMismatches"]
-            .as_array()
-            .expect("census")
-            .len(),
-        0,
-        "a retained record changed or went missing: {retained}"
-    );
-    let entries = retained["entries"].as_array().expect("entries");
-    assert!(
-        !entries.is_empty(),
-        "the retained census is empty, so it measured nothing"
-    );
-    for entry in entries {
-        assert_eq!(
-            entry["sourceDigestMatches"],
-            Value::Bool(true),
-            "the mapping changed a record's source identity: {entry}"
-        );
-        // The honest answer for this repository. It is asserted rather than
-        // tolerated, so that a future record which the mapping CAN read shows up
-        // here as a change instead of passing silently.
-        assert_eq!(
-            entry["outcome"], "unreadable",
-            "a retained record mapped to something other than the refusal this \
-             repository's Markdown records earn: {entry}"
-        );
-    }
-
-    // The fixture corpus is what shows the mapping can answer other things.
-    let fixtures = &view["fixtures"];
-    assert_eq!(
-        fixtures["casesMatched"], fixtures["casesTotal"],
-        "a compatibility fixture did not match: {fixtures}"
-    );
-    let demonstrated: BTreeSet<&str> = fixtures["statesDemonstrated"]
-        .as_array()
-        .expect("states")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect();
-    assert!(
-        demonstrated.contains("incompatible")
-            && demonstrated.contains("unreadable")
-            && demonstrated.contains("lossy"),
-        "the corpus did not separate incompatible, unreadable and a readable control: \
-         {demonstrated:?}"
-    );
-}
-
 /// TC-012: no local generic assurance machinery remains in the execution path.
 /// Trace: TC-012, FR-006-AC-6
 #[test]
 fn no_local_generic_machinery_remains() {
-    // The retained records stay; the *verifier* is what was removed. `make ci`
-    // must no longer run a repository-local evidence verifier, and no script may
-    // reference one.
+    // `make ci` must not run a repository-local evidence verifier, and no script
+    // may reference one. The retained records and their reader are gone too:
+    // engineering-assurance#7 released the preservation constraint for the
+    // pre-stable phase, so an `evidence/` tree reappearing here is a local
+    // retention store returning, not a record being preserved.
     assert!(
         !MAKEFILE.contains("verify-evidence:"),
         "a repository-local evidence verifier target is still defined"
     );
     assert!(
-        root().join("evidence/manifest.sha256").is_file(),
-        "the retained manifest was deleted; it is frozen, not removed"
+        !root().join("evidence").exists(),
+        "a local evidence retention tree is back; this repository retains nothing of its own"
     );
 
     let scripts = root().join("scripts");
@@ -455,7 +396,6 @@ fn no_local_generic_machinery_remains() {
         "assurance_chain.py",
         "check_shared_pins.py",
         "check_unsafe_comments.sh",
-        "legacy_evidence_view.py",
         "unsafe_comment_baseline.txt",
     ]);
     let names: BTreeSet<&str> = names.iter().map(String::as_str).collect();
@@ -499,7 +439,6 @@ fn a_producer_that_did_not_pass_cannot_produce_a_green_chain() {
             "solver-state-census.json",
             "engine-availability.json",
             "shared-pins.json",
-            "legacy-compatibility.json",
         ] {
             rewrite_outcome(&directory.join(name), "failed");
         }
@@ -675,10 +614,6 @@ fn adopted_pins_are_classified_upstream_and_name_no_mirror() {
     assert!(
         FR_006.contains("engineering-assurance#20"),
         "FR-006 does not record the acceptance packaging gap"
-    );
-    assert!(
-        FR_006.contains("engineering-assurance#21"),
-        "FR-006 does not record the PGM-01 mapping gap"
     );
 }
 

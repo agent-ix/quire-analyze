@@ -53,18 +53,13 @@ a producer.
   variables and checked against their pinned executable digests. When they are
   absent the real-engine differential corpus is `unavailable`: it did not run, so
   nothing about it was decided, and that is neither a pass nor a failure.
-- Retained evidence under `evidence/` is read through
-  `engineering_assurance.verification_semantics.map_pgm01_bytes` with each
-  record's committed manifest digest bound, and is never modified. The mapping's
-  answer is reported as it stands. This repository's retained records are
-  Markdown validation summaries rather than PGM-01 envelopes, so the mapping
-  refuses them as `unreadable`; no local mapper makes that read as a pass.
-  Tracked as `agent-ix/engineering-assurance#21`.
-- Every negative fixture is one named edit to the pinned release's own bytes,
-  re-derived at run time. A committed fixture that is not equal to its declared
-  derivation is a failure and not a fixture. Every negative names the positive
-  control it is paired with, and a control naming a case that did not run is
-  refused rather than passing vacuously.
+- This repository retains no evidence tree, manifest or digest oracle of its own.
+  The records it once retained were deleted under the preservation constraint
+  `agent-ix/engineering-assurance#7` released for the pre-stable phase; they are
+  deleted rather than rewritten, and no claim that they still verify anything is
+  made here in weaker form.
+- Every negative case names the positive control it is paired with, and a control
+  naming a case that did not run is refused rather than passing vacuously.
 - The published crate gains no runtime dependency on Quire, Quoin or
   engineering-assurance.
 - Hosted CI remains `workflow_dispatch` only and is not dispatched by this
@@ -77,15 +72,14 @@ a producer.
 | FR-006-AC-1 | Adopted component versions are classified by the packaged compatibility matrix rather than by a local restatement, and an unobservable component is `unknown`. | Test (TC-011) |
 | FR-006-AC-2 | Solver execution, analysis classification and differential comparison are produced by this repository's tools in a declared structured format and transcribed by Quoin without Quoin executing the producer. | Test (TC-011) |
 | FR-006-AC-3 | Static specification, obligation and coverage facts come from a Quire export, and Quire executes no producer. | Test (TC-011) |
-| FR-006-AC-4 | Retained evidence bytes are read through the pinned compatibility mapping unmodified, and the mapping's answer is reported without collapsing it into pass or fail. | Test (TC-012) |
-| FR-006-AC-5 | Every non-conclusive solver state stays distinct from a conclusion and from every other non-conclusive state across the intake path. | Test (TC-011, TC-012) |
+| FR-006-AC-5 | Every non-conclusive solver state stays distinct from a conclusion and from every other non-conclusive state across the intake path. | Test (TC-011) |
 | FR-006-AC-6 | No repository-local generic runner, envelope, manifest, identity framework, retention store, audit store or aggregate verdict remains in the execution path. | Test (TC-012) |
 
 ## Verification
 
 TC-011 verifies the intake path, producer isolation, result derivation and the
-closed outcome vocabulary. TC-012 verifies the compatibility view, the derived
-fixture corpus, the mutation probes and the absence of local generic machinery.
+closed outcome vocabulary. TC-012 verifies the absence of repository-local
+generic assurance machinery.
 
 ## Dependencies
 

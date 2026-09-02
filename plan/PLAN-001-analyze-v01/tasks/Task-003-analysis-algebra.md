@@ -27,5 +27,7 @@ ADR-0010 accepts the minimal analysis algebra, explicit cross-requirement bindin
 versioned invalidation rules. REV-004 retains the reproduced dual encoding and corpus/fixture
 measurements. TC-009 executes the identity comparison and incompatible-binding controls.
 
-The source-bound local outcomes and eight closed review findings are retained at
-`evidence/adr-0010-2690c25/validation-summary.md`.
+The source-bound local outcomes and eight closed review findings are no longer retained: that record
+was deleted under `agent-ix/engineering-assurance#7`, which released the evidence-preservation
+constraint for the pre-stable phase on 2026-09-02. It is deleted rather than rewritten, and nothing
+weaker is stated in its place.
