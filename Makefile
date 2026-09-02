@@ -47,7 +47,6 @@ help:
 	@echo "  make msrv             - Test the locked graph with Rust 1.75"
 	@echo "  make rustdoc          - Build warning-free public documentation"
 	@echo "  make coverage         - Enforce the local line-coverage floor"
-	@echo "  make verify-evidence  - Verify retained evidence checksums"
 	@echo "  make build            - Release build"
 	@echo "  make clean            - cargo clean"
 	@echo "  make deny             - cargo deny check licenses"
@@ -89,10 +88,6 @@ rustdoc:
 .PHONY: coverage
 coverage:
 	$(CARGO) llvm-cov --all-targets --locked --fail-under-lines 90
-
-.PHONY: verify-evidence
-verify-evidence:
-	sha256sum --check evidence/manifest.sha256
 
 .PHONY: build
 build:
@@ -181,4 +176,4 @@ assurance: pins compat-view assurance-chain
 # already have run. They are a prerequisite rather than something a test creates
 # for itself.
 .PHONY: ci
-ci: fmt-check lint assurance-inputs test deny audit-unsafe spec msrv rustdoc coverage verify-evidence assurance
+ci: fmt-check lint assurance-inputs test deny audit-unsafe spec msrv rustdoc coverage assurance

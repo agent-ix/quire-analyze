@@ -153,7 +153,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .collect();
     assert_eq!(
         complete_rows.len(),
-        30,
+        32,
         "a new complete matrix row requires an executable trace binding"
     );
     assert_eq!(
@@ -198,7 +198,7 @@ fn foundation_plan_advances_only_first_unblocked_child() {
             .iter()
             .filter(|line| line.starts_with("| FR-006 |"))
             .count(),
-        5
+        6
     );
     assert_eq!(TEST_MATRIX.matches("Coverage Status |").count(), 2);
 }
@@ -234,7 +234,6 @@ fn make_ci_has_a_closed_unsuppressed_gate_census() {
         "rustdoc",
         "spec",
         "test",
-        "verify-evidence",
     ]);
     assert_eq!(actual, expected);
 

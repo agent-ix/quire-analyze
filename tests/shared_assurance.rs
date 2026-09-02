@@ -20,6 +20,7 @@ use serde_json::Value;
 
 const DECLARATION: &str = include_str!("../assurance/change-assurance.json");
 const PINS: &str = include_str!("../assurance/pins.json");
+const MAKEFILE: &str = include_str!("../Makefile");
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 const FR_006: &str = include_str!("../spec/functional/FR-006-shared-assurance-intake.md");
 
@@ -373,6 +374,47 @@ fn retained_evidence_is_read_through_the_pinned_mapping_without_being_changed() 
         "the corpus did not separate incompatible, unreadable and a readable control: \
          {demonstrated:?}"
     );
+}
+
+/// TC-012: no local generic assurance machinery remains in the execution path.
+/// Trace: TC-012, FR-006-AC-6
+#[test]
+fn no_local_generic_machinery_remains() {
+    // The retained records stay; the *verifier* is what was removed. `make ci`
+    // must no longer run a repository-local evidence verifier, and no script may
+    // reference one.
+    assert!(
+        !MAKEFILE.contains("verify-evidence:"),
+        "a repository-local evidence verifier target is still defined"
+    );
+    assert!(
+        root().join("evidence/manifest.sha256").is_file(),
+        "the retained manifest was deleted; it is frozen, not removed"
+    );
+
+    let scripts = root().join("scripts");
+    let mut names = BTreeSet::new();
+    for entry in fs::read_dir(&scripts).expect("scripts directory") {
+        let path = entry.expect("script entry").path();
+        if path.is_file() {
+            names.insert(path.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    // A census, not a spot check: a new generic collector, envelope builder or
+    // verifier appearing here is the thing this migration exists to prevent.
+    for forbidden in [
+        "verify_evidence.py",
+        "build_evidence_envelope.py",
+        "collect_evidence.sh",
+        "finalize_collection.py",
+        "tool_identity.py",
+        "verify_evidence_manifest.py",
+    ] {
+        assert!(
+            !names.contains(forbidden),
+            "a generic evidence script reappeared: {forbidden}"
+        );
+    }
 }
 
 /// TC-011: the declaration states what it derives, and derives nothing else.
