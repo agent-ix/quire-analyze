@@ -1,11 +1,13 @@
 //! SMT-backed consistency and implication analysis for versioned requirement contracts.
 
 mod analysis;
+mod hybrid_synthesis;
 mod report;
 mod smt;
 mod solver;
 
 pub use analysis::*;
+pub use hybrid_synthesis::*;
 pub use report::*;
 pub use smt::*;
 pub use solver::*;
