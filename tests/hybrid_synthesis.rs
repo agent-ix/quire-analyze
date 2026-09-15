@@ -41,7 +41,7 @@ fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
         panic!("expected enclosure");
     };
     assert_eq!(enclosures.len(), 1);
-    assert_eq!(enclosures[0].mode, "run");
+    assert_eq!(enclosures[0].mode, "run".into());
     assert_eq!(
         enclosures[0].interval,
         Interval {
