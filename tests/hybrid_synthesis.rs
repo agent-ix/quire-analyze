@@ -104,6 +104,19 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
         }),
         SynthesisOutcome::Refused { .. }
     ));
+    let SynthesisOutcome::Candidate(mut tampered) = synthesize(&request) else {
+        panic!("expected candidate");
+    };
+    tampered.identity = "sha256:tampered".into();
+    assert!(matches!(
+        validate_candidate(ValidationRequest {
+            problem_identity: tampered.problem_identity.clone(),
+            candidate: tampered,
+            accepted: true,
+            evidence_identity: "validator:run:3".into(),
+        }),
+        SynthesisOutcome::Refused { .. }
+    ));
 }
 
 /// Tracing: TC-014, FR-008-AC-3.

@@ -298,6 +298,15 @@ pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
     if validation.problem_identity != validation.candidate.problem_identity
         || validation.evidence_identity.is_empty()
         || validation.candidate.terms.is_empty()
+        || validation.candidate.identity
+            != digest(
+                format!(
+                    "{}:{}",
+                    validation.candidate.problem_identity,
+                    validation.candidate.terms.join(" & ")
+                )
+                .as_bytes(),
+            )
     {
         return SynthesisOutcome::Refused {
             reason: "validation does not bind the exact candidate and problem".into(),
