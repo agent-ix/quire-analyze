@@ -27,7 +27,7 @@ fn model() -> HybridRequest {
     }
 }
 
-/// Tracing: TC-013, FR-007-AC-1, FR-007-AC-3.
+/// Trace: TC-013, FR-007-AC-1, FR-007-AC-3.
 #[test]
 fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
     let request = model();
@@ -55,7 +55,7 @@ fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
     assert!(!replay_hybrid(&changed, &witness));
 }
 
-/// Tracing: TC-013, FR-007-AC-2.
+/// Trace: TC-013, FR-007-AC-2.
 #[test]
 fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     let mut bounded = model();
@@ -66,7 +66,7 @@ fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     assert!(matches!(reach(&malformed), HybridOutcome::Refused { .. }));
 }
 
-/// Tracing: TC-014, FR-008-AC-1, FR-008-AC-2.
+/// Trace: TC-014, FR-008-AC-1, FR-008-AC-2.
 #[test]
 fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     let request = SynthesisRequest {
@@ -119,7 +119,7 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     ));
 }
 
-/// Tracing: TC-014, FR-008-AC-3.
+/// Trace: TC-014, FR-008-AC-3.
 #[test]
 fn tc_014_distinguishes_exhaustive_no_candidate_from_incomplete_search() {
     let exhaustive = SynthesisRequest {
