@@ -27,7 +27,7 @@ const PLAN: &str = include_str!("../plan/PLAN-001-analyze-v01/plan.md");
 /// Trace: NFR-002-AC-4
 #[test]
 fn foundation_keeps_license_publication_and_ci_authority_bounded() {
-    assert!(CARGO_MANIFEST.contains("license = \"MIT OR Apache-2.0\""));
+    assert!(CARGO_MANIFEST.contains("license = \"AGPL-3.0-or-later\""));
     assert!(CARGO_MANIFEST.contains("publish = false"));
     let workflow: serde_yaml::Value =
         serde_yaml::from_str(CI_WORKFLOW).expect("valid workflow YAML");
