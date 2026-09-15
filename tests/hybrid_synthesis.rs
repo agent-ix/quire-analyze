@@ -5,7 +5,8 @@
 
 use quire_analyze::{
     reach, replay_hybrid, synthesize, validate_candidate, HybridOutcome, HybridRequest,
-    HybridTransition, Interval, SynthesisOutcome, SynthesisRequest, ValidationRequest,
+    HybridTransition, Interval, SynthesisAtom, SynthesisOutcome, SynthesisRequest,
+    ValidationRequest,
 };
 
 fn model() -> HybridRequest {
@@ -140,6 +141,41 @@ fn tc_014_distinguishes_exhaustive_no_candidate_from_incomplete_search() {
     };
     assert!(matches!(
         synthesize(&incomplete),
+        SynthesisOutcome::Incomplete { .. }
+    ));
+}
+
+/// Trace: TC-014, FR-008-AC-1, FR-008-AC-3.
+#[test]
+fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
+    let single_atom = SynthesisRequest {
+        atoms: vec!["a\u{1f}b".into()],
+        required_atoms: vec!["a\u{1f}b".into()],
+        max_terms: 1,
+        search_bound: 1,
+    };
+    let split_atoms = SynthesisRequest {
+        atoms: vec!["a".into(), "b".into()],
+        required_atoms: vec!["a".into(), "b".into()],
+        max_terms: 2,
+        search_bound: 3,
+    };
+    let (SynthesisOutcome::Candidate(single), SynthesisOutcome::Candidate(split)) =
+        (synthesize(&single_atom), synthesize(&split_atoms))
+    else {
+        panic!("expected candidates");
+    };
+    assert_ne!(single.problem_identity, split.problem_identity);
+    let bounded = SynthesisRequest {
+        atoms: (0..10_000)
+            .map(|index| SynthesisAtom(format!("atom:{index}")))
+            .collect(),
+        required_atoms: vec!["missing".into()],
+        max_terms: 1,
+        search_bound: 1,
+    };
+    assert!(matches!(
+        synthesize(&bounded),
         SynthesisOutcome::Incomplete { .. }
     ));
 }

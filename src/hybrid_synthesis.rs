@@ -302,28 +302,27 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
     let mut inspected = 0usize;
     let max_terms = request.max_terms.min(atoms.len());
     for size in 1..=max_terms {
-        let mut selections = Vec::new();
-        combinations(&atoms, size, 0, &mut Vec::new(), &mut selections);
-        for terms in selections {
-            if inspected == request.search_bound {
-                return SynthesisOutcome::Incomplete {
-                    reason: "canonical candidate search bound exhausted".into(),
-                };
-            }
-            inspected = inspected.saturating_add(1);
-            if required
-                .iter()
-                .all(|required_atom| terms.binary_search(required_atom).is_ok())
-            {
+        match inspect_combinations(
+            &atoms,
+            &required,
+            size,
+            &mut inspected,
+            request.search_bound,
+        ) {
+            CombinationSearch::Candidate(terms) => {
                 let candidate = SynthesisCandidate {
-                    identity: SynthesisCandidateIdentity(digest(
-                        format!("{}:{}", identity.0, join_atoms(&terms)).as_bytes(),
-                    )),
+                    identity: candidate_identity(&identity, &terms),
                     problem_identity: identity,
                     terms,
                 };
                 return SynthesisOutcome::Candidate(candidate);
             }
+            CombinationSearch::Incomplete => {
+                return SynthesisOutcome::Incomplete {
+                    reason: "canonical candidate search bound exhausted".into(),
+                };
+            }
+            CombinationSearch::Exhausted => {}
         }
     }
     SynthesisOutcome::NoCandidate
@@ -336,14 +335,10 @@ pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
         || validation.evidence_identity.0.is_empty()
         || validation.candidate.terms.is_empty()
         || validation.candidate.identity
-            != SynthesisCandidateIdentity(digest(
-                format!(
-                    "{}:{}",
-                    validation.candidate.problem_identity.0,
-                    join_atoms(&validation.candidate.terms)
-                )
-                .as_bytes(),
-            ))
+            != candidate_identity(
+                &validation.candidate.problem_identity,
+                &validation.candidate.terms,
+            )
     {
         return SynthesisOutcome::Refused {
             reason: "validation does not bind the exact candidate and problem".into(),
@@ -404,22 +399,74 @@ fn canonical_atoms(atoms: &[SynthesisAtom]) -> Vec<SynthesisAtom> {
     canonical.dedup();
     canonical
 }
-fn combinations(
+enum CombinationSearch {
+    Candidate(Vec<SynthesisAtom>),
+    Exhausted,
+    Incomplete,
+}
+
+fn inspect_combinations(
     atoms: &[SynthesisAtom],
+    required: &[SynthesisAtom],
+    size: usize,
+    inspected: &mut usize,
+    search_bound: usize,
+) -> CombinationSearch {
+    let mut partial = Vec::with_capacity(size);
+    inspect_combination_prefix(
+        atoms,
+        required,
+        size,
+        0,
+        &mut partial,
+        inspected,
+        search_bound,
+    )
+}
+
+fn inspect_combination_prefix(
+    atoms: &[SynthesisAtom],
+    required: &[SynthesisAtom],
     remaining: usize,
     start: usize,
     partial: &mut Vec<SynthesisAtom>,
-    output: &mut Vec<Vec<SynthesisAtom>>,
-) {
+    inspected: &mut usize,
+    search_bound: usize,
+) -> CombinationSearch {
     if remaining == 0 {
-        output.push(partial.clone());
-        return;
+        if *inspected == search_bound {
+            return CombinationSearch::Incomplete;
+        }
+        *inspected = inspected.saturating_add(1);
+        return if required
+            .iter()
+            .all(|required_atom| partial.binary_search(required_atom).is_ok())
+        {
+            CombinationSearch::Candidate(partial.clone())
+        } else {
+            CombinationSearch::Exhausted
+        };
     }
     for index in start..=atoms.len().saturating_sub(remaining) {
         partial.push(atoms[index].clone());
-        combinations(atoms, remaining - 1, index + 1, partial, output);
+        match inspect_combination_prefix(
+            atoms,
+            required,
+            remaining - 1,
+            index + 1,
+            partial,
+            inspected,
+            search_bound,
+        ) {
+            CombinationSearch::Exhausted => {}
+            result => {
+                partial.pop();
+                return result;
+            }
+        }
         partial.pop();
     }
+    CombinationSearch::Exhausted
 }
 fn hybrid_identity(request: &HybridRequest) -> HybridModelIdentity {
     HybridModelIdentity(digest(format!("{:?}", request).as_bytes()))
@@ -429,24 +476,34 @@ fn synthesis_identity(
     required: &[SynthesisAtom],
     max_terms: usize,
 ) -> SynthesisProblemIdentity {
-    SynthesisProblemIdentity(digest(
-        format!(
-            "{}|{}|{max_terms}",
-            join_atoms_with(atoms, "\u{1f}"),
-            join_atoms_with(required, "\u{1f}")
-        )
-        .as_bytes(),
-    ))
+    let mut bytes = b"quire-analyze/synthesis-problem/v1".to_vec();
+    encode_atoms(&mut bytes, atoms);
+    encode_atoms(&mut bytes, required);
+    encode_text(&mut bytes, &max_terms.to_string());
+    SynthesisProblemIdentity(digest(&bytes))
 }
-fn join_atoms(atoms: &[SynthesisAtom]) -> String {
-    join_atoms_with(atoms, " & ")
+
+fn candidate_identity(
+    problem_identity: &SynthesisProblemIdentity,
+    terms: &[SynthesisAtom],
+) -> SynthesisCandidateIdentity {
+    let mut bytes = b"quire-analyze/synthesis-candidate/v1".to_vec();
+    encode_text(&mut bytes, &problem_identity.0);
+    encode_atoms(&mut bytes, terms);
+    SynthesisCandidateIdentity(digest(&bytes))
 }
-fn join_atoms_with(atoms: &[SynthesisAtom], separator: &str) -> String {
-    atoms
-        .iter()
-        .map(|atom| atom.0.as_str())
-        .collect::<Vec<_>>()
-        .join(separator)
+
+fn encode_atoms(bytes: &mut Vec<u8>, atoms: &[SynthesisAtom]) {
+    encode_text(bytes, &atoms.len().to_string());
+    for atom in atoms {
+        encode_text(bytes, &atom.0);
+    }
+}
+
+fn encode_text(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(value.len().to_string().as_bytes());
+    bytes.push(b':');
+    bytes.extend_from_slice(value.as_bytes());
 }
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
