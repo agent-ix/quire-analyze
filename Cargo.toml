@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.75"
 description = "SMT-backed consistency and implication analysis for versioned requirement contracts."
 authors = ["Peter Krenesky <kreneskyp@gmail.com>"]
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 publish = false
 repository = "https://github.com/agent-ix/quire-analyze"
 
