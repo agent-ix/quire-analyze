@@ -22,3 +22,10 @@ non-conclusion.
 | FR-007-AC-1 | A successful result contains an enclosure and its declared error bound, not a point estimate. | Test (TC-013) |
 | FR-007-AC-2 | Failed convergence, an exceeded bound, or malformed mode/guard/reset data returns incomplete, failed, or refused and never proved. | Test (TC-013) |
 | FR-007-AC-3 | A retained witness replays against the exact model and bound. | Test (TC-013) |
+
+## Dependencies
+
+- [StR-001](../stakeholder/StR-001-reviewable-analysis.md) owns the
+  deterministic bounded-analysis boundary.
+- [FR-008](./FR-008-bounded-canonical-synthesis.md) shares the typed
+  non-conclusion and independent-validation provider boundary.
