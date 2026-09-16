@@ -714,6 +714,7 @@ mod contract_tests {
         }
     }
 
+    /// Trace: TC-013, TC-014.
     #[test]
     fn binders_preserve_exact_envelope_and_refuse_wrong_method() {
         let hybrid = reach(&HybridRequest {
@@ -727,9 +728,13 @@ mod contract_tests {
             step_bound: 0,
             convergence_steps: 0,
         });
-        let bound = bind_hybrid_result(envelope(AnalyzeMethod::HybridReachability), &hybrid)
-            .expect("matching method");
-        assert_eq!(bound.outcome, AnalyzeOutcome::Enclosure);
+        let hybrid_envelope = envelope(AnalyzeMethod::HybridReachability);
+        let mut expected_hybrid = hybrid_envelope.clone();
+        expected_hybrid.outcome = AnalyzeOutcome::Enclosure;
+        assert_eq!(
+            bind_hybrid_result(hybrid_envelope, &hybrid),
+            Some(expected_hybrid)
+        );
         assert!(bind_hybrid_result(envelope(AnalyzeMethod::CanonicalSynthesis), &hybrid).is_none());
         for outcome in [
             synthesize(&SynthesisRequest {
@@ -751,9 +756,12 @@ mod contract_tests {
                 search_bound: 1,
             }),
         ] {
-            assert!(
-                bind_synthesis_result(envelope(AnalyzeMethod::CanonicalSynthesis), &outcome)
-                    .is_some()
+            let synthesis_envelope = envelope(AnalyzeMethod::CanonicalSynthesis);
+            let mut expected = synthesis_envelope.clone();
+            expected.outcome = synthesis_method_outcome(&outcome).1;
+            assert_eq!(
+                bind_synthesis_result(synthesis_envelope, &outcome),
+                Some(expected)
             );
         }
     }
