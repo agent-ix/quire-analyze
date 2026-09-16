@@ -10,6 +10,11 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
+/// Finite ceiling on caller-controlled combination depth.
+///
+/// This preserves the recursive search implementation's bounded stack use.
+const MAX_SYNTHESIS_TERMS: usize = 64;
+
 /// Exact hybrid mode identity.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ModeIdentity(pub String);
@@ -291,6 +296,7 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
     let required = canonical_atoms(&request.required_atoms);
     if request.search_bound == 0
         || request.max_terms == 0
+        || request.max_terms > MAX_SYNTHESIS_TERMS
         || atoms.iter().any(|atom| atom.0.is_empty())
         || required.iter().any(|atom| atom.0.is_empty())
     {
@@ -298,7 +304,7 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
             reason: "invalid finite synthesis bound or atom".into(),
         };
     }
-    let identity = synthesis_identity(&atoms, &required, request.max_terms);
+    let identity = synthesis_identity(&atoms, &required, request.max_terms, request.search_bound);
     let mut inspected = 0usize;
     let max_terms = request.max_terms.min(atoms.len());
     for size in 1..=max_terms {
@@ -475,11 +481,13 @@ fn synthesis_identity(
     atoms: &[SynthesisAtom],
     required: &[SynthesisAtom],
     max_terms: usize,
+    search_bound: usize,
 ) -> SynthesisProblemIdentity {
     let mut bytes = b"quire-analyze/synthesis-problem/v1".to_vec();
     encode_atoms(&mut bytes, atoms);
     encode_atoms(&mut bytes, required);
     encode_text(&mut bytes, &max_terms.to_string());
+    encode_text(&mut bytes, &search_bound.to_string());
     SynthesisProblemIdentity(digest(&bytes))
 }
 

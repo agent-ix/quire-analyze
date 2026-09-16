@@ -166,6 +166,14 @@ fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
         panic!("expected candidates");
     };
     assert_ne!(single.problem_identity, split.problem_identity);
+    let different_bound = SynthesisRequest {
+        search_bound: 2,
+        ..single_atom.clone()
+    };
+    let SynthesisOutcome::Candidate(different_bound) = synthesize(&different_bound) else {
+        panic!("expected candidate");
+    };
+    assert_ne!(single.problem_identity, different_bound.problem_identity);
     let bounded = SynthesisRequest {
         atoms: (0..10_000)
             .map(|index| SynthesisAtom(format!("atom:{index}")))
@@ -177,5 +185,17 @@ fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
     assert!(matches!(
         synthesize(&bounded),
         SynthesisOutcome::Incomplete { .. }
+    ));
+    let deep = SynthesisRequest {
+        atoms: (0..65)
+            .map(|index| SynthesisAtom(format!("deep:{index}")))
+            .collect(),
+        required_atoms: vec!["deep:0".into()],
+        max_terms: 65,
+        search_bound: 1,
+    };
+    assert!(matches!(
+        synthesize(&deep),
+        SynthesisOutcome::Refused { .. }
     ));
 }
