@@ -3,16 +3,38 @@
 
 use proptest::prelude::*;
 use quire_analyze::{
-    reach, replay_hybrid, synthesize, validate_candidate, CandidateValidator, HybridOutcome,
-    HybridRequest, HybridTransition, Interval, SynthesisAtom, SynthesisOutcome, SynthesisRequest,
-    ValidationDecision, ValidationRequest,
+    reach, replay_hybrid, synthesize, validate_candidate, CandidateValidator, HybridIncompleteCode,
+    HybridOutcome, HybridRefusalCode, HybridRequest, HybridTransition, Interval, SynthesisAtom,
+    SynthesisIncompleteCode, SynthesisOutcome, SynthesisRefusalCode, SynthesisRequest,
+    ValidationAttestation, ValidationDecision, ValidationFailureCode, ValidationRequest,
 };
 
-struct FixtureValidator(ValidationDecision);
+struct FixtureValidator(bool);
 
 impl CandidateValidator for FixtureValidator {
-    fn validate(&self, _request: &ValidationRequest) -> ValidationDecision {
-        self.0.clone()
+    fn validate(&self, request: &ValidationRequest) -> ValidationDecision {
+        let attestation = ValidationAttestation {
+            candidate_identity: request.candidate.identity.clone(),
+            problem_identity: request.problem_identity.clone(),
+            evidence_identity: "validator:run".into(),
+        };
+        if self.0 {
+            ValidationDecision::Accepted(attestation)
+        } else {
+            ValidationDecision::Rejected(attestation)
+        }
+    }
+}
+
+struct MismatchedValidator;
+
+impl CandidateValidator for MismatchedValidator {
+    fn validate(&self, request: &ValidationRequest) -> ValidationDecision {
+        ValidationDecision::Accepted(ValidationAttestation {
+            candidate_identity: "sha256:other".into(),
+            problem_identity: request.problem_identity.clone(),
+            evidence_identity: "validator:mismatch".into(),
+        })
     }
 }
 
@@ -90,10 +112,22 @@ fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
 fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     let mut bounded = model();
     bounded.step_bound = 1;
-    assert!(matches!(reach(&bounded), HybridOutcome::Incomplete { .. }));
+    assert!(matches!(
+        reach(&bounded),
+        HybridOutcome::Incomplete {
+            code: HybridIncompleteCode::StepBoundExhausted,
+            ..
+        }
+    ));
     let mut malformed = model();
     malformed.transitions[0].guard = Interval { lower: 4, upper: 3 };
-    assert!(matches!(reach(&malformed), HybridOutcome::Refused { .. }));
+    assert!(matches!(
+        reach(&malformed),
+        HybridOutcome::Refused {
+            code: HybridRefusalCode::MalformedModel,
+            ..
+        }
+    ));
 }
 
 /// Trace: TC-014, FR-008-AC-1, FR-008-AC-2.
@@ -122,9 +156,12 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
                 candidate: candidate.clone(),
                 problem_identity: candidate.problem_identity.clone(),
             },
-            &FixtureValidator(ValidationDecision::Rejected("validator:run:1".into()))
+            &FixtureValidator(false)
         ),
-        SynthesisOutcome::ValidationFailed { .. }
+        SynthesisOutcome::ValidationFailed {
+            code: ValidationFailureCode::Rejected,
+            ..
+        }
     ));
     assert!(matches!(
         validate_candidate(
@@ -132,9 +169,12 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
                 candidate,
                 problem_identity: "different-problem".into(),
             },
-            &FixtureValidator(ValidationDecision::Accepted("validator:run:2".into()))
+            &FixtureValidator(true)
         ),
-        SynthesisOutcome::Refused { .. }
+        SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
+            ..
+        }
     ));
     let SynthesisOutcome::Candidate(mut tampered) = synthesize(&request) else {
         panic!("expected candidate");
@@ -146,9 +186,28 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
                 problem_identity: tampered.problem_identity.clone(),
                 candidate: tampered,
             },
-            &FixtureValidator(ValidationDecision::Accepted("validator:run:3".into()))
+            &FixtureValidator(true)
         ),
-        SynthesisOutcome::Refused { .. }
+        SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
+            ..
+        }
+    ));
+    let SynthesisOutcome::Candidate(candidate) = synthesize(&request) else {
+        panic!("expected candidate");
+    };
+    assert!(matches!(
+        validate_candidate(
+            ValidationRequest {
+                problem_identity: candidate.problem_identity.clone(),
+                candidate,
+            },
+            &MismatchedValidator,
+        ),
+        SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
+            ..
+        }
     ));
 }
 
@@ -173,7 +232,10 @@ fn tc_014_distinguishes_exhaustive_no_candidate_from_incomplete_search() {
     };
     assert!(matches!(
         synthesize(&incomplete),
-        SynthesisOutcome::Incomplete { .. }
+        SynthesisOutcome::Incomplete {
+            code: SynthesisIncompleteCode::SearchBoundExhausted,
+            ..
+        }
     ));
 }
 
@@ -231,6 +293,35 @@ fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
     };
     assert!(matches!(
         synthesize(&deep),
-        SynthesisOutcome::Refused { .. }
+        SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidRequest,
+            ..
+        }
+    ));
+}
+
+/// Trace: TC-014, FR-008-AC-1.
+#[test]
+fn tc_014_enforces_aggregate_atom_byte_boundary() {
+    let at_limit = SynthesisRequest {
+        atoms: vec![SynthesisAtom("a".repeat(1_048_576))],
+        required_atoms: vec![],
+        max_terms: 1,
+        search_bound: 1,
+    };
+    assert!(matches!(
+        synthesize(&at_limit),
+        SynthesisOutcome::Candidate(_)
+    ));
+    let over_limit = SynthesisRequest {
+        atoms: vec![SynthesisAtom("a".repeat(1_048_577))],
+        ..at_limit
+    };
+    assert!(matches!(
+        synthesize(&over_limit),
+        SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InputTooLarge,
+            ..
+        }
     ));
 }

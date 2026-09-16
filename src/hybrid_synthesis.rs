@@ -282,9 +282,20 @@ pub struct ValidationRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ValidationDecision {
     /// The validator accepted this exact candidate with retained evidence.
-    Accepted(ValidationEvidenceIdentity),
+    Accepted(ValidationAttestation),
     /// The validator rejected this exact candidate with retained evidence.
-    Rejected(ValidationEvidenceIdentity),
+    Rejected(ValidationAttestation),
+}
+
+/// Immutable validator attestation bound to one exact candidate and problem.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationAttestation {
+    /// Exact candidate identity reviewed by the validator.
+    pub candidate_identity: SynthesisCandidateIdentity,
+    /// Exact search problem reviewed by the validator.
+    pub problem_identity: SynthesisProblemIdentity,
+    /// Immutable validation evidence identity.
+    pub evidence_identity: ValidationEvidenceIdentity,
 }
 
 /// Trust boundary for independently validating a synthesized candidate.
@@ -420,12 +431,7 @@ pub fn validate_candidate(
     validation: ValidationRequest,
     validator: &dyn CandidateValidator,
 ) -> SynthesisOutcome {
-    let decision = validator.validate(&validation);
-    let evidence_identity = match &decision {
-        ValidationDecision::Accepted(evidence) | ValidationDecision::Rejected(evidence) => evidence,
-    };
     if validation.problem_identity != validation.candidate.problem_identity
-        || evidence_identity.0.is_empty()
         || validation.candidate.terms.is_empty()
         || validation.candidate.identity
             != candidate_identity(
@@ -438,10 +444,25 @@ pub fn validate_candidate(
             reason: "validation does not bind the exact candidate and problem".into(),
         };
     }
+    let decision = validator.validate(&validation);
+    let attestation = match &decision {
+        ValidationDecision::Accepted(attestation) | ValidationDecision::Rejected(attestation) => {
+            attestation
+        }
+    };
+    if attestation.candidate_identity != validation.candidate.identity
+        || attestation.problem_identity != validation.problem_identity
+        || attestation.evidence_identity.0.is_empty()
+    {
+        return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
+            reason: "validation attestation does not bind the exact candidate and problem".into(),
+        };
+    }
     match decision {
-        ValidationDecision::Accepted(proof) => SynthesisOutcome::Validated {
+        ValidationDecision::Accepted(attestation) => SynthesisOutcome::Validated {
             candidate: validation.candidate,
-            proof,
+            proof: attestation.evidence_identity,
         },
         ValidationDecision::Rejected(_) => SynthesisOutcome::ValidationFailed {
             candidate: validation.candidate,
