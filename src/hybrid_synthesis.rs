@@ -736,6 +736,26 @@ mod contract_tests {
             Some(expected_hybrid)
         );
         assert!(bind_hybrid_result(envelope(AnalyzeMethod::CanonicalSynthesis), &hybrid).is_none());
+        let mut bounded = HybridRequest {
+            initial_mode: "m".into(),
+            transitions: vec![],
+            initial_set: Interval { lower: 0, upper: 0 },
+            horizon: 1,
+            flow_delta_lower: 0,
+            flow_delta_upper: 0,
+            error_bound: 0,
+            step_bound: 0,
+            convergence_steps: 0,
+        };
+        assert_eq!(
+            hybrid_method_outcome(&reach(&bounded)).1,
+            AnalyzeOutcome::Incomplete
+        );
+        bounded.initial_set = Interval { lower: 1, upper: 0 };
+        assert_eq!(
+            hybrid_method_outcome(&reach(&bounded)).1,
+            AnalyzeOutcome::Refused
+        );
         for (outcome, expected_outcome) in [
             (
                 synthesize(&SynthesisRequest {
@@ -772,6 +792,43 @@ mod contract_tests {
                 bind_synthesis_result(synthesis_envelope, &outcome),
                 Some(expected)
             );
+        }
+        let SynthesisOutcome::Candidate(candidate) = synthesize(&SynthesisRequest {
+            atoms: vec!["a".into()],
+            required_atoms: vec!["a".into()],
+            max_terms: 1,
+            search_bound: 1,
+        }) else {
+            panic!("candidate fixture")
+        };
+        for (outcome, expected_outcome) in [
+            (
+                SynthesisOutcome::Validated {
+                    candidate: candidate.clone(),
+                    proof: ValidationEvidenceIdentity("proof".into()),
+                },
+                AnalyzeOutcome::ValidatedCandidate,
+            ),
+            (
+                SynthesisOutcome::ValidationFailed {
+                    candidate: candidate.clone(),
+                    code: ValidationFailureCode::Rejected,
+                    reason: "rejected".into(),
+                },
+                AnalyzeOutcome::ValidationRejected,
+            ),
+            (
+                SynthesisOutcome::Refused {
+                    code: SynthesisRefusalCode::InvalidRequest,
+                    reason: "refused".into(),
+                },
+                AnalyzeOutcome::Refused,
+            ),
+        ] {
+            let source = envelope(AnalyzeMethod::CanonicalSynthesis);
+            let mut expected = source.clone();
+            expected.outcome = expected_outcome;
+            assert_eq!(bind_synthesis_result(source, &outcome), Some(expected));
         }
     }
 }
