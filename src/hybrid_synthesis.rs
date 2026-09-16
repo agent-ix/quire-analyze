@@ -10,6 +10,55 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
+/// Finite ceiling on caller-controlled combination depth.
+///
+/// This preserves the recursive search implementation's bounded stack use.
+const MAX_SYNTHESIS_TERMS: usize = 64;
+/// Maximum atoms admitted before canonicalization allocates owned input.
+const MAX_SYNTHESIS_ATOMS: usize = 4_096;
+/// Maximum UTF-8 bytes admitted across both atom collections.
+const MAX_SYNTHESIS_ATOM_BYTES: usize = 1_048_576;
+
+/// Exact hybrid mode identity.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ModeIdentity(pub String);
+
+/// Exact hybrid-model identity for witness replay.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct HybridModelIdentity(pub String);
+
+/// Canonical synthesis atom.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SynthesisAtom(pub String);
+
+/// Exact canonical synthesis search identity.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SynthesisProblemIdentity(pub String);
+
+/// Exact canonical synthesis candidate identity.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SynthesisCandidateIdentity(pub String);
+
+/// Immutable independent validation evidence identity.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ValidationEvidenceIdentity(pub String);
+
+macro_rules! string_identity {
+    ($($identity:ty),+ $(,)?) => {$(
+        impl From<&str> for $identity {
+            fn from(value: &str) -> Self { Self(value.into()) }
+        }
+    )+};
+}
+
+string_identity!(
+    ModeIdentity,
+    SynthesisAtom,
+    SynthesisProblemIdentity,
+    SynthesisCandidateIdentity,
+    ValidationEvidenceIdentity,
+);
+
 /// A closed integer interval used for initial sets, guards, and enclosures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Interval {
@@ -23,9 +72,9 @@ pub struct Interval {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HybridTransition {
     /// Source mode identity.
-    pub from_mode: String,
+    pub from_mode: ModeIdentity,
     /// Target mode identity.
-    pub to_mode: String,
+    pub to_mode: ModeIdentity,
     /// Guard interval; overlap enables a conservative transition.
     pub guard: Interval,
     /// Additive reset applied after a guard overlap.
@@ -36,7 +85,7 @@ pub struct HybridTransition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HybridRequest {
     /// Initial exact mode identity.
-    pub initial_mode: String,
+    pub initial_mode: ModeIdentity,
     /// All authored guarded/reset transitions.
     pub transitions: Vec<HybridTransition>,
     /// Initial state enclosure.
@@ -59,7 +108,7 @@ pub struct HybridRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HybridWitness {
     /// Digest of the entire exact request.
-    pub model_identity: String,
+    pub model_identity: HybridModelIdentity,
     /// Analyzed horizon.
     pub horizon: u64,
     /// Final enclosures keyed by mode identity.
@@ -70,7 +119,7 @@ pub struct HybridWitness {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModeEnclosure {
     /// Mode identity.
-    pub mode: String,
+    pub mode: ModeIdentity,
     /// Sound final reachable interval.
     pub interval: Interval,
 }
@@ -89,29 +138,46 @@ pub enum HybridOutcome {
     },
     /// The request was valid but its admitted finite analysis did not finish.
     Incomplete {
+        /// Stable non-conclusion category.
+        code: HybridIncompleteCode,
         /// Typed non-conclusion explanation.
-        reason: String,
-    },
-    /// A numerical operation could not produce an enclosure.
-    Failed {
-        /// Failure explanation.
         reason: String,
     },
     /// The model or bound was structurally invalid.
     Refused {
+        /// Stable refusal category.
+        code: HybridRefusalCode,
         /// Refusal explanation.
         reason: String,
     },
 }
 
+/// Stable non-conclusion categories for hybrid reachability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HybridIncompleteCode {
+    /// The declared finite step budget was exhausted.
+    StepBoundExhausted,
+}
+
+/// Stable refusal categories for hybrid reachability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HybridRefusalCode {
+    /// The mode, interval, flow, or transition is malformed.
+    MalformedModel,
+}
+
 /// Computes mode-sensitive sound interval enclosures for a finite horizon.
 #[must_use]
 pub fn reach(request: &HybridRequest) -> HybridOutcome {
-    if let Err(reason) = validate_hybrid(request) {
-        return HybridOutcome::Refused { reason };
+    if validate_hybrid(request).is_err() {
+        return HybridOutcome::Refused {
+            code: HybridRefusalCode::MalformedModel,
+            reason: "malformed initial mode, set, flow, guard, or transition".into(),
+        };
     }
     if request.horizon > request.step_bound || request.convergence_steps > request.step_bound {
         return HybridOutcome::Incomplete {
+            code: HybridIncompleteCode::StepBoundExhausted,
             reason: "declared hybrid step bound exhausted".into(),
         };
     }
@@ -183,9 +249,9 @@ pub fn replay_hybrid(request: &HybridRequest, witness: &HybridWitness) -> bool {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SynthesisRequest {
     /// Set-like candidate atoms.
-    pub atoms: Vec<String>,
+    pub atoms: Vec<SynthesisAtom>,
     /// Atoms every satisfying candidate must contain.
-    pub required_atoms: Vec<String>,
+    pub required_atoms: Vec<SynthesisAtom>,
     /// Maximum terms in an admissible candidate.
     pub max_terms: usize,
     /// Maximum candidates that may be inspected.
@@ -196,11 +262,11 @@ pub struct SynthesisRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SynthesisCandidate {
     /// Sorted, duplicate-free candidate terms.
-    pub terms: Vec<String>,
+    pub terms: Vec<SynthesisAtom>,
     /// Exact search-request identity.
-    pub problem_identity: String,
+    pub problem_identity: SynthesisProblemIdentity,
     /// Canonical candidate identity.
-    pub identity: String,
+    pub identity: SynthesisCandidateIdentity,
 }
 
 /// A separate independent validation input.
@@ -209,11 +275,33 @@ pub struct ValidationRequest {
     /// Candidate being checked.
     pub candidate: SynthesisCandidate,
     /// Search problem that the independent validator received.
-    pub problem_identity: String,
-    /// External validator result; discovery cannot set this value.
-    pub accepted: bool,
+    pub problem_identity: SynthesisProblemIdentity,
+}
+
+/// Externally supplied decision from an independent candidate validator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ValidationDecision {
+    /// The validator accepted this exact candidate with retained evidence.
+    Accepted(ValidationAttestation),
+    /// The validator rejected this exact candidate with retained evidence.
+    Rejected(ValidationAttestation),
+}
+
+/// Immutable validator attestation bound to one exact candidate and problem.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationAttestation {
+    /// Exact candidate identity reviewed by the validator.
+    pub candidate_identity: SynthesisCandidateIdentity,
+    /// Exact search problem reviewed by the validator.
+    pub problem_identity: SynthesisProblemIdentity,
     /// Immutable validation evidence identity.
-    pub evidence_identity: String,
+    pub evidence_identity: ValidationEvidenceIdentity,
+}
+
+/// Trust boundary for independently validating a synthesized candidate.
+pub trait CandidateValidator {
+    /// Validates the exact candidate and search problem without delegating to discovery.
+    fn validate(&self, request: &ValidationRequest) -> ValidationDecision;
 }
 
 /// A closed terminal result for bounded synthesis.
@@ -226,12 +314,14 @@ pub enum SynthesisOutcome {
         /// Candidate preserved exactly.
         candidate: SynthesisCandidate,
         /// Independent proof/evidence identity.
-        proof: String,
+        proof: ValidationEvidenceIdentity,
     },
     /// The finite candidate space was exhausted without a candidate.
     NoCandidate,
     /// The search bound ended before finite-space exhaustion.
     Incomplete {
+        /// Stable non-conclusion category.
+        code: SynthesisIncompleteCode,
         /// Non-conclusion explanation.
         reason: String,
     },
@@ -239,54 +329,97 @@ pub enum SynthesisOutcome {
     ValidationFailed {
         /// Candidate preserved for diagnosis.
         candidate: SynthesisCandidate,
+        /// Stable validation rejection category.
+        code: ValidationFailureCode,
         /// Rejection explanation.
         reason: String,
     },
     /// Input or candidate identity was malformed.
     Refused {
+        /// Stable refusal category.
+        code: SynthesisRefusalCode,
         /// Refusal explanation.
         reason: String,
     },
 }
 
+/// Stable non-conclusion categories for canonical synthesis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SynthesisIncompleteCode {
+    /// The finite candidate-inspection budget was exhausted.
+    SearchBoundExhausted,
+}
+
+/// Stable validation-rejection categories.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValidationFailureCode {
+    /// The independent validator rejected the candidate.
+    Rejected,
+}
+
+/// Stable refusal categories for canonical synthesis and validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SynthesisRefusalCode {
+    /// Bounds, atoms, or request shape are invalid.
+    InvalidRequest,
+    /// Atom count or bytes exceed the admitted resource bound.
+    InputTooLarge,
+    /// Validation does not bind the exact candidate and problem.
+    InvalidValidationBinding,
+}
+
 /// Enumerates finite canonical candidates in length then lexical order.
 #[must_use]
 pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
+    if request.atoms.len() > MAX_SYNTHESIS_ATOMS
+        || request.required_atoms.len() > MAX_SYNTHESIS_ATOMS
+        || atom_bytes(&request.atoms).saturating_add(atom_bytes(&request.required_atoms))
+            > MAX_SYNTHESIS_ATOM_BYTES
+    {
+        return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InputTooLarge,
+            reason: "synthesis atoms exceed the admitted resource bound".into(),
+        };
+    }
     let atoms = canonical_atoms(&request.atoms);
     let required = canonical_atoms(&request.required_atoms);
     if request.search_bound == 0
         || request.max_terms == 0
-        || atoms.iter().any(String::is_empty)
-        || required.iter().any(String::is_empty)
+        || request.max_terms > MAX_SYNTHESIS_TERMS
+        || atoms.iter().any(|atom| atom.0.is_empty())
+        || required.iter().any(|atom| atom.0.is_empty())
     {
         return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidRequest,
             reason: "invalid finite synthesis bound or atom".into(),
         };
     }
-    let identity = synthesis_identity(&atoms, &required, request.max_terms);
+    let identity = synthesis_identity(&atoms, &required, request.max_terms, request.search_bound);
     let mut inspected = 0usize;
     let max_terms = request.max_terms.min(atoms.len());
     for size in 1..=max_terms {
-        let mut selections = Vec::new();
-        combinations(&atoms, size, 0, &mut Vec::new(), &mut selections);
-        for terms in selections {
-            if inspected == request.search_bound {
-                return SynthesisOutcome::Incomplete {
-                    reason: "canonical candidate search bound exhausted".into(),
-                };
-            }
-            inspected = inspected.saturating_add(1);
-            if required
-                .iter()
-                .all(|required_atom| terms.binary_search(required_atom).is_ok())
-            {
+        match inspect_combinations(
+            &atoms,
+            &required,
+            size,
+            &mut inspected,
+            request.search_bound,
+        ) {
+            CombinationSearch::Candidate(terms) => {
                 let candidate = SynthesisCandidate {
-                    identity: digest(format!("{identity}:{}", terms.join(" & ")).as_bytes()),
+                    identity: candidate_identity(&identity, &terms),
                     problem_identity: identity,
                     terms,
                 };
                 return SynthesisOutcome::Candidate(candidate);
             }
+            CombinationSearch::Incomplete => {
+                return SynthesisOutcome::Incomplete {
+                    code: SynthesisIncompleteCode::SearchBoundExhausted,
+                    reason: "canonical candidate search bound exhausted".into(),
+                };
+            }
+            CombinationSearch::Exhausted => {}
         }
     }
     SynthesisOutcome::NoCandidate
@@ -294,52 +427,71 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
 
 /// Binds an independently supplied validation result to its exact candidate.
 #[must_use]
-pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
+pub fn validate_candidate(
+    validation: ValidationRequest,
+    validator: &dyn CandidateValidator,
+) -> SynthesisOutcome {
     if validation.problem_identity != validation.candidate.problem_identity
-        || validation.evidence_identity.is_empty()
         || validation.candidate.terms.is_empty()
         || validation.candidate.identity
-            != digest(
-                format!(
-                    "{}:{}",
-                    validation.candidate.problem_identity,
-                    validation.candidate.terms.join(" & ")
-                )
-                .as_bytes(),
+            != candidate_identity(
+                &validation.candidate.problem_identity,
+                &validation.candidate.terms,
             )
     {
         return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
             reason: "validation does not bind the exact candidate and problem".into(),
         };
     }
-    if validation.accepted {
-        SynthesisOutcome::Validated {
-            candidate: validation.candidate,
-            proof: validation.evidence_identity,
+    let decision = validator.validate(&validation);
+    let attestation = match &decision {
+        ValidationDecision::Accepted(attestation) | ValidationDecision::Rejected(attestation) => {
+            attestation
         }
-    } else {
-        SynthesisOutcome::ValidationFailed {
+    };
+    if attestation.candidate_identity != validation.candidate.identity
+        || attestation.problem_identity != validation.problem_identity
+        || attestation.evidence_identity.0.is_empty()
+    {
+        return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
+            reason: "validation attestation does not bind the exact candidate and problem".into(),
+        };
+    }
+    match decision {
+        ValidationDecision::Accepted(attestation) => SynthesisOutcome::Validated {
             candidate: validation.candidate,
+            proof: attestation.evidence_identity,
+        },
+        ValidationDecision::Rejected(_) => SynthesisOutcome::ValidationFailed {
+            candidate: validation.candidate,
+            code: ValidationFailureCode::Rejected,
             reason: "independent validator rejected candidate".into(),
-        }
+        },
     }
 }
 
-fn validate_hybrid(request: &HybridRequest) -> Result<(), String> {
-    if request.initial_mode.is_empty()
+fn validate_hybrid(request: &HybridRequest) -> Result<(), HybridRefusalCode> {
+    if request.initial_mode.0.is_empty()
         || !valid_interval(request.initial_set)
         || request.flow_delta_lower > request.flow_delta_upper
     {
-        return Err("malformed initial mode, set, or flow enclosure".into());
+        return Err(HybridRefusalCode::MalformedModel);
     }
     if request.transitions.iter().any(|transition| {
-        transition.from_mode.is_empty()
-            || transition.to_mode.is_empty()
+        transition.from_mode.0.is_empty()
+            || transition.to_mode.0.is_empty()
             || !valid_interval(transition.guard)
     }) {
-        return Err("malformed mode, guard, or reset transition".into());
+        return Err(HybridRefusalCode::MalformedModel);
     }
     Ok(())
+}
+fn atom_bytes(atoms: &[SynthesisAtom]) -> usize {
+    atoms
+        .iter()
+        .fold(0usize, |total, atom| total.saturating_add(atom.0.len()))
 }
 
 fn valid_interval(interval: Interval) -> bool {
@@ -348,7 +500,11 @@ fn valid_interval(interval: Interval) -> bool {
 fn overlaps(left: Interval, right: Interval) -> bool {
     left.lower <= right.upper && right.lower <= left.upper
 }
-fn join_interval(target: &mut BTreeMap<String, Interval>, mode: String, interval: Interval) {
+fn join_interval(
+    target: &mut BTreeMap<ModeIdentity, Interval>,
+    mode: ModeIdentity,
+    interval: Interval,
+) {
     target
         .entry(mode)
         .and_modify(|existing| {
@@ -357,41 +513,119 @@ fn join_interval(target: &mut BTreeMap<String, Interval>, mode: String, interval
         })
         .or_insert(interval);
 }
-fn canonical_atoms(atoms: &[String]) -> Vec<String> {
+fn canonical_atoms(atoms: &[SynthesisAtom]) -> Vec<SynthesisAtom> {
     let mut canonical = atoms.to_vec();
     canonical.sort();
     canonical.dedup();
     canonical
 }
-fn combinations(
-    atoms: &[String],
+enum CombinationSearch {
+    Candidate(Vec<SynthesisAtom>),
+    Exhausted,
+    Incomplete,
+}
+
+fn inspect_combinations(
+    atoms: &[SynthesisAtom],
+    required: &[SynthesisAtom],
+    size: usize,
+    inspected: &mut usize,
+    search_bound: usize,
+) -> CombinationSearch {
+    let mut partial = Vec::with_capacity(size);
+    inspect_combination_prefix(
+        atoms,
+        required,
+        size,
+        0,
+        &mut partial,
+        inspected,
+        search_bound,
+    )
+}
+
+fn inspect_combination_prefix(
+    atoms: &[SynthesisAtom],
+    required: &[SynthesisAtom],
     remaining: usize,
     start: usize,
-    partial: &mut Vec<String>,
-    output: &mut Vec<Vec<String>>,
-) {
+    partial: &mut Vec<SynthesisAtom>,
+    inspected: &mut usize,
+    search_bound: usize,
+) -> CombinationSearch {
     if remaining == 0 {
-        output.push(partial.clone());
-        return;
+        if *inspected == search_bound {
+            return CombinationSearch::Incomplete;
+        }
+        *inspected = inspected.saturating_add(1);
+        return if required
+            .iter()
+            .all(|required_atom| partial.binary_search(required_atom).is_ok())
+        {
+            CombinationSearch::Candidate(partial.clone())
+        } else {
+            CombinationSearch::Exhausted
+        };
     }
     for index in start..=atoms.len().saturating_sub(remaining) {
         partial.push(atoms[index].clone());
-        combinations(atoms, remaining - 1, index + 1, partial, output);
+        match inspect_combination_prefix(
+            atoms,
+            required,
+            remaining - 1,
+            index + 1,
+            partial,
+            inspected,
+            search_bound,
+        ) {
+            CombinationSearch::Exhausted => {}
+            result => {
+                partial.pop();
+                return result;
+            }
+        }
         partial.pop();
     }
+    CombinationSearch::Exhausted
 }
-fn hybrid_identity(request: &HybridRequest) -> String {
-    digest(format!("{:?}", request).as_bytes())
+fn hybrid_identity(request: &HybridRequest) -> HybridModelIdentity {
+    HybridModelIdentity(digest(format!("{:?}", request).as_bytes()))
 }
-fn synthesis_identity(atoms: &[String], required: &[String], max_terms: usize) -> String {
-    digest(
-        format!(
-            "{}|{}|{max_terms}",
-            atoms.join("\u{1f}"),
-            required.join("\u{1f}")
-        )
-        .as_bytes(),
-    )
+fn synthesis_identity(
+    atoms: &[SynthesisAtom],
+    required: &[SynthesisAtom],
+    max_terms: usize,
+    search_bound: usize,
+) -> SynthesisProblemIdentity {
+    let mut bytes = b"quire-analyze/synthesis-problem/v1".to_vec();
+    encode_atoms(&mut bytes, atoms);
+    encode_atoms(&mut bytes, required);
+    encode_text(&mut bytes, &max_terms.to_string());
+    encode_text(&mut bytes, &search_bound.to_string());
+    SynthesisProblemIdentity(digest(&bytes))
+}
+
+fn candidate_identity(
+    problem_identity: &SynthesisProblemIdentity,
+    terms: &[SynthesisAtom],
+) -> SynthesisCandidateIdentity {
+    let mut bytes = b"quire-analyze/synthesis-candidate/v1".to_vec();
+    encode_text(&mut bytes, &problem_identity.0);
+    encode_atoms(&mut bytes, terms);
+    SynthesisCandidateIdentity(digest(&bytes))
+}
+
+fn encode_atoms(bytes: &mut Vec<u8>, atoms: &[SynthesisAtom]) {
+    encode_text(bytes, &atoms.len().to_string());
+    for atom in atoms {
+        encode_text(bytes, &atom.0);
+    }
+}
+
+fn encode_text(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(value.len().to_string().as_bytes());
+    bytes.push(b':');
+    bytes.extend_from_slice(value.as_bytes());
 }
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
