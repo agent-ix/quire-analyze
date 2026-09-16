@@ -29,10 +29,10 @@ completion.
 
 | ID | Severity | Summary | Refs |
 | --- | --- | --- | --- |
-| FND-001 | high | `synthesize` builds every combination for a size before inspecting `search_bound`; caller-controlled atom sets can allocate exponentially before the declared bound takes effect. | `src/hybrid_synthesis.rs:258-260`, `src/hybrid_synthesis.rs:367-380` |
-| FND-002 | high | `synthesis_identity` excludes `search_bound`, so requests with distinct conclusion semantics receive the same problem identity. | `src/hybrid_synthesis.rs:270`, `src/hybrid_synthesis.rs:392-402` |
+| FND-001 | high | `synthesize` builds every combination for a size before inspecting `search_bound`; caller-controlled atom sets can allocate exponentially before the declared bound takes effect. | `src/hybrid_synthesis.rs:269-272`, `src/hybrid_synthesis.rs:367-380` |
+| FND-002 | high | `synthesis_identity` excludes `search_bound`, so requests with distinct conclusion semantics receive the same problem identity. | `src/hybrid_synthesis.rs:266`, `src/hybrid_synthesis.rs:386-394` |
 | FND-003 | high | `ValidationRequest.accepted` and `evidence_identity` are caller-supplied; no validator trust seam or attestation binds the asserted decision to the candidate/problem. | `src/hybrid_synthesis.rs:213-216`, `src/hybrid_synthesis.rs:303-335` |
-| FND-004 | medium | TC-013 and TC-014 use unrecognized prose `Tracing:` comments rather than compiler-checked tracking markers, leaving FR-007 and FR-008 unbacked in mechanical coverage. | `tests/hybrid_synthesis.rs` |
+| FND-004 | medium | TC-013 and TC-014 use unrecognized prose `Tracing:` comments rather than Quire-recognized tracking syntax, leaving FR-007 and FR-008 unbacked in mechanical coverage. | `tests/hybrid_synthesis.rs` |
 
 ## Coverage
 
