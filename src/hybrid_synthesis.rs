@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome};
+use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome, AnalyzeResult};
 use sha2::{Digest, Sha256};
 
 /// Finite ceiling on caller-controlled combination depth.
@@ -394,6 +394,32 @@ pub const fn synthesis_method_outcome(
         SynthesisOutcome::Refused { .. } => AnalyzeOutcome::Refused,
     };
     (AnalyzeMethod::CanonicalSynthesis, terminal)
+}
+
+/// Binds a native hybrid outcome into the exact shared result envelope.
+#[must_use]
+pub fn bind_hybrid_result(
+    mut result: AnalyzeResult,
+    outcome: &HybridOutcome,
+) -> Option<AnalyzeResult> {
+    let (method, terminal) = hybrid_method_outcome(outcome);
+    (result.method == method).then(|| {
+        result.outcome = terminal;
+        result
+    })
+}
+
+/// Binds a native synthesis outcome into the exact shared result envelope.
+#[must_use]
+pub fn bind_synthesis_result(
+    mut result: AnalyzeResult,
+    outcome: &SynthesisOutcome,
+) -> Option<AnalyzeResult> {
+    let (method, terminal) = synthesis_method_outcome(outcome);
+    (result.method == method).then(|| {
+        result.outcome = terminal;
+        result
+    })
 }
 
 /// Enumerates finite canonical candidates in length then lexical order.

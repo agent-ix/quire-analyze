@@ -32,3 +32,58 @@ pub enum AnalyzeOutcome {
     /// The provider refused malformed input.
     Refused,
 }
+
+macro_rules! exact_identity {
+    ($($identity:ident),+ $(,)?) => {$(
+        /// Exact immutable identity retained in an Analyze result envelope.
+        #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+        pub struct $identity(pub String);
+    )+};
+}
+
+exact_identity!(
+    ProviderRevision,
+    AnalyzeSubjectIdentity,
+    AnalyzeRunIdentity,
+    AnalyzeRequestIdentity,
+    AnalyzeImplementationIdentity,
+    AnalyzeToolchainIdentity,
+    AnalyzeOptionsIdentity,
+    AnalyzeAssumptionsIdentity,
+    AnalyzeBoundsIdentity,
+    AnalyzeContentIdentity,
+    AnalyzeResultIdentity,
+);
+
+/// Exact producer result shared by Analyze and Verification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalyzeResult {
+    /// Shared terminal method-result contract version.
+    pub contract_version: String,
+    /// Revision that produced this result.
+    pub provider_revision: ProviderRevision,
+    /// Exact provider method.
+    pub method: AnalyzeMethod,
+    /// Typed terminal outcome.
+    pub outcome: AnalyzeOutcome,
+    /// Exact semantic subject identity.
+    pub subject_identity: AnalyzeSubjectIdentity,
+    /// Exact provider run identity.
+    pub run_identity: AnalyzeRunIdentity,
+    /// Exact resolved method request identity.
+    pub request_identity: AnalyzeRequestIdentity,
+    /// Exact Analyze implementation identity.
+    pub implementation_identity: AnalyzeImplementationIdentity,
+    /// Exact producer toolchain identity.
+    pub toolchain_identity: AnalyzeToolchainIdentity,
+    /// Exact resolved method-options identity.
+    pub options_identity: AnalyzeOptionsIdentity,
+    /// Exact resolved assumptions identity.
+    pub assumptions_identity: AnalyzeAssumptionsIdentity,
+    /// Exact resolved semantic-bounds identity.
+    pub bounds_identity: AnalyzeBoundsIdentity,
+    /// Exact immutable outcome/witness content identity.
+    pub content_identity: AnalyzeContentIdentity,
+    /// Immutable result/artifact identity.
+    pub result_identity: AnalyzeResultIdentity,
+}
