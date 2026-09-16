@@ -14,37 +14,32 @@ relationships:
 
 ## Summary
 
-Reviewed the bounded hybrid/synthesis implementation added for Analyze #33
-against FR-007, FR-008, TC-013, TC-014, and the required AP-001 code-review
-operation. Focused tests, formatting, and strict Clippy pass; two type-model
-findings remain before this review can be a clean pass.
+Reviewed the hybrid/synthesis implementation at this PR's exact revision
+against FR-007, FR-008, TC-013, TC-014, and AP-001. The review found three
+blocking contract defects in bounded synthesis and independent validation.
 
 ## Verdict
 
-**CONDITIONAL.** The implementation correctly separates enclosures,
-non-conclusions, candidates, and validation. It must replace identity-bearing
-raw strings and either produce or remove the terminal `Failed` state before a
-final task-completion claim.
+**FAIL.** The implementation eagerly allocates unbounded combinations, omits
+the search bound from the synthesis identity, and lets a caller forge an
+"independent" validation decision. These must be corrected before task
+completion.
 
 ## Findings
 
 | ID | Severity | Summary | Refs |
 | --- | --- | --- | --- |
-| FND-001 | medium | Hybrid modes, witness identities, provider evidence identities, and synthesis atoms are raw `String` fields. A caller can swap a mode/identity at construction with no compiler signal, contrary to the Rust-review newtype guidance. | `src/hybrid_synthesis.rs:28`, `src/hybrid_synthesis.rs:59`, `src/hybrid_synthesis.rs:198` |
-| FND-002 | medium | `HybridOutcome::Failed` is public but no reachable path produces it. A numerical-enclosure failure cannot be distinguished from refusal/incomplete despite the closed outcome contract. | `src/hybrid_synthesis.rs:91`, `src/hybrid_synthesis.rs:106` |
-| FND-003 | low | No source or test stub, unsafe block, debug output, request-path panic, unchecked integer cast, test-only production branch, clock dependency, or unbounded provider loop was found in the reviewed subset. | `src/hybrid_synthesis.rs`, `tests/hybrid_synthesis.rs` |
+| FND-001 | high | `synthesize` builds every combination for a size before inspecting `search_bound`; caller-controlled atom sets can allocate exponentially before the declared bound takes effect. | `src/hybrid_synthesis.rs:258-260`, `src/hybrid_synthesis.rs:367-380` |
+| FND-002 | high | `synthesis_identity` excludes `search_bound`, so requests with distinct conclusion semantics receive the same problem identity. | `src/hybrid_synthesis.rs:270`, `src/hybrid_synthesis.rs:392-402` |
+| FND-003 | high | `ValidationRequest.accepted` and `evidence_identity` are caller-supplied; no validator trust seam or attestation binds the asserted decision to the candidate/problem. | `src/hybrid_synthesis.rs:213-216`, `src/hybrid_synthesis.rs:303-335` |
+| FND-004 | medium | TC-013 and TC-014 use unrecognized prose `Tracing:` comments rather than compiler-checked tracking markers, leaving FR-007 and FR-008 unbacked in mechanical coverage. | `tests/hybrid_synthesis.rs` |
 
 ## Coverage
 
-- FR-007 AC-1/2/3 are exercised by TC-013: mode/guard/reset enclosure,
-  malformed/bound exhaustion, and exact replay.
-- FR-008 AC-1/2/3 are exercised by TC-014: canonical ordering/identity,
-  independent validation/tamper refusal, and exhaustive no-candidate versus
-  incomplete bounded search.
-- `make fmt-check`, `make lint`, and `cargo test --test hybrid_synthesis`
-  passed after the #33 remediation (4 tests).
-- This review makes no source-release, production-readiness, or consuming
-  qualification claim.
+- The test cases exercise portions of both requirements but their prose trace
+  comments do not back Test Matrix rows.
+- No production readiness, release input, or human decision was used as a
+  development gate in this review.
 
 Native `quoin write` is affected by the tracked module-fetch regression;
 npm Quoin 0.23.1 rendered the authoring contract. Quire validation remains the
