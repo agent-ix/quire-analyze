@@ -736,29 +736,38 @@ mod contract_tests {
             Some(expected_hybrid)
         );
         assert!(bind_hybrid_result(envelope(AnalyzeMethod::CanonicalSynthesis), &hybrid).is_none());
-        for outcome in [
-            synthesize(&SynthesisRequest {
-                atoms: vec!["a".into()],
-                required_atoms: vec!["a".into()],
-                max_terms: 1,
-                search_bound: 1,
-            }),
-            synthesize(&SynthesisRequest {
-                atoms: vec!["a".into()],
-                required_atoms: vec!["missing".into()],
-                max_terms: 1,
-                search_bound: 1,
-            }),
-            synthesize(&SynthesisRequest {
-                atoms: vec!["a".into(), "b".into()],
-                required_atoms: vec!["b".into()],
-                max_terms: 2,
-                search_bound: 1,
-            }),
+        for (outcome, expected_outcome) in [
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into()],
+                    required_atoms: vec!["a".into()],
+                    max_terms: 1,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::Candidate,
+            ),
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into()],
+                    required_atoms: vec!["missing".into()],
+                    max_terms: 1,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::NoCandidate,
+            ),
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into(), "b".into()],
+                    required_atoms: vec!["b".into()],
+                    max_terms: 2,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::Incomplete,
+            ),
         ] {
             let synthesis_envelope = envelope(AnalyzeMethod::CanonicalSynthesis);
             let mut expected = synthesis_envelope.clone();
-            expected.outcome = synthesis_method_outcome(&outcome).1;
+            expected.outcome = expected_outcome;
             assert_eq!(
                 bind_synthesis_result(synthesis_envelope, &outcome),
                 Some(expected)
