@@ -684,3 +684,77 @@ fn encode_text(bytes: &mut Vec<u8>, value: &str) {
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use quire_analyze_method_contract::{
+        AnalyzeAssumptionsIdentity, AnalyzeBoundsIdentity, AnalyzeContentIdentity,
+        AnalyzeImplementationIdentity, AnalyzeOptionsIdentity, AnalyzeRequestIdentity,
+        AnalyzeResultIdentity, AnalyzeRunIdentity, AnalyzeSubjectIdentity,
+        AnalyzeToolchainIdentity, ProviderRevision, METHOD_RESULT_VERSION,
+    };
+
+    fn envelope(method: AnalyzeMethod) -> AnalyzeResult {
+        AnalyzeResult {
+            contract_version: METHOD_RESULT_VERSION.into(),
+            provider_revision: ProviderRevision("rev".into()),
+            method,
+            outcome: AnalyzeOutcome::Failed,
+            subject_identity: AnalyzeSubjectIdentity("subject".into()),
+            run_identity: AnalyzeRunIdentity("run".into()),
+            request_identity: AnalyzeRequestIdentity("request".into()),
+            implementation_identity: AnalyzeImplementationIdentity("implementation".into()),
+            toolchain_identity: AnalyzeToolchainIdentity("toolchain".into()),
+            options_identity: AnalyzeOptionsIdentity("options".into()),
+            assumptions_identity: AnalyzeAssumptionsIdentity("assumptions".into()),
+            bounds_identity: AnalyzeBoundsIdentity("bounds".into()),
+            content_identity: AnalyzeContentIdentity("content".into()),
+            result_identity: AnalyzeResultIdentity("result".into()),
+        }
+    }
+
+    #[test]
+    fn binders_preserve_exact_envelope_and_refuse_wrong_method() {
+        let hybrid = reach(&HybridRequest {
+            initial_mode: "m".into(),
+            transitions: vec![],
+            initial_set: Interval { lower: 0, upper: 0 },
+            horizon: 0,
+            flow_delta_lower: 0,
+            flow_delta_upper: 0,
+            error_bound: 0,
+            step_bound: 0,
+            convergence_steps: 0,
+        });
+        let bound = bind_hybrid_result(envelope(AnalyzeMethod::HybridReachability), &hybrid)
+            .expect("matching method");
+        assert_eq!(bound.outcome, AnalyzeOutcome::Enclosure);
+        assert!(bind_hybrid_result(envelope(AnalyzeMethod::CanonicalSynthesis), &hybrid).is_none());
+        for outcome in [
+            synthesize(&SynthesisRequest {
+                atoms: vec!["a".into()],
+                required_atoms: vec!["a".into()],
+                max_terms: 1,
+                search_bound: 1,
+            }),
+            synthesize(&SynthesisRequest {
+                atoms: vec!["a".into()],
+                required_atoms: vec!["missing".into()],
+                max_terms: 1,
+                search_bound: 1,
+            }),
+            synthesize(&SynthesisRequest {
+                atoms: vec!["a".into(), "b".into()],
+                required_atoms: vec!["b".into()],
+                max_terms: 2,
+                search_bound: 1,
+            }),
+        ] {
+            assert!(
+                bind_synthesis_result(envelope(AnalyzeMethod::CanonicalSynthesis), &outcome)
+                    .is_some()
+            );
+        }
+    }
+}
