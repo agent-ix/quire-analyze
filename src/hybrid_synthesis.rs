@@ -14,6 +14,10 @@ use sha2::{Digest, Sha256};
 ///
 /// This preserves the recursive search implementation's bounded stack use.
 const MAX_SYNTHESIS_TERMS: usize = 64;
+/// Maximum atoms admitted before canonicalization allocates owned input.
+const MAX_SYNTHESIS_ATOMS: usize = 4_096;
+/// Maximum UTF-8 bytes admitted across both atom collections.
+const MAX_SYNTHESIS_ATOM_BYTES: usize = 1_048_576;
 
 /// Exact hybrid mode identity.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -134,24 +138,46 @@ pub enum HybridOutcome {
     },
     /// The request was valid but its admitted finite analysis did not finish.
     Incomplete {
+        /// Stable non-conclusion category.
+        code: HybridIncompleteCode,
         /// Typed non-conclusion explanation.
         reason: String,
     },
     /// The model or bound was structurally invalid.
     Refused {
+        /// Stable refusal category.
+        code: HybridRefusalCode,
         /// Refusal explanation.
         reason: String,
     },
 }
 
+/// Stable non-conclusion categories for hybrid reachability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HybridIncompleteCode {
+    /// The declared finite step budget was exhausted.
+    StepBoundExhausted,
+}
+
+/// Stable refusal categories for hybrid reachability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HybridRefusalCode {
+    /// The mode, interval, flow, or transition is malformed.
+    MalformedModel,
+}
+
 /// Computes mode-sensitive sound interval enclosures for a finite horizon.
 #[must_use]
 pub fn reach(request: &HybridRequest) -> HybridOutcome {
-    if let Err(reason) = validate_hybrid(request) {
-        return HybridOutcome::Refused { reason };
+    if validate_hybrid(request).is_err() {
+        return HybridOutcome::Refused {
+            code: HybridRefusalCode::MalformedModel,
+            reason: "malformed initial mode, set, flow, guard, or transition".into(),
+        };
     }
     if request.horizon > request.step_bound || request.convergence_steps > request.step_bound {
         return HybridOutcome::Incomplete {
+            code: HybridIncompleteCode::StepBoundExhausted,
             reason: "declared hybrid step bound exhausted".into(),
         };
     }
@@ -272,6 +298,8 @@ pub enum SynthesisOutcome {
     NoCandidate,
     /// The search bound ended before finite-space exhaustion.
     Incomplete {
+        /// Stable non-conclusion category.
+        code: SynthesisIncompleteCode,
         /// Non-conclusion explanation.
         reason: String,
     },
@@ -279,19 +307,58 @@ pub enum SynthesisOutcome {
     ValidationFailed {
         /// Candidate preserved for diagnosis.
         candidate: SynthesisCandidate,
+        /// Stable validation rejection category.
+        code: ValidationFailureCode,
         /// Rejection explanation.
         reason: String,
     },
     /// Input or candidate identity was malformed.
     Refused {
+        /// Stable refusal category.
+        code: SynthesisRefusalCode,
         /// Refusal explanation.
         reason: String,
     },
 }
 
+/// Stable non-conclusion categories for canonical synthesis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SynthesisIncompleteCode {
+    /// The finite candidate-inspection budget was exhausted.
+    SearchBoundExhausted,
+}
+
+/// Stable validation-rejection categories.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValidationFailureCode {
+    /// The independent validator rejected the candidate.
+    Rejected,
+}
+
+/// Stable refusal categories for canonical synthesis and validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SynthesisRefusalCode {
+    /// Bounds, atoms, or request shape are invalid.
+    InvalidRequest,
+    /// Atom count or bytes exceed the admitted resource bound.
+    InputTooLarge,
+    /// Validation does not bind the exact candidate and problem.
+    InvalidValidationBinding,
+}
+
 /// Enumerates finite canonical candidates in length then lexical order.
 #[must_use]
 pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
+    if request.atoms.len() > MAX_SYNTHESIS_ATOMS
+        || request.required_atoms.len() > MAX_SYNTHESIS_ATOMS
+        || atom_bytes(&request.atoms).saturating_add(atom_bytes(&request.required_atoms))
+            > MAX_SYNTHESIS_ATOM_BYTES
+    {
+        return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InputTooLarge,
+            reason: "synthesis atoms exceed the admitted resource bound".into(),
+        };
+    }
     let atoms = canonical_atoms(&request.atoms);
     let required = canonical_atoms(&request.required_atoms);
     if request.search_bound == 0
@@ -301,6 +368,7 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
         || required.iter().any(|atom| atom.0.is_empty())
     {
         return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidRequest,
             reason: "invalid finite synthesis bound or atom".into(),
         };
     }
@@ -325,6 +393,7 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
             }
             CombinationSearch::Incomplete => {
                 return SynthesisOutcome::Incomplete {
+                    code: SynthesisIncompleteCode::SearchBoundExhausted,
                     reason: "canonical candidate search bound exhausted".into(),
                 };
             }
@@ -347,6 +416,7 @@ pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
             )
     {
         return SynthesisOutcome::Refused {
+            code: SynthesisRefusalCode::InvalidValidationBinding,
             reason: "validation does not bind the exact candidate and problem".into(),
         };
     }
@@ -358,26 +428,32 @@ pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
     } else {
         SynthesisOutcome::ValidationFailed {
             candidate: validation.candidate,
+            code: ValidationFailureCode::Rejected,
             reason: "independent validator rejected candidate".into(),
         }
     }
 }
 
-fn validate_hybrid(request: &HybridRequest) -> Result<(), String> {
+fn validate_hybrid(request: &HybridRequest) -> Result<(), HybridRefusalCode> {
     if request.initial_mode.0.is_empty()
         || !valid_interval(request.initial_set)
         || request.flow_delta_lower > request.flow_delta_upper
     {
-        return Err("malformed initial mode, set, or flow enclosure".into());
+        return Err(HybridRefusalCode::MalformedModel);
     }
     if request.transitions.iter().any(|transition| {
         transition.from_mode.0.is_empty()
             || transition.to_mode.0.is_empty()
             || !valid_interval(transition.guard)
     }) {
-        return Err("malformed mode, guard, or reset transition".into());
+        return Err(HybridRefusalCode::MalformedModel);
     }
     Ok(())
+}
+fn atom_bytes(atoms: &[SynthesisAtom]) -> usize {
+    atoms
+        .iter()
+        .fold(0usize, |total, atom| total.saturating_add(atom.0.len()))
 }
 
 fn valid_interval(interval: Interval) -> bool {

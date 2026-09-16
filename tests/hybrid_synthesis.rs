@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 
-#![allow(missing_docs)]
-
 use quire_analyze::{
     reach, replay_hybrid, synthesize, validate_candidate, HybridOutcome, HybridRequest,
     HybridTransition, Interval, SynthesisAtom, SynthesisOutcome, SynthesisRequest,
@@ -184,7 +182,10 @@ fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
     };
     assert!(matches!(
         synthesize(&bounded),
-        SynthesisOutcome::Incomplete { .. }
+        SynthesisOutcome::Refused {
+            code: quire_analyze::SynthesisRefusalCode::InputTooLarge,
+            ..
+        }
     ));
     let deep = SynthesisRequest {
         atoms: (0..65)
