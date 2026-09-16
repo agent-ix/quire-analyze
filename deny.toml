@@ -16,6 +16,7 @@ confidence-threshold = 0.9
 # third-party allow-list stays permissive-only.
 exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "quire-analyze" },
+    { allow = ["AGPL-3.0-or-later"], crate = "quire-analyze-method-contract" },
     { allow = ["AGPL-3.0-or-later"], crate = "quire-contract-ir" },
 ]
 

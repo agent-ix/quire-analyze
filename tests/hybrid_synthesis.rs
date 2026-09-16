@@ -3,11 +3,13 @@
 
 use proptest::prelude::*;
 use quire_analyze::{
-    reach, replay_hybrid, synthesize, validate_candidate, CandidateValidator, HybridIncompleteCode,
-    HybridOutcome, HybridRefusalCode, HybridRequest, HybridTransition, Interval, SynthesisAtom,
-    SynthesisIncompleteCode, SynthesisOutcome, SynthesisRefusalCode, SynthesisRequest,
-    ValidationAttestation, ValidationDecision, ValidationFailureCode, ValidationRequest,
+    hybrid_method_outcome, reach, replay_hybrid, synthesis_method_outcome, synthesize,
+    validate_candidate, CandidateValidator, HybridIncompleteCode, HybridOutcome, HybridRefusalCode,
+    HybridRequest, HybridTransition, Interval, SynthesisAtom, SynthesisIncompleteCode,
+    SynthesisOutcome, SynthesisRefusalCode, SynthesisRequest, ValidationAttestation,
+    ValidationDecision, ValidationFailureCode, ValidationRequest,
 };
+use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome};
 
 struct FixtureValidator(bool);
 
@@ -84,6 +86,10 @@ fn model() -> HybridRequest {
 fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
     let request = model();
     let outcome = reach(&request);
+    assert_eq!(
+        hybrid_method_outcome(&outcome),
+        (AnalyzeMethod::HybridReachability, AnalyzeOutcome::Enclosure)
+    );
     let HybridOutcome::Enclosure {
         enclosures,
         witness,
@@ -112,8 +118,16 @@ fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
 fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     let mut bounded = model();
     bounded.step_bound = 1;
+    let bounded_outcome = reach(&bounded);
+    assert_eq!(
+        hybrid_method_outcome(&bounded_outcome),
+        (
+            AnalyzeMethod::HybridReachability,
+            AnalyzeOutcome::Incomplete
+        )
+    );
     assert!(matches!(
-        reach(&bounded),
+        bounded_outcome,
         HybridOutcome::Incomplete {
             code: HybridIncompleteCode::StepBoundExhausted,
             ..
@@ -121,8 +135,13 @@ fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     ));
     let mut malformed = model();
     malformed.transitions[0].guard = Interval { lower: 4, upper: 3 };
+    let malformed_outcome = reach(&malformed);
+    assert_eq!(
+        hybrid_method_outcome(&malformed_outcome),
+        (AnalyzeMethod::HybridReachability, AnalyzeOutcome::Refused)
+    );
     assert!(matches!(
-        reach(&malformed),
+        malformed_outcome,
         HybridOutcome::Refused {
             code: HybridRefusalCode::MalformedModel,
             ..
@@ -149,6 +168,10 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     else {
         panic!("expected candidates");
     };
+    assert_eq!(
+        synthesis_method_outcome(&SynthesisOutcome::Candidate(candidate.clone())),
+        (AnalyzeMethod::CanonicalSynthesis, AnalyzeOutcome::Candidate)
+    );
     assert_eq!(candidate, other);
     assert!(matches!(
         validate_candidate(

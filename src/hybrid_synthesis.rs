@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome, AnalyzeResult};
 use sha2::{Digest, Sha256};
 
 /// Finite ceiling on caller-controlled combination depth.
@@ -368,6 +369,59 @@ pub enum SynthesisRefusalCode {
     InvalidValidationBinding,
 }
 
+/// Maps a native hybrid terminal outcome to the shared provider contract.
+#[must_use]
+pub const fn hybrid_method_outcome(outcome: &HybridOutcome) -> (AnalyzeMethod, AnalyzeOutcome) {
+    let terminal = match outcome {
+        HybridOutcome::Enclosure { .. } => AnalyzeOutcome::Enclosure,
+        HybridOutcome::Incomplete { .. } => AnalyzeOutcome::Incomplete,
+        HybridOutcome::Refused { .. } => AnalyzeOutcome::Refused,
+    };
+    (AnalyzeMethod::HybridReachability, terminal)
+}
+
+/// Maps a native synthesis terminal outcome to the shared provider contract.
+#[must_use]
+pub const fn synthesis_method_outcome(
+    outcome: &SynthesisOutcome,
+) -> (AnalyzeMethod, AnalyzeOutcome) {
+    let terminal = match outcome {
+        SynthesisOutcome::Candidate(_) => AnalyzeOutcome::Candidate,
+        SynthesisOutcome::Validated { .. } => AnalyzeOutcome::ValidatedCandidate,
+        SynthesisOutcome::NoCandidate => AnalyzeOutcome::NoCandidate,
+        SynthesisOutcome::Incomplete { .. } => AnalyzeOutcome::Incomplete,
+        SynthesisOutcome::ValidationFailed { .. } => AnalyzeOutcome::ValidationRejected,
+        SynthesisOutcome::Refused { .. } => AnalyzeOutcome::Refused,
+    };
+    (AnalyzeMethod::CanonicalSynthesis, terminal)
+}
+
+/// Binds a native hybrid outcome into the exact shared result envelope.
+#[must_use]
+pub fn bind_hybrid_result(
+    mut result: AnalyzeResult,
+    outcome: &HybridOutcome,
+) -> Option<AnalyzeResult> {
+    let (method, terminal) = hybrid_method_outcome(outcome);
+    (result.method == method).then(|| {
+        result.outcome = terminal;
+        result
+    })
+}
+
+/// Binds a native synthesis outcome into the exact shared result envelope.
+#[must_use]
+pub fn bind_synthesis_result(
+    mut result: AnalyzeResult,
+    outcome: &SynthesisOutcome,
+) -> Option<AnalyzeResult> {
+    let (method, terminal) = synthesis_method_outcome(outcome);
+    (result.method == method).then(|| {
+        result.outcome = terminal;
+        result
+    })
+}
+
 /// Enumerates finite canonical candidates in length then lexical order.
 #[must_use]
 pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
@@ -629,4 +683,152 @@ fn encode_text(bytes: &mut Vec<u8>, value: &str) {
 }
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use quire_analyze_method_contract::{
+        AnalyzeAssumptionsIdentity, AnalyzeBoundsIdentity, AnalyzeContentIdentity,
+        AnalyzeImplementationIdentity, AnalyzeOptionsIdentity, AnalyzeRequestIdentity,
+        AnalyzeResultIdentity, AnalyzeRunIdentity, AnalyzeSubjectIdentity,
+        AnalyzeToolchainIdentity, ProviderRevision, METHOD_RESULT_VERSION,
+    };
+
+    fn envelope(method: AnalyzeMethod) -> AnalyzeResult {
+        AnalyzeResult {
+            contract_version: METHOD_RESULT_VERSION.into(),
+            provider_revision: ProviderRevision("rev".into()),
+            method,
+            outcome: AnalyzeOutcome::Failed,
+            subject_identity: AnalyzeSubjectIdentity("subject".into()),
+            run_identity: AnalyzeRunIdentity("run".into()),
+            request_identity: AnalyzeRequestIdentity("request".into()),
+            implementation_identity: AnalyzeImplementationIdentity("implementation".into()),
+            toolchain_identity: AnalyzeToolchainIdentity("toolchain".into()),
+            options_identity: AnalyzeOptionsIdentity("options".into()),
+            assumptions_identity: AnalyzeAssumptionsIdentity("assumptions".into()),
+            bounds_identity: AnalyzeBoundsIdentity("bounds".into()),
+            content_identity: AnalyzeContentIdentity("content".into()),
+            result_identity: AnalyzeResultIdentity("result".into()),
+        }
+    }
+
+    /// Trace: TC-013, TC-014.
+    #[test]
+    fn binders_preserve_exact_envelope_and_refuse_wrong_method() {
+        let hybrid = reach(&HybridRequest {
+            initial_mode: "m".into(),
+            transitions: vec![],
+            initial_set: Interval { lower: 0, upper: 0 },
+            horizon: 0,
+            flow_delta_lower: 0,
+            flow_delta_upper: 0,
+            error_bound: 0,
+            step_bound: 0,
+            convergence_steps: 0,
+        });
+        let hybrid_envelope = envelope(AnalyzeMethod::HybridReachability);
+        let mut expected_hybrid = hybrid_envelope.clone();
+        expected_hybrid.outcome = AnalyzeOutcome::Enclosure;
+        assert_eq!(
+            bind_hybrid_result(hybrid_envelope, &hybrid),
+            Some(expected_hybrid)
+        );
+        assert!(bind_hybrid_result(envelope(AnalyzeMethod::CanonicalSynthesis), &hybrid).is_none());
+        let mut bounded = HybridRequest {
+            initial_mode: "m".into(),
+            transitions: vec![],
+            initial_set: Interval { lower: 0, upper: 0 },
+            horizon: 1,
+            flow_delta_lower: 0,
+            flow_delta_upper: 0,
+            error_bound: 0,
+            step_bound: 0,
+            convergence_steps: 0,
+        };
+        assert_eq!(
+            hybrid_method_outcome(&reach(&bounded)).1,
+            AnalyzeOutcome::Incomplete
+        );
+        bounded.initial_set = Interval { lower: 1, upper: 0 };
+        assert_eq!(
+            hybrid_method_outcome(&reach(&bounded)).1,
+            AnalyzeOutcome::Refused
+        );
+        for (outcome, expected_outcome) in [
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into()],
+                    required_atoms: vec!["a".into()],
+                    max_terms: 1,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::Candidate,
+            ),
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into()],
+                    required_atoms: vec!["missing".into()],
+                    max_terms: 1,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::NoCandidate,
+            ),
+            (
+                synthesize(&SynthesisRequest {
+                    atoms: vec!["a".into(), "b".into()],
+                    required_atoms: vec!["b".into()],
+                    max_terms: 2,
+                    search_bound: 1,
+                }),
+                AnalyzeOutcome::Incomplete,
+            ),
+        ] {
+            let synthesis_envelope = envelope(AnalyzeMethod::CanonicalSynthesis);
+            let mut expected = synthesis_envelope.clone();
+            expected.outcome = expected_outcome;
+            assert_eq!(
+                bind_synthesis_result(synthesis_envelope, &outcome),
+                Some(expected)
+            );
+        }
+        let SynthesisOutcome::Candidate(candidate) = synthesize(&SynthesisRequest {
+            atoms: vec!["a".into()],
+            required_atoms: vec!["a".into()],
+            max_terms: 1,
+            search_bound: 1,
+        }) else {
+            panic!("candidate fixture")
+        };
+        for (outcome, expected_outcome) in [
+            (
+                SynthesisOutcome::Validated {
+                    candidate: candidate.clone(),
+                    proof: ValidationEvidenceIdentity("proof".into()),
+                },
+                AnalyzeOutcome::ValidatedCandidate,
+            ),
+            (
+                SynthesisOutcome::ValidationFailed {
+                    candidate: candidate.clone(),
+                    code: ValidationFailureCode::Rejected,
+                    reason: "rejected".into(),
+                },
+                AnalyzeOutcome::ValidationRejected,
+            ),
+            (
+                SynthesisOutcome::Refused {
+                    code: SynthesisRefusalCode::InvalidRequest,
+                    reason: "refused".into(),
+                },
+                AnalyzeOutcome::Refused,
+            ),
+        ] {
+            let source = envelope(AnalyzeMethod::CanonicalSynthesis);
+            let mut expected = source.clone();
+            expected.outcome = expected_outcome;
+            assert_eq!(bind_synthesis_result(source, &outcome), Some(expected));
+        }
+    }
 }
