@@ -13,6 +13,10 @@ repository = "https://github.com/agent-ix/quire-analyze"
 name = "quire_analyze"
 path = "src/lib.rs"
 
+[workspace]
+members = [".", "crates/method-contract"]
+resolver = "2"
+
 [dependencies]
 jsonschema = { version = "=0.17.1", default-features = false }
 libc = "=0.2.189"
@@ -20,6 +24,7 @@ quire-contract-ir = { git = "https://github.com/agent-ix/quire-contract-ir", rev
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "=0.10.9"
+quire-analyze-method-contract = { path = "crates/method-contract", version = "=0.1.0" }
 
 [dev-dependencies]
 proptest = "1.8.0"

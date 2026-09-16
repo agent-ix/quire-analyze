@@ -609,12 +609,17 @@ dependencies = [
  "jsonschema",
  "libc",
  "proptest",
+ "quire-analyze-method-contract",
  "quire-contract-ir",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
 ]
+
+[[package]]
+name = "quire-analyze-method-contract"
+version = "0.1.0"
 
 [[package]]
 name = "quire-contract-ir"

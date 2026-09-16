@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome};
 use sha2::{Digest, Sha256};
 
 /// Finite ceiling on caller-controlled combination depth.
@@ -366,6 +367,33 @@ pub enum SynthesisRefusalCode {
     InputTooLarge,
     /// Validation does not bind the exact candidate and problem.
     InvalidValidationBinding,
+}
+
+/// Maps a native hybrid terminal outcome to the shared provider contract.
+#[must_use]
+pub const fn hybrid_method_outcome(outcome: &HybridOutcome) -> (AnalyzeMethod, AnalyzeOutcome) {
+    let terminal = match outcome {
+        HybridOutcome::Enclosure { .. } => AnalyzeOutcome::Enclosure,
+        HybridOutcome::Incomplete { .. } => AnalyzeOutcome::Incomplete,
+        HybridOutcome::Refused { .. } => AnalyzeOutcome::Refused,
+    };
+    (AnalyzeMethod::HybridReachability, terminal)
+}
+
+/// Maps a native synthesis terminal outcome to the shared provider contract.
+#[must_use]
+pub const fn synthesis_method_outcome(
+    outcome: &SynthesisOutcome,
+) -> (AnalyzeMethod, AnalyzeOutcome) {
+    let terminal = match outcome {
+        SynthesisOutcome::Candidate(_) => AnalyzeOutcome::Candidate,
+        SynthesisOutcome::Validated { .. } => AnalyzeOutcome::ValidatedCandidate,
+        SynthesisOutcome::NoCandidate => AnalyzeOutcome::NoCandidate,
+        SynthesisOutcome::Incomplete { .. } => AnalyzeOutcome::Incomplete,
+        SynthesisOutcome::ValidationFailed { .. } => AnalyzeOutcome::ValidationRejected,
+        SynthesisOutcome::Refused { .. } => AnalyzeOutcome::Refused,
+    };
+    (AnalyzeMethod::CanonicalSynthesis, terminal)
 }
 
 /// Enumerates finite canonical candidates in length then lexical order.
