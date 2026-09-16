@@ -276,10 +276,21 @@ pub struct ValidationRequest {
     pub candidate: SynthesisCandidate,
     /// Search problem that the independent validator received.
     pub problem_identity: SynthesisProblemIdentity,
-    /// External validator result; discovery cannot set this value.
-    pub accepted: bool,
-    /// Immutable validation evidence identity.
-    pub evidence_identity: ValidationEvidenceIdentity,
+}
+
+/// Externally supplied decision from an independent candidate validator.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ValidationDecision {
+    /// The validator accepted this exact candidate with retained evidence.
+    Accepted(ValidationEvidenceIdentity),
+    /// The validator rejected this exact candidate with retained evidence.
+    Rejected(ValidationEvidenceIdentity),
+}
+
+/// Trust boundary for independently validating a synthesized candidate.
+pub trait CandidateValidator {
+    /// Validates the exact candidate and search problem without delegating to discovery.
+    fn validate(&self, request: &ValidationRequest) -> ValidationDecision;
 }
 
 /// A closed terminal result for bounded synthesis.
@@ -405,9 +416,16 @@ pub fn synthesize(request: &SynthesisRequest) -> SynthesisOutcome {
 
 /// Binds an independently supplied validation result to its exact candidate.
 #[must_use]
-pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
+pub fn validate_candidate(
+    validation: ValidationRequest,
+    validator: &dyn CandidateValidator,
+) -> SynthesisOutcome {
+    let decision = validator.validate(&validation);
+    let evidence_identity = match &decision {
+        ValidationDecision::Accepted(evidence) | ValidationDecision::Rejected(evidence) => evidence,
+    };
     if validation.problem_identity != validation.candidate.problem_identity
-        || validation.evidence_identity.0.is_empty()
+        || evidence_identity.0.is_empty()
         || validation.candidate.terms.is_empty()
         || validation.candidate.identity
             != candidate_identity(
@@ -420,17 +438,16 @@ pub fn validate_candidate(validation: ValidationRequest) -> SynthesisOutcome {
             reason: "validation does not bind the exact candidate and problem".into(),
         };
     }
-    if validation.accepted {
-        SynthesisOutcome::Validated {
+    match decision {
+        ValidationDecision::Accepted(proof) => SynthesisOutcome::Validated {
             candidate: validation.candidate,
-            proof: validation.evidence_identity,
-        }
-    } else {
-        SynthesisOutcome::ValidationFailed {
+            proof,
+        },
+        ValidationDecision::Rejected(_) => SynthesisOutcome::ValidationFailed {
             candidate: validation.candidate,
             code: ValidationFailureCode::Rejected,
             reason: "independent validator rejected candidate".into(),
-        }
+        },
     }
 }
 

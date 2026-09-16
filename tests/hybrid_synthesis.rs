@@ -1,11 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 
+use proptest::prelude::*;
 use quire_analyze::{
-    reach, replay_hybrid, synthesize, validate_candidate, HybridOutcome, HybridRequest,
-    HybridTransition, Interval, SynthesisAtom, SynthesisOutcome, SynthesisRequest,
-    ValidationRequest,
+    reach, replay_hybrid, synthesize, validate_candidate, CandidateValidator, HybridOutcome,
+    HybridRequest, HybridTransition, Interval, SynthesisAtom, SynthesisOutcome, SynthesisRequest,
+    ValidationDecision, ValidationRequest,
 };
+
+struct FixtureValidator(ValidationDecision);
+
+impl CandidateValidator for FixtureValidator {
+    fn validate(&self, _request: &ValidationRequest) -> ValidationDecision {
+        self.0.clone()
+    }
+}
+
+proptest! {
+    /// Trace: TC-014, FR-008-AC-1.
+    #[test]
+    fn tc_014_canonicalizes_arbitrary_finite_set_like_inputs(
+        atoms in prop::collection::vec("[a-z]{1,4}", 1..32)
+    ) {
+        let request = SynthesisRequest {
+            atoms: atoms.iter().cloned().map(SynthesisAtom).collect(),
+            required_atoms: vec![],
+            max_terms: 1,
+            search_bound: 1,
+        };
+        let mut reordered = atoms;
+        reordered.reverse();
+        let reordered = SynthesisRequest {
+            atoms: reordered.into_iter().map(SynthesisAtom).collect(),
+            ..request.clone()
+        };
+        prop_assert_eq!(synthesize(&request), synthesize(&reordered));
+    }
+}
 
 fn model() -> HybridRequest {
     HybridRequest {
@@ -86,21 +117,23 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     };
     assert_eq!(candidate, other);
     assert!(matches!(
-        validate_candidate(ValidationRequest {
-            candidate: candidate.clone(),
-            problem_identity: candidate.problem_identity.clone(),
-            accepted: false,
-            evidence_identity: "validator:run:1".into()
-        }),
+        validate_candidate(
+            ValidationRequest {
+                candidate: candidate.clone(),
+                problem_identity: candidate.problem_identity.clone(),
+            },
+            &FixtureValidator(ValidationDecision::Rejected("validator:run:1".into()))
+        ),
         SynthesisOutcome::ValidationFailed { .. }
     ));
     assert!(matches!(
-        validate_candidate(ValidationRequest {
-            candidate,
-            problem_identity: "different-problem".into(),
-            accepted: true,
-            evidence_identity: "validator:run:2".into()
-        }),
+        validate_candidate(
+            ValidationRequest {
+                candidate,
+                problem_identity: "different-problem".into(),
+            },
+            &FixtureValidator(ValidationDecision::Accepted("validator:run:2".into()))
+        ),
         SynthesisOutcome::Refused { .. }
     ));
     let SynthesisOutcome::Candidate(mut tampered) = synthesize(&request) else {
@@ -108,12 +141,13 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     };
     tampered.identity = "sha256:tampered".into();
     assert!(matches!(
-        validate_candidate(ValidationRequest {
-            problem_identity: tampered.problem_identity.clone(),
-            candidate: tampered,
-            accepted: true,
-            evidence_identity: "validator:run:3".into(),
-        }),
+        validate_candidate(
+            ValidationRequest {
+                problem_identity: tampered.problem_identity.clone(),
+                candidate: tampered,
+            },
+            &FixtureValidator(ValidationDecision::Accepted("validator:run:3".into()))
+        ),
         SynthesisOutcome::Refused { .. }
     ));
 }
