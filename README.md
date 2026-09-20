@@ -1,5 +1,7 @@
 # Quire Analyze
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/6qsdhSPE)
+
 SMT-backed consistency and implication analysis for versioned requirement contracts.
 
 ## Build
