@@ -2,6 +2,16 @@
 
 SMT-backed consistency and implication analysis for versioned requirement contracts.
 
+## Hash / digest / pin antipattern: present, slated for removal
+
+This repository still contains hashes, digests, SHAs, pins, checksum catalogs and
+records that track files, versions or tools. That is an antipattern and it is slated
+for removal. Do not introduce any new use of it. When you touch code or specs that
+contain one, remove it as part of the change. The only hash that stays is a canonical
+identity digest that binds a proof to the exact content it proved. Package versions
+live in Cargo.toml / package.json and their lockfiles only; reports name the app
+version they ran.
+
 ## Commands
 
 ```bash
@@ -21,9 +31,6 @@ make ci             # every local gate, including the shared assurance lane
 ```bash
 make assurance-env      # build .venv-assurance from requirements-assurance.txt
 make assurance-inputs   # THE ONLY TARGET THAT RUNS A PRODUCER
-make pins               # classify the installed toolchain against the upstream matrix
-make assurance-chain    # quoin seal / intake / receipt over already-produced bytes
-make assurance          # pins + assurance-chain
 ```
 
 Everything downstream of `assurance-inputs` consumes files and refuses to create
@@ -37,13 +44,9 @@ never reaches.
 
 ## Safety scaffolding
 
-Backported from `agent-ix/ecaz`:
-
-- `clippy.toml` pins MSRV to `1.75` and caps cognitive complexity / arg count
 - `deny.toml` allow-lists licenses and denies unknown registries/git sources
 - `scripts/check_unsafe_comments.sh` runs in CI and locally via `make audit-unsafe`. Every `unsafe {` block must have a `// SAFETY:` comment within the 3 preceding lines, or be listed in `scripts/unsafe_comment_baseline.txt`. Update the baseline with `bash scripts/check_unsafe_comments.sh --update-baseline`.
 - `rustfmt.toml` uses 100-char width and `StdExternalCrate` import grouping. CI fails on drift.
-- `rust-toolchain.toml` pins to stable + rustfmt + clippy.
 
 ## Layout
 
