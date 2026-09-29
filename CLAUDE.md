@@ -23,24 +23,8 @@ make build          # release build
 make clean          # cargo clean
 make deny           # cargo deny check licenses
 make audit-unsafe   # check that every unsafe block has a // SAFETY: comment
-make ci             # every local gate, including the shared assurance lane
+make ci             # every local gate
 ```
-
-## Shared assurance (issue #25)
-
-```bash
-make assurance-env      # build .venv-assurance from requirements-assurance.txt
-make assurance-inputs   # THE ONLY TARGET THAT RUNS A PRODUCER
-```
-
-Everything downstream of `assurance-inputs` consumes files and refuses to create
-them. Quire exports and never executes a producer; Quoin transcribes and never
-executes one. See `assurance/README.md`.
-
-The Python here runs in `.venv-assurance` and nowhere else: `engineering-assurance`
-declares `jsonschema>=4.23,<5`, and a Draft 7 interpreter imports it and appears
-to work because the paths needing a 4.x validator are the ones a refusing record
-never reaches.
 
 ## Safety scaffolding
 
