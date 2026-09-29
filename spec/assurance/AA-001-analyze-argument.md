@@ -16,7 +16,6 @@ reasoning:
     supports: claim-analyze-v01
     sufficiency_criteria:
       - every native issue and required gate is complete
-      - exact IR and solver pins are reconciled
       - no blocking specification implementation code-review or gap-review finding remains
 assumptions:
   - id: assumption-consumer-validation

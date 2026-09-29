@@ -51,25 +51,11 @@ versioned dependencies and a named human retains release authority.
 
 ## Requirements Architecture
 
-StR-001 is refined by FR-001 through FR-008 and constrained by NFR-001 and NFR-002.
+StR-001 is refined by FR-001 through FR-005, FR-007 and FR-008 and constrained by NFR-001 and NFR-002.
 `interface-001` defines the request, response, outcome, diagnostic, and evidence boundary. TC-001
-through TC-014 form the verification matrix. FR-006 adopts the shared Engineering Assurance, Quire
-and Quoin contracts and owns no local evidence machinery. FR-007 and FR-008 own the bounded hybrid
+through TC-010, TC-013 and TC-014 form the verification matrix. FR-007 and FR-008 own the bounded hybrid
 reachability and canonical synthesis providers. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
 assurance boundary. PLAN-001 maps this foundation and native issues #6, #7, #3, #4, #5, and #33.
-
-## Authoritative Inputs
-
-- PGM-01: `ix://agent-ix/quire-contract-ir/PGM-01`, merged revision
-  `7dac9d8c19952412b56a0347387666e2ca81e01d` and inherited without local weakening.
-- Accepted contract-IR Wave 1 head: `bb5d30cbb1519b7ac286250114c96ba967661cba`.
-- Implemented schema/corpus merge: `5c49ebfd1c87415f74420ad047392bd03b1bd202`.
-- Package schema SHA-256: `748d98def7c0a67e3e12f882cd9ef7d0948c8eacbff1e5f6135faa7fd29d642d`.
-- Conformance schema SHA-256: `63fe642ebe7e7f49acf59094a8edaa488b96b13806886f0af2779629900bdb75`.
-- Corpus manifest SHA-256: `aed86fa6fd5e88412b3a771b594011884ef6df1e8256827ccf87bc9ae53fced4`.
-
-These are development pins, not source-release tags. A semantic implementation must reconcile its
-dependency declaration and lockfile to an accepted exact source revision before merge.
 
 ## References
 

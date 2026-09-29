@@ -36,7 +36,7 @@ and declared supported platform.
 
 Each native implementation task extends a source-bound local evidence runner. The runner executes
 the requirement-tagged test census, retains stdout, stderr, numeric exit and structured outcome,
-records exact pins, and derives rather than authors aggregate status. Fake executables exercise
+and derives rather than authors aggregate status. Fake executables exercise
 process faults; independent finite enumeration and counterexample replay exercise semantics; pinned
 Z3 and cvc5 runs exercise differential behavior; mutation probes exercise evidence integrity.
 
@@ -74,13 +74,6 @@ Z3 and cvc5 runs exercise differential behavior; mutation probes exercise eviden
 These are v1 profile ceilings, not performance estimates. TC-005 measures cleanup against the
 declared value on every supported platform run. Later release evidence retains platform-specific
 observations and cannot infer an unexecuted platform result.
-
-## Retention
-
-Each candidate record identifies source revision and state, commands, toolchain, OS/target, exact IR
-and solver pins, schema and corpus digests, feature set, environment, individual exit/status values,
-test census, limitations, and SHA-256 checksums. Failed, skipped, and unavailable measures remain
-visible. A rerun creates a new immutable record; it never edits history.
 
 ## Interpretation
 

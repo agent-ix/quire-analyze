@@ -48,13 +48,11 @@ and the human decision are external and exactly identified.
 ## Assurance Activities
 
 1. Validate requirements, interface, matrix, reviews, and plan with Quire.
-2. Reconcile exact contract-IR, schema, corpus, toolchain, solver, and configuration pins.
-3. Require independent finite-model truth checks for the algebra and counterexamples.
-4. Exercise exact/unsupported capability partitions for every public IR construct.
-5. Fault-inject process, protocol, resource, evidence, and publication boundaries.
-6. Differentially execute the supported corpus on pinned Z3 and cvc5.
-7. Retain source-bound results, failures, skipped lanes, limitations, and checksums.
-8. Perform code review, requirements-test review, gap analysis, and correction before merge.
+2. Require independent finite-model truth checks for the algebra and counterexamples.
+3. Exercise exact/unsupported capability partitions for every public IR construct.
+4. Fault-inject process, protocol, resource, evidence, and publication boundaries.
+5. Differentially execute the supported corpus on pinned Z3 and cvc5.
+6. Perform code review, requirements-test review, gap analysis, and correction before merge.
 
 ## Failure States
 

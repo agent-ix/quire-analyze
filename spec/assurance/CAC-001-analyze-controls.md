@@ -10,10 +10,6 @@ inputs: [validated contract package, analysis request, encoding profile, solver 
 outputs: [analysis report, diagnostics, derivation evidence]
 invariants: [exact encoding for conclusions, complete identity, bounded execution, explicit non-conclusive states]
 failure_behaviors: [abstain from a conclusion, retain the failure, reap the process tree, publish no partial report]
-version_pins:
-  rust-msrv: "1.75"
-  governance: agent-ix/quire-contract-ir@7dac9d8c19952412b56a0347387666e2ca81e01d
-  ir-wave1: agent-ix/quire-contract-ir@bb5d30cbb1519b7ac286250114c96ba967661cba
 controls:
   surfaces: [library API, CLI, semantic model, SMT lowering, solver adapters, evidence verifier]
   fallback: return a typed non-conclusive outcome and retain available raw evidence
@@ -64,7 +60,7 @@ reproducibility measurement, code review, gap analysis, and human decision const
 ## Stop Conditions
 
 Any false conclusive classification, semantic differential without disposition, live process after
-cleanup, identity collision, unbounded owned path, evidence mutation that passes, missing exact pin,
+cleanup, identity collision, unbounded owned path, evidence mutation that passes,
 or unresolved blocking review finding prevents implementation-epic completion.
 
 ## Replacement

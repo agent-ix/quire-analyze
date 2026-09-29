@@ -5,7 +5,6 @@ Cargo.lock.bak
 .DS_Store
 .idea/
 .vscode/
-/.venv-assurance
 __pycache__/
 *.pyc
 
