@@ -26,7 +26,7 @@ a regression signal, not proof of containment or protocol correctness.
   larger than a typical pipe;
 - three timeout and three cancellation process-tree cleanup repetitions with all durations retained,
   zero surviving child/descendant PIDs, and a 4 ms observed maximum against the 1,000 ms limit;
-- deterministic normalized outcomes, immutable query/result boundaries, documentation,
+- deterministic normalized outcomes, immutable query/result boundaries, Rust 1.75, documentation,
   lint, supply-chain, unsafe-comment, specification, coverage, and evidence-integrity gates.
 
 ## Residual Test Gaps

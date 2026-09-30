@@ -26,7 +26,7 @@ report, matrix, and plan. This is producer review, not independent approval or a
 
 The TC-009 test uses no new dependency, parses a committed ten-field fixture, exhaustively evaluates
 all 55 unordered pairs, and separately probes incompatible kind, type, and observation/point cases.
-Its fixed expected counts make changes to fixture labels or candidate keys visible.
+Its fixed expected counts make changes to fixture labels or candidate keys visible. Rust 1.75,
 Clippy warnings-as-errors, formatting, documentation, license, and unsafe-code gates pass.
 
 The test's ADR/report string assertions are structural guards, not a proof that the architecture is
