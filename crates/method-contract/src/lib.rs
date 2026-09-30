@@ -42,12 +42,9 @@ macro_rules! exact_identity {
 }
 
 exact_identity!(
-    ProviderRevision,
     AnalyzeSubjectIdentity,
     AnalyzeRunIdentity,
     AnalyzeRequestIdentity,
-    AnalyzeImplementationIdentity,
-    AnalyzeToolchainIdentity,
     AnalyzeOptionsIdentity,
     AnalyzeAssumptionsIdentity,
     AnalyzeBoundsIdentity,
@@ -60,8 +57,6 @@ exact_identity!(
 pub struct AnalyzeResult {
     /// Shared terminal method-result contract version.
     pub contract_version: String,
-    /// Revision that produced this result.
-    pub provider_revision: ProviderRevision,
     /// Exact provider method.
     pub method: AnalyzeMethod,
     /// Typed terminal outcome.
@@ -72,10 +67,6 @@ pub struct AnalyzeResult {
     pub run_identity: AnalyzeRunIdentity,
     /// Exact resolved method request identity.
     pub request_identity: AnalyzeRequestIdentity,
-    /// Exact Analyze implementation identity.
-    pub implementation_identity: AnalyzeImplementationIdentity,
-    /// Exact producer toolchain identity.
-    pub toolchain_identity: AnalyzeToolchainIdentity,
     /// Exact resolved method-options identity.
     pub options_identity: AnalyzeOptionsIdentity,
     /// Exact resolved assumptions identity.
