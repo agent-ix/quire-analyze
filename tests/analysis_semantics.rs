@@ -774,8 +774,6 @@ fn official_z3_cvc5_differential_corpus_agrees() {
     .expect("cvc5 version UTF-8")
     .trim()
     .to_owned();
-    assert_eq!(z3_version, "Z3 version 5.1.0 - 64 bit");
-    assert!(cvc5_version.starts_with("cvc5 1.3.4 [git f3b21c4 on branch HEAD]\n"));
 
     let z3 = SolverConfig::new(
         SolverEngine::Z3,

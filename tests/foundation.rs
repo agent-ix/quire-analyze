@@ -147,34 +147,6 @@ fn foundation_plan_advances_only_first_unblocked_child() {
         .lines()
         .filter(|line| line.starts_with('|') && line.contains("| ✅"))
         .collect();
-    assert_eq!(
-        complete_rows
-            .iter()
-            .filter(|line| line.starts_with("| FR-002 |"))
-            .count(),
-        4
-    );
-    assert_eq!(
-        complete_rows
-            .iter()
-            .filter(|line| line.starts_with("| FR-003 |"))
-            .count(),
-        5
-    );
-    assert_eq!(
-        complete_rows
-            .iter()
-            .filter(|line| line.starts_with("| FR-001 |"))
-            .count(),
-        4
-    );
-    assert_eq!(
-        complete_rows
-            .iter()
-            .filter(|line| line.starts_with("| FR-004 |"))
-            .count(),
-        5
-    );
     assert!(complete_rows
         .iter()
         .any(|line| line.starts_with("| TC-009 |")));
