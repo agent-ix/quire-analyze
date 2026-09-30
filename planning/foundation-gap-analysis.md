@@ -28,7 +28,7 @@ type: Review
 | OPEN-004 | Analysis classification, source maps, and replayed counterexamples do not exist. | Task-006 / issue #4 | Blocks end-to-end evidence. |
 | OPEN-005 | Report schemas, evidence verifier, differential runner, and CLI do not exist. | Task-007 / issue #5 | Blocks epic closure. |
 | OPEN-006 | Cross-platform and independent review evidence is absent. | Task-008 | Blocks human source-release consideration. |
-| OPEN-007 | Human source-release decision, tag, and checksums are intentionally absent. | PGM-02 Wave 4 | Human-only; not a Wave 2 completion condition. |
+| OPEN-007 | Human source-release decision is intentionally absent. | PGM-02 Wave 4 | Human-only; not a Wave 2 completion condition. |
 
 ## Ticket Decision
 

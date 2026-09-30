@@ -13,7 +13,7 @@ relationships:
 
 ## Statement
 
-For one pinned package, request, encoding, engine, and configuration, the analyzer shall produce
+For one package, request, encoding, engine, and configuration, the analyzer shall produce
 byte-identical query and normalized semantic outcome bytes, and every memory, I/O, process, and time
 boundary owned by the adapter shall be finite and enforced. Observational elapsed times are retained
 in the execution record but excluded from the deterministic semantic-outcome projection.

@@ -23,7 +23,7 @@ relationships:
 
 ## Decision Use
 
-Measurements inform a later human source-release decision for one pinned candidate. They do not
+Measurements inform a later human source-release decision for one candidate. They do not
 approve release or confer solver qualification, validation, accreditation, or certification.
 
 ## Population
@@ -34,10 +34,8 @@ and declared supported platform.
 
 ## Collection Procedure
 
-Each native implementation task extends a source-bound local evidence runner. The runner executes
-the requirement-tagged test census, retains stdout, stderr, numeric exit and structured outcome,
-and derives rather than authors aggregate status. Fake executables exercise
-process faults; independent finite enumeration and counterexample replay exercise semantics; pinned
+Fake executables exercise
+process faults; independent finite enumeration and counterexample replay exercise semantics;
 Z3 and cvc5 runs exercise differential behavior; mutation probes exercise evidence integrity.
 
 ## Measures

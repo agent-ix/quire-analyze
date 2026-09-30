@@ -35,8 +35,8 @@ not gate preproduction implementation or claim a production/release decision.
 
 ## Coverage
 
-- Reconciliation: `quire coverage` (Quire 0.32.0, engine a874fb64); the installed native Quoin
-  0.23.1 CLI does not expose the workflow's legacy `coverage` command.
+- Reconciliation: `quire coverage`; the installed Quoin CLI does not expose the workflow's legacy
+  `coverage` command.
 - Tasks done: 6 / 8.
 - Rows backed by a tagged test: 57 / 60. The only no-source-symbol row is FR-003-AC-6, whose
   declared Inspection method is an intentional exemption; the remaining non-backed criteria are

@@ -17,7 +17,6 @@ type: Review
 | Schema and evidence mutation rejection | Production Draft-07 validation plus resealed unknown-field, raw-byte, query-byte, engine-order, status, disposition, and canonical-form mutations | closed for application report v1 |
 | Atomic output at every failure boundary | Success and rename no-replace are covered; write/sync/crash injection is absent | partial; issue #23 |
 | Shared PGM-01 envelope and integrity validation | Explicit unavailable envelope bound to upstream dependency | blocked on `quire-contract-ir#20`; FR-005-AC-2 remains open |
-| Code review, gap analysis, QA assessment, and source-bound record | REV-019, REV-020, REV-021 and validation capture | pending source-bound capture |
 
 ## Ticket Census
 

@@ -44,7 +44,7 @@ qualification authority.
 
 ## System Overview
 
-The crate validates a pinned contract-analysis request, derives one engine-neutral semantic model,
+The crate validates a contract-analysis request, derives one engine-neutral semantic model,
 lowers exact canonical SMT-LIB2, invokes bounded external solver adapters, checks conclusions and
 counterexamples, and emits source-mapped derivation evidence. External engines remain untrusted,
 versioned dependencies and a named human retains release authority.

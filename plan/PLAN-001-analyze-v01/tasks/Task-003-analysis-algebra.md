@@ -19,7 +19,7 @@ link the accepted ADR as the explicit replacement that supersedes `quire-rs#164`
 
 ## Guard
 
-Tasks 001 and 002 must be done. The exact IR revision, schemas, corpus, and lockfile must agree.
+Tasks 001 and 002 must be done.
 
 ## Current Evidence
 

@@ -7,7 +7,7 @@ type: Review
 
 ## Measurement
 
-The complete local gate executes 50 tests with zero failures and one separately controlled pinned
+The complete local gate executes 50 tests with zero failures and one separately controlled
 real-engine test ignored by default. LLVM line coverage is 91.49% overall and 91.62% for
 `src/report.rs`, above the enforced 90% project floor. The default and Rust 1.75 suites both execute
 the fault state machine, five abrupt-termination child probes, and the production concurrency path.
@@ -34,5 +34,4 @@ publisher's data. This limitation is the remaining #23 review item.
 ## QA Verdict
 
 The fault campaign is sufficient for the recoverable Linux named-temp/rename boundary and exposes
-the true crash state. It is not evidence that a dead process removed its own staging entry. Full
-local gate counts and coverage are retained with the source-bound validation record.
+the true crash state. It is not evidence that a dead process removed its own staging entry.

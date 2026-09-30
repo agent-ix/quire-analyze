@@ -41,7 +41,7 @@ contradictory, discrepant, incomplete, or internal state is explicit and non-con
 
 ## Controls
 
-Exact dependency and engine pins, requirement-tagged model/property/fault/differential tests,
+Requirement-tagged model/property/fault/differential tests,
 bounded argv-only process execution, immutable raw records, schema and mutation verification,
 reproducibility measurement, code review, gap analysis, and human decision constrain the component.
 

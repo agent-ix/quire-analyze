@@ -19,7 +19,7 @@ reasoning:
       - no blocking specification implementation code-review or gap-review finding remains
 assumptions:
   - id: assumption-consumer-validation
-    statement: consuming projects validate the pinned analyzer engines and outputs for their intended use
+    statement: consuming projects validate the analyzer engines and outputs for their intended use
     owner: human-release-owner
     status: open
     review_by: "2026-12-31T00:00:00Z"
@@ -27,7 +27,7 @@ participants:
   - id: human-release-owner
     role: decision owner
     authority: accept reject or defer the bounded source candidate
-    independence: reviews agent-assisted implementation pins limitations and evidence
+    independence: reviews agent-assisted implementation limitations and evidence
 challenges:
   - id: challenge-unimplemented-semantics
     target: claim-analyze-v01
@@ -51,7 +51,7 @@ use with all limitations understood and accepted by the named human release auth
 
 Independent model checks, exact capability coverage, deterministic lowering, hostile-process fault
 injection, differential solvers, counterexample replay, schema mutations, local quality gates, and
-human review jointly address the known failure scenarios. No single solver answer or manifest is sufficient.
+human review jointly address the known failure scenarios. No single solver answer is sufficient.
 
 ## Sufficiency Decision
 
@@ -77,5 +77,5 @@ planned and all subclaims remain open until native issues and independent review
 
 ## Challenges
 
-Semantic implementation, solver pins, retained campaigns, independent review, cross-platform
+Semantic implementation, retained campaigns, independent review, cross-platform
 evidence, and the human decision are absent. Each remains explicit and open.

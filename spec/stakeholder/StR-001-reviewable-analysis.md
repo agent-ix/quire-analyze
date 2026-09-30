@@ -10,7 +10,7 @@ relationships:
 
 ## Stakeholder Need
 
-Assurance engineers require reproducible consistency and implication conclusions from one pinned
+Assurance engineers require reproducible consistency and implication conclusions from one
 contract package while every unsupported feature, approximation, timeout, cancellation, tool
 failure, and unknown solver response remains visible and non-conclusive.
 
@@ -24,7 +24,7 @@ would create false assurance.
 
 | ID | Criteria | Validation |
 |---|---|---|
-| StR-001-VC-1 | Repeated analysis of one pinned request yields byte-identical query and normalized evidence bytes. | Demonstration |
+| StR-001-VC-1 | Repeated analysis of one request yields byte-identical query and normalized evidence bytes. | Demonstration |
 | StR-001-VC-2 | Z3 and cvc5 agree on the supported seeded corpus, or retain a typed discrepancy without a conclusive claim. | Demonstration |
 
 ## Dependencies

@@ -9,7 +9,7 @@ type: Review
 
 Producer review of the unblocked native issue #5 slice: two-engine comparison, versioned canonical
 reports, schema and mutation validation, solver identity/configuration retention, guarded PGM-01
-state, no-replace Linux publication, CLI exit classes, and pinned real-engine execution. This is not
+state, no-replace Linux publication, CLI exit classes, and real-engine execution. This is not
 independent approval, PGM-01 evidence authority, or a release decision.
 
 ## Findings and Dispositions

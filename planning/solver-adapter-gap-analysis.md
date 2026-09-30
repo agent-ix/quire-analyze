@@ -15,14 +15,14 @@ type: Review
 | Records retain execution identity and observations | Engine, normalized version, executable digest/path/size, argv, configuration/query digests, limits, exit, bounded streams/model, elapsed/cleanup, and diagnostic accessors are asserted | closed |
 | Absolute independent paths require neither network nor shell resolution | Direct descriptor execution with cleared environment; metacharacter path test and missing/relative-path failures | closed |
 | No solver library is linked | Manifest/source inspection and supply-chain graph gates | closed |
-| Code review, tests, gap analysis, and retained record | REV-011, TC-005, REV-012, REV-013, and source-bound validation record | closed after validation capture |
+| Code review, tests, gap analysis, and retained record | REV-011, TC-005, REV-012, and REV-013 | closed after validation capture |
 
 ## Open Downstream Gaps
 
 | Gap | Disposition |
 |---|---|
 | No equivalent measured process-tree containment exists on non-Linux targets. | Native issue #20. Non-Linux fails before spawn in v0.1. |
-| The suite does not run pinned real Z3 and cvc5 binaries or a differential corpus. | Existing issue #5 / Task-007; fake processes are correct for deterministic fault isolation but not engine conformance. |
+| The suite does not run real Z3 and cvc5 binaries or a differential corpus. | Existing issue #5 / Task-007; fake processes are correct for deterministic fault isolation but not engine conformance. |
 | Sustained PID/PGID churn, full-ceiling pressure, executable-race campaigns, and deterministic OS-call fault injection are absent. | New defense-in-depth QA issue #21. |
 | Analysis conclusions, model replay, and finding algebra do not exist yet. | Existing issue #4 / Task-006. |
 | Versioned evidence reports and CLI publication do not exist yet. | Existing issue #5 / Task-007. |
@@ -37,5 +37,5 @@ work is already issue #20, lowering campaigns are issue #19, and real-engine/evi
 
 ## Verdict
 
-No issue #3 Linux-v1 acceptance gap remains after source-bound validation capture. This does not
+No issue #3 Linux-v1 acceptance gap remains after validation. This does not
 claim a fully tested cross-platform or real-engine analyzer.

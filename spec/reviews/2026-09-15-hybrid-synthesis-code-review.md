@@ -14,7 +14,7 @@ relationships:
 
 ## Summary
 
-Reviewed the hybrid/synthesis implementation at this PR's exact revision
+Reviewed the hybrid/synthesis implementation
 against FR-007, FR-008, TC-013, TC-014, and AP-001. The review found three
 blocking contract defects in bounded synthesis and independent validation.
 

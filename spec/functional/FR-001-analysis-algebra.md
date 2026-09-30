@@ -20,7 +20,7 @@ types, observations, definedness, or identity.
 
 ## Inputs
 
-A pinned validated package, ordered assumption/left/right/candidate clause groups as required by the
+A validated package, ordered assumption/left/right/candidate clause groups as required by the
 analysis kind, execution point, bounds, and encoding profile.
 
 ## Outputs

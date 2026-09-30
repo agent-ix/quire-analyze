@@ -1,4 +1,4 @@
-//! Shared, dependency-light outcome contract for pinned Analyze providers.
+//! Shared, dependency-light outcome contract for Analyze providers.
 
 /// Version of the shared method-outcome contract.
 pub const METHOD_RESULT_VERSION: &str = "quire.method-result/v1";

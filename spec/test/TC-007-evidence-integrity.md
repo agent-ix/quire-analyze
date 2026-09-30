@@ -16,7 +16,7 @@ Verify retained evidence detects missing, altered, extra, and contradicted recor
 
 ## Test Procedure
 
-Validate every report and envelope against pinned schemas. Remove and mutate each required identity,
+Validate every report and envelope against their schemas. Remove and mutate each required identity,
 artifact, digest, status, limitation, engine field, and output. Contradict raw responses and declared
 outcomes, and alter the artifact census.
 
