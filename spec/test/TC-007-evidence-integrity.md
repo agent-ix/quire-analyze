@@ -21,8 +21,7 @@ artifact, digest, status, limitation, engine field, and output. Contradict raw r
 outcomes, and alter the artifact census.
 
 Runtime report validation re-derives canonical JSON, report digest, raw stdout/stderr/model digests,
-query/configuration identities, and differential disposition. Shared run transcription is audited by
-Quoin 0.23.1. The PGM-01 envelope lane must return unavailable until the component selected by
+query/configuration identities, and differential disposition. The PGM-01 envelope lane must return unavailable until the component selected by
 `quire-contract-ir#20` is adopted.
 
 ## Expected Results

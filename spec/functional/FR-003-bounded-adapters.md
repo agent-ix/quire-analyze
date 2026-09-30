@@ -45,7 +45,7 @@ and normalize their protocol responses without shell interpretation.
 | FR-003-AC-1 | In each of three timeout and cancellation repetitions on Linux, zero members of the spawned POSIX process group survive 1,000 ms after cleanup begins; the measured maximum is retained. | Test (TC-005) |
 | FR-003-AC-2 | Malformed, excessive, contradictory, signaled, and nonzero-exit responses cannot become conclusive. | Test (TC-005) |
 | FR-003-AC-3 | Z3 and cvc5 adapters expose the same normalized result contract. | Test (TC-006) |
-| FR-003-AC-4 | The record identifies exact engine, full normalized version output, argv, query digest, limits, configuration digest, exit state, stdout/stderr, and elapsed/cleanup milliseconds. | Test (TC-005, TC-007) |
+| FR-003-AC-4 | The record identifies exact engine, full normalized version output, executable SHA-256, argv, query digest, limits, configuration digest, exit state, stdout/stderr, and elapsed/cleanup milliseconds. | Test (TC-005, TC-007) |
 | FR-003-AC-5 | Independently configured absolute solver paths work without network or shell resolution. | Test (TC-005) |
 | FR-003-AC-6 | Dependency and binary inspection finds no linked Z3 or cvc5 library. | Inspection |
 

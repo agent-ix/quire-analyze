@@ -41,6 +41,5 @@ completion.
 - No production readiness, release input, or human decision was used as a
   development gate in this review.
 
-Native `quoin write` is affected by the tracked module-fetch regression;
-npm Quoin 0.23.1 rendered the authoring contract. Quire validation remains the
-artifact authority.
+Native `quoin write` is affected by the tracked module-fetch regression.
+Quire validation remains the artifact authority.

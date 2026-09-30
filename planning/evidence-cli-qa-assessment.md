@@ -18,7 +18,7 @@ is 91.00% overall, 88.96% for `src/report.rs`, 90.47% for `src/solver.rs`, and 7
 
 - all four differential dispositions, both conclusive statuses, verified-model agreement, retained
   disagreement records, missing-engine unavailability, and incomplete-model inconclusiveness;
-- complete version output, exact configuration identity, SAT model differences between Z3/cvc5, and Z3 non-sat exit behavior;
+- extracted executable digests, complete version output, exact configuration identity, SAT model differences between Z3/cvc5, and Z3 non-sat exit behavior;
 - strict schema application in production, exact field census, canonical bytes, report/query/raw
   stream digests, outcome/status consistency, engine order, and contextual reconstruction;
 - resealed mutations of unknown fields, raw output, query bytes, engine order, status, disposition,
@@ -27,7 +27,7 @@ is 91.00% overall, 88.96% for `src/report.rs`, 90.47% for `src/solver.rs`, and 7
   classes, invalid input, existing destination refusal, unchanged destination bytes, and no owned
   staging residue;
 - local fmt, warnings-as-errors lint, stable and Rust 1.75 tests, rustdoc, dependency advisories,
-  bans/licenses/sources, unsafe audit, specification validation, coverage floor, and evidence census.
+  bans/licenses/sources, unsafe audit, specification validation, and coverage floor.
 
 ## Residual Test Gaps
 

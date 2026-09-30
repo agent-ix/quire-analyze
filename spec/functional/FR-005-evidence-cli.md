@@ -47,6 +47,9 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   close and remove their staging file and synchronize that removal. An uncatchable process
   termination can leave a private staging file but never exposes partial destination bytes; the
   file name identifies it as non-authoritative staging rather than a report.
+- Until `quire-contract-ir#20` selects the shared PGM-01 envelope and integrity component, its
+  status is `unavailable`; no report or local gate may translate that absence into schema
+  validation success.
 
 ## Acceptance Criteria
 

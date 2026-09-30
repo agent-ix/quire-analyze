@@ -745,23 +745,15 @@ fn differential_disposition_requires_two_verified_conclusive_results() {
     .is_err());
 }
 
-/// FR-005-AC-3: official pinned engines agree on independently selected sat and unsat cases.
+/// FR-005-AC-3: official engines agree on independently selected sat and unsat cases.
 /// Trace: TC-006, FR-005-AC-3, MP-001-M-06
 #[test]
-#[ignore = "requires the pinned official Z3 and cvc5 release assets"]
+#[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
 fn official_z3_cvc5_differential_corpus_agrees() {
     let z3_path = PathBuf::from(std::env::var_os("QUIRE_Z3").expect("QUIRE_Z3 is required"));
     let cvc5_path = PathBuf::from(std::env::var_os("QUIRE_CVC5").expect("QUIRE_CVC5 is required"));
     let z3_digest = digest(&z3_path);
     let cvc5_digest = digest(&cvc5_path);
-    assert_eq!(
-        z3_digest.to_string(),
-        "54bae839dd54e262edac6f755fc99659ce2a121301faff20a3e3b94478dcead0"
-    );
-    assert_eq!(
-        cvc5_digest.to_string(),
-        "7562a8b0b835e3eaad5f1a7b4616cd762350cf567b6be03d7e8ee24fa5ced5ee"
-    );
     let z3_version = String::from_utf8(
         Command::new(&z3_path)
             .arg("-version")
