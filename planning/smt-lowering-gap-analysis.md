@@ -17,7 +17,7 @@ type: Review
 | Every assertion has stable requirement/clause identity | Domain-separated statement digest and injective readable assertion symbol; golden and source-map assertions | closed |
 | Unsupported arithmetic, quantification, and data types return Unsupported | Requirement-tagged representative fixtures assert `UnsupportedConstruct` | closed |
 | Golden encodings are independently reviewable | `tests/golden/boolean-v1.smt2` is byte-compared to production output | closed |
-| Code review, tests, gap analysis, and retained review record | REV-007, TC-010, this review, and the issue #7 validation record | closed after source-bound validation capture |
+| Code review, tests, gap analysis, and retained review record | REV-007, TC-010, this review, and the issue #7 validation record | closed after validation |
 
 ## Open Downstream Gaps
 
@@ -28,7 +28,7 @@ type: Review
 | Differential execution, deterministic reports, CLI publication, and machine-produced derivation evidence do not exist yet. | Existing issue #5 / Task-007; shared evidence component remains guarded on `quire-contract-ir#20`. |
 | Mutation, fuzz, digest-collision-family, every-unsupported-variant, and large boundary campaigns are not part of the issue slice. | New QA issue #19. These are defense-in-depth additions, not untested issue #7 acceptance paths. |
 | `time` cannot both consume its patched release and retain Cargo/Rust 1.75 because the patched dependency uses edition 2024. | Upstream `quire-contract-ir#37`; exact unreachable-parser exception is documented and narrowly scoped. |
-| Installed Quire 0.31.0 disagrees between matrix validation (`Coverage Status`) and coverage calculation (`Status`). | Existing issue #14; local parsed matrix census fails closed while Quire validation remains gated. |
+| Installed Quire disagrees between matrix validation (`Coverage Status`) and coverage calculation (`Status`). | Existing issue #14; Quire validation remains gated. |
 
 ## Ticket Census
 
@@ -38,6 +38,6 @@ evidence issue; no duplicate tickets are needed.
 
 ## Verdict
 
-No issue #7 acceptance gap remains after source-bound validation capture. The implementation is a
+No issue #7 acceptance gap remains after validation. The implementation is a
 deliberately narrow Boolean lowering boundary and must not be represented as a solver, analyzer, or
 machine-evidence pipeline.

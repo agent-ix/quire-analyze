@@ -11,7 +11,7 @@ type: interface
 name: ContractAnalysis
 version: draft-analysis-v1
 input:
-  package: validated package at pinned quire-contract-ir revision and schema digest
+  package: validated quire-contract-ir package
   request: closed analysis kind, ordered assumption/left/right/candidate groups, execution point, encoding profile, limits
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
@@ -44,9 +44,6 @@ exit_classes:
   2: invalid-input-or-unsupported
   3: unknown-or-timeout-or-cancelled
   4: tool-or-internal-error
-identity_envelope:
-  schema: quire.derivation-evidence/v1
-  required: [producer, inputs, backend, outputs, parameters, dependencies, environment, provenance, result]
 resource_limits:
   lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
   adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, executable_bytes, path_bytes]
@@ -58,8 +55,6 @@ lowering_v1:
   unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
-  exact_source_revision: required for development
-  source_tag_and_checksum: required only for a human-selected release candidate
   publication: disabled until the human PGM-02 Wave 4 decision
 ```
 

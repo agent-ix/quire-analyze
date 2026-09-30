@@ -27,11 +27,11 @@ signal, not proof of semantic completeness.
 - replay of every query assertion before verification, exact assertion role/source maps, complete
   variable origins, explicit two-origin binding groups, and model-purpose classification;
 - legacy lowering golden stability, Rust 1.75, documentation, lint, supply-chain, unsafe-comment,
-  specification, coverage, and retained-evidence gates.
+  specification, and coverage gates.
 
 ## Residual Test Gaps
 
-- pinned real Z3/cvc5 model acquisition and differential replay (existing issue #5);
+- real Z3/cvc5 model acquisition and differential replay (existing issue #5);
 - property generation over arbitrary bounded Boolean formulas, assumptions, roles, and bindings;
 - model parser fuzzing/mutation and adversarial size/nesting campaigns;
 - expanded package/revision/declaration/observation/execution-point/Unicode collision families;

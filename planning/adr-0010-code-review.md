@@ -20,7 +20,6 @@ report, matrix, and plan. This is producer review, not independent approval or a
 | A10-F04 | medium | Binding arbitrary `DependencyKind` values could make fields, enum variants, or pure functions independent variables rather than derived expression dependencies. | Closed: only root input/state dependencies are bindable; other dependency kinds remain derived. |
 | A10-F05 | medium | The complete-identity measurement included a research row ID not present in the real IR identity. | Closed: the candidate key now uses only package, requirement/revision, kind, observation, name, type, and execution point; results are unchanged. |
 | A10-F06 | medium | A 100% explicit-binding row could be mistaken for measured inference accuracy. | Closed: ADR and report state it measures deterministic application of human-reviewed labels, not an inference algorithm. |
-| A10-F07 | medium | `@current` in the real-FR transcription was not an immutable source identity. | Closed: the report records exact historical source revision and file digest and labels the owner as a research transcription. |
 | A10-F08 | low | ADR relationships used an edge not allowed by the active Quire ADR archetype. | Closed: unsupported ADR edges were removed; FR-001 retains the normative ADR relationship. |
 
 ## Code Quality

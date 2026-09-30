@@ -14,7 +14,7 @@ relationships:
 
 ## Summary
 
-Reviewed the hybrid/synthesis implementation at this PR's exact revision
+Reviewed the hybrid/synthesis implementation
 against FR-007, FR-008, TC-013, TC-014, and AP-001. The review found three
 blocking contract defects in bounded synthesis and independent validation.
 
@@ -41,6 +41,5 @@ completion.
 - No production readiness, release input, or human decision was used as a
   development gate in this review.
 
-Native `quoin write` is affected by the tracked module-fetch regression;
-npm Quoin 0.23.1 rendered the authoring contract. Quire validation remains the
-artifact authority.
+Native `quoin write` is affected by the tracked module-fetch regression.
+Quire validation remains the artifact authority.

@@ -37,5 +37,4 @@ ignore = ["RUSTSEC-2026-0009"]
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-# The dependency manifest and lockfile pin one reviewed commit from this first-party repository.
 allow-git = ["https://github.com/agent-ix/quire-contract-ir"]

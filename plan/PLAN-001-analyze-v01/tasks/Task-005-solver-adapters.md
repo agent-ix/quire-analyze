@@ -13,7 +13,7 @@ relationships:
 
 ## Scope
 
-Complete native issue #3 with exact solver pins, argv-only process invocation, all resource limits,
+Complete native issue #3 with argv-only process invocation, all resource limits,
 protocol normalization, process-tree cleanup, and hostile fake-process tests.
 
 ## Guard

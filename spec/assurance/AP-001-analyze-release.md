@@ -6,7 +6,7 @@ status: proposed
 owner: human-release-owner
 profile_version: 0.2
 profile_kind: general
-scope: one identified quire-analyze v0.1 source candidate and pinned dependency and solver set
+scope: one quire-analyze v0.1 source candidate
 impact_assessments:
   - id: impact-false-conclusion
     scenario: a semantic adapter or evidence failure is reported as a conclusive analysis
@@ -28,14 +28,13 @@ relationships:
 
 ## Decision Boundary
 
-The decision boundary is one source revision, pinned IR/schema/corpus, encoding, solver executables,
-configuration, toolchain, and platform profile. The profile supplies evidence and confers no
+The decision boundary is the encoding, solver engines, configuration, and platform profile. The profile supplies evidence and confers no
 consuming-project qualification, accreditation, certification, or release authority.
 
 ## Intended Use
 
 `quire-analyze` is an analysis/evidence tool that assists reviewers by producing bounded,
-reproducible consistency and implication evidence for one pinned contract package. It does not
+reproducible consistency and implication evidence for one contract package. It does not
 replace source review, solver qualification, system verification, or a human release decision.
 
 ## Boundary and Dependencies
@@ -43,18 +42,16 @@ replace source review, solver qualification, system verification, or a human rel
 The owned boundary validates an analysis request, constructs the semantic model, lowers exact
 SMT-LIB2, invokes a bounded adapter, classifies the response, checks source mapping, and emits
 evidence. Contract IR and schemas, Z3, cvc5, the operating system, Rust toolchain, Quire validator,
-and the human decision are external and exactly identified.
+and the human decision are external.
 
 ## Assurance Activities
 
 1. Validate requirements, interface, matrix, reviews, and plan with Quire.
-2. Reconcile exact contract-IR, schema, corpus, toolchain, solver, and configuration pins.
-3. Require independent finite-model truth checks for the algebra and counterexamples.
-4. Exercise exact/unsupported capability partitions for every public IR construct.
-5. Fault-inject process, protocol, resource, evidence, and publication boundaries.
-6. Differentially execute the supported corpus on pinned Z3 and cvc5.
-7. Retain source-bound results, failures, skipped lanes, limitations, and checksums.
-8. Perform code review, requirements-test review, gap analysis, and correction before merge.
+2. Require independent finite-model truth checks for the algebra and counterexamples.
+3. Exercise exact/unsupported capability partitions for every public IR construct.
+4. Fault-inject process, protocol, resource, evidence, and publication boundaries.
+5. Differentially execute the supported corpus on Z3 and cvc5.
+6. Perform code review, requirements-test review, gap analysis, and correction before merge.
 
 ## Failure States
 

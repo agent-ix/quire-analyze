@@ -16,14 +16,13 @@ Verify retained evidence detects missing, altered, extra, and contradicted recor
 
 ## Test Procedure
 
-Validate every report and envelope against pinned schemas. Remove and mutate each required identity,
+Validate every report and envelope against their schemas. Remove and mutate each required identity,
 artifact, digest, status, limitation, engine field, and output. Contradict raw responses and declared
 outcomes, and alter the artifact census.
 
 Runtime report validation re-derives canonical JSON, report digest, raw stdout/stderr/model digests,
-query/configuration identities, and differential disposition. Shared run transcription is audited by
-Quoin 0.23.1. The PGM-01 envelope lane must return unavailable until the component selected by
-`quire-contract-ir#20` is adopted.
+query/configuration identities, and differential disposition. The PGM-01 envelope lane must return
+unavailable until the component selected by `quire-contract-ir#20` is adopted.
 
 ## Expected Results
 

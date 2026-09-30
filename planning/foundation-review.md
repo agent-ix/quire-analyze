@@ -15,7 +15,7 @@ PLAN-001. It is not independent approval and makes no release decision.
 
 | Dimension | Question | Finding | Disposition |
 |---|---|---|---|
-| Dependency | Are prerequisites exact, accepted, and ordered? | IR issues #8 and #10 are closed; current accepted revisions/digests are recorded. Solver and implementation pins do not yet exist. | PASS for foundation; implementation tasks require exact-pin reconciliation. |
+| Dependency | Are prerequisites exact, accepted, and ordered? | IR issues #8 and #10 are closed. | PASS for foundation. |
 | Risk | Can a solver, adapter, encoding, or model failure become proof? | The prior placeholder had no explicit boundary. | CLOSED in spec: only checked sat/unsat under exact encoding is conclusive; every failure class is typed. |
 | Evidence | Can results be reproduced and mutations detected? | No semantic evidence exists yet. | PLANNED by MP-001 M-01 through M-10 and TC-007; matrix remains planned. |
 | Integrity | Can identity collision, stale input, or partial output evade detection? | These are principal hazards. | CONTROLLED by full identities, injective mapping, artifact census, atomic output, and mutation tests. |

@@ -8,12 +8,9 @@ type: Review
 ## Sources and Limits
 
 This report reproduces the unfinished Q2 work from closed `agent-ix/quire-rs#164` against accepted
-contract IR. The historical ADR source was inspected at quire-rs revision
-`a642c91c3560c022276b77a31ee54141b3a8f97a`. The real example below uses quire-rs FR-063 as observed
-at source revision `ce852bb77cc3a30df56aba5ce60e49aa44449e34` with file SHA-256
-`c929d1fa4638430d201c4f9e28f856eb803e26cfdecb1bb82382f7c5c2a308db`.
+contract IR. The real example below uses quire-rs FR-063.
 
-The accepted contract-IR corpus at `5c49ebfd1c87415f74420ad047392bd03b1bd202` contains 99 fixtures:
+The accepted contract-IR corpus contains 99 fixtures:
 22 package, 66 expression, 8 coverage, and 3 migration fixtures. Its 66 expression fixtures expose
 one unique requirement owner, `agent-ix/conformance:REQ_alpha@1`; therefore it cannot measure
 cross-requirement aliases. That absence is a corpus limitation, not a zero-error result. TC-009 adds
@@ -30,7 +27,6 @@ contract IR.
 
 ```yaml
 research_owner: agent-ix/quire-rs:FR-063
-historical_source_revision: ce852bb77cc3a30df56aba5ce60e49aa44449e34
 execution_point: post:compute_metric
 declarations:
   population: {kind: input, type: {integer: {minimum: 0, maximum: 9223372036854775807}}}
@@ -104,8 +100,7 @@ is worse: an implicit alias changes the logical problem while still looking conc
 
 Use separate version identities for the analysis model and SMT encoding, and bind both into
 domain-separated statement/request/query digests. Contract-IR clause digest plus requirement revision
-replaces the historical natural-language statement hash as the semantic identity; the historical
-hash remains provenance only. This makes source, binding, request, and encoding changes invalidate
+replaces the historical natural-language statement hash as the semantic identity. This makes source, binding, request, and encoding changes invalidate
 stale evidence at the appropriate layer.
 
 ## Implementation Tickets

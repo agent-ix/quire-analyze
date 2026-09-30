@@ -14,13 +14,13 @@ relationships:
 
 ## Description
 
-Verify pinned engines agree on supported cases and every published counterexample replays.
+Verify engines agree on supported cases and every published counterexample replays.
 
 ## Test Procedure
 
 For the issue #4 slice, decode bounded Boolean models and independently re-evaluate every asserted
 expression using the query's sealed replay map. Reject missing, duplicate, unknown, non-Boolean, and
-predicate-refuting assignments as verified evidence. In Task-007, run pinned Z3 and cvc5 versions
+predicate-refuting assignments as verified evidence. In Task-007, run Z3 and cvc5
 over the seeded supported corpus, inject a controlled disagreement fixture, and verify every filed
 semantic defect has a stable executable regression fixture and retained disposition.
 
@@ -31,7 +31,7 @@ result, never a skipped pass.
 
 ## Expected Results
 
-Every published decoded counterexample satisfies the required truth condition. Later pinned engines
+Every published decoded counterexample satisfies the required truth condition. Later engines
 agree on supported cases; a disagreement retains both raw and normalized results and cannot be
 classified as conclusive before human-reviewed adjudication. Every filed semantic defect remains
 reproducible by its regression fixture.

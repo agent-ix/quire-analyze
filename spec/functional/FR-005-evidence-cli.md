@@ -39,12 +39,6 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   `inconclusive`. Agreement is conclusive only when both exact engines return the same conclusive
   status and every required sat model is replay-verified. Different conclusive statuses are
   disagreement; a missing engine is unavailable; every other combination is inconclusive.
-- The Linux-x86_64 conformance pins are Z3 5.1.0 from the official
-  `z3_solver-5.1.0.0-py3-none-manylinux_2_27_x86_64.whl` asset (archive SHA-256
-  `dfad9e309d7010b1ff6bdb33f21570a1603ef4727373221c7117a74448f0cfef`) and cvc5 1.3.4 from
-  `cvc5-Linux-x86_64-static.zip` (archive SHA-256
-  `dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6`). Executable SHA-256 and
-  complete normalized version output are recorded after extraction and remain adapter pins.
 - The v1 library executes caller-prepared queries with caller-supplied exact solver pins and renders
   the authoritative report bytes. The v1 CLI validates and publishes those exact bytes; it does not
   reconstruct authoritative contract packages or solver configurations from JSON. Publication
@@ -53,10 +47,9 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   close and remove their staging file and synchronize that removal. An uncatchable process
   termination can leave a private staging file but never exposes partial destination bytes; the
   file name identifies it as non-authoritative staging rather than a report.
-- Assurance-run transcription/audit uses Quoin 0.23.1, the version the accepted FR-012
-  compatibility matrix pins; 0.22.5 and 0.23.0 are named incompatible by that matrix. Until `quire-contract-ir#20` selects the
-  shared PGM-01 envelope and integrity component, its status is `unavailable`; no report or local
-  gate may translate that absence into schema validation success.
+- Until `quire-contract-ir#20` selects the shared PGM-01 envelope and integrity component, its
+  status is `unavailable`; no report or local gate may translate that absence into schema
+  validation success.
 
 ## Acceptance Criteria
 

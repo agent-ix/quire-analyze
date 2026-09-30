@@ -31,7 +31,7 @@ a regression signal, not proof of containment or protocol correctness.
 
 ## Residual Test Gaps
 
-- real pinned Z3/cvc5 smoke and differential corpus execution (existing issue #5);
+- real Z3/cvc5 smoke and differential corpus execution (existing issue #5);
 - measured non-Linux containment (issue #20);
 - repeated stress under PID/PGID churn, full-profile memory pressure, adversarial executable races,
   and injected failures at each OS call boundary (issue #21);

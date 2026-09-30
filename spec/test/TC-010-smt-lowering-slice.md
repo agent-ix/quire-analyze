@@ -23,7 +23,7 @@ Run `tests/smt_lowering.rs` under the default toolchain and Rust 1.75. Permute s
 declaration order; exercise every exact Boolean operator; mutate clause digests; validate accepted,
 duplicate, and unused binding groups; exceed the statement limit; lower the retained golden query;
 and inject arithmetic, quantification, and text data. Inspect the exhaustive `ExpressionKind` match,
-capability table, exact contract-IR revision, dependency lock, and absence of solver libraries.
+capability table, and absence of solver libraries.
 
 ## Expected Results
 

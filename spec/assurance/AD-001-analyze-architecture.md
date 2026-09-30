@@ -19,7 +19,7 @@ solver implementations, operating-system process behavior, and release authority
 
 ## Views
 
-The derivation view is: pinned validated IR → analysis model → canonical query bundle → bounded
+The derivation view is: validated IR → analysis model → canonical query bundle → bounded
 engine adapter → normalized solver record → checked conclusion → immutable evidence report.
 
 The identity view binds package/schema/corpus, selected clauses and revisions, shared variables,
@@ -41,8 +41,7 @@ variant. Adapters cannot construct conclusions directly.
 
 ## Interfaces and Trust
 
-Contract-IR validation is trusted only at the exact recorded revision and schema digest. Solver
-answers are evidence, not self-authenticating truth: finite-model and cross-engine campaigns reduce
+Solver answers are evidence, not self-authenticating truth: finite-model and cross-engine campaigns reduce
 risk but do not qualify engines. The OS process API, filesystem atomicity, hashing library, and
 schema validator remain named external dependencies.
 

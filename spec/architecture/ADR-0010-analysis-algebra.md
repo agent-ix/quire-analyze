@@ -112,10 +112,7 @@ algorithm: correctness still depends on the workflow and human review that autho
 ### 3. Statement, binding, request, and query identities are separate
 
 The source statement identity contains the complete clause reference (including requirement
-revision), `quire.contract.canonical-json/v1`, and the accepted clause canonical digest. The
-provenance record also retains the source document identity/revision. The historical `quire-rs`
-natural-language `statement_hash` may be retained as provenance, but it is not an analysis identity
-because it is outside the accepted contract IR.
+revision), `quire.contract.canonical-json/v1`, and the accepted clause canonical digest.
 
 The v1 identities are domain-separated SHA-256 values over canonical length-delimited fields:
 
@@ -157,7 +154,7 @@ than a retry-to-consensus loop. Choosing a sample count remains outside this det
 - **A second typed guard/obligation expression algebra:** duplicates accepted IR semantics and makes
   drift likely. The selected analysis algebra adds only cross-statement structure.
 - **Direct SMT-LIB2 from a formalizer:** fastest prototype, but it bypasses validation, capability,
-  provenance, and backend-independent review boundaries.
+  and backend-independent review boundaries.
 - **Complete upstream identity as the only rule:** safe but makes every cross-requirement interaction
   invisible because upstream dependencies are requirement-scoped.
 - **Name or typed-name inference:** the measured fixture retains false aliases even after structural

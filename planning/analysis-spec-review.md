@@ -29,7 +29,7 @@ decision.
 Task-006 advances to `in_progress` because Task-005 is locally complete. Implementation order is:
 closed request/status types; role-aware deterministic lowering; bounded Boolean model decoder;
 independent replay and source mapping; exhaustive truth-table and malformed-model tests; code review,
-completion gap analysis, and source-bound validation capture. Task-007 remains guarded.
+and completion gap analysis. Task-007 remains guarded.
 
 ## Pre-implementation Verdict
 

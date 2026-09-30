@@ -19,15 +19,10 @@ link the accepted ADR as the explicit replacement that supersedes `quire-rs#164`
 
 ## Guard
 
-Tasks 001 and 002 must be done. The exact IR revision, schemas, corpus, and lockfile must agree.
+Tasks 001 and 002 must be done.
 
 ## Current Evidence
 
 ADR-0010 accepts the minimal analysis algebra, explicit cross-requirement binding groups, and
 versioned invalidation rules. REV-004 retains the reproduced dual encoding and corpus/fixture
 measurements. TC-009 executes the identity comparison and incompatible-binding controls.
-
-The source-bound local outcomes and eight closed review findings are no longer retained: that record
-was deleted under `agent-ix/engineering-assurance#7`, which released the evidence-preservation
-constraint for the pre-stable phase on 2026-09-02. It is deleted rather than rewritten, and nothing
-weaker is stated in its place.
