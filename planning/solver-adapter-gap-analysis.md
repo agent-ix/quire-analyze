@@ -27,7 +27,7 @@ type: Review
 | Analysis conclusions, model replay, and finding algebra do not exist yet. | Existing issue #4 / Task-006. |
 | Versioned evidence reports and CLI publication do not exist yet. | Existing issue #5 / Task-007. |
 | Lowering-wide mutation, fuzz, identity collision, and boundary campaigns remain incomplete. | Existing QA issue #19. |
-| Installed Quire disagrees between matrix validation and coverage calculation column names. | Existing issue #14; the repository's parsed matrix census fails closed. |
+| Installed Quire disagrees between matrix validation and coverage calculation column names. | Existing issue #14. |
 
 ## Ticket Census
 

@@ -26,7 +26,7 @@ type: Review
 | Arithmetic, option, record, collection, quantifier, and other data theories remain unsupported. | Explicit Boolean-v1 scope; new theory work requires a reviewed encoding-profile issue rather than expansion by inference. |
 | Versioned machine evidence, disagreement adjudication, deterministic reports, and CLI publication do not exist yet. | Existing issue #5 / Task-007. |
 | Non-Linux process containment and adapter stress remain open. | Existing issues #20 and #21; no issue #4 result can convert those states into success. |
-| Installed Quire matrix column behavior remains inconsistent. | Existing issue #14; parsed local matrix census continues to fail closed. |
+| Installed Quire matrix column behavior remains inconsistent. | Existing issue #14. |
 
 ## Ticket Census
 
