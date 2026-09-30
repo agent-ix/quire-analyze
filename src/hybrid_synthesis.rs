@@ -690,18 +690,22 @@ mod contract_tests {
     use super::*;
     use quire_analyze_method_contract::{
         AnalyzeAssumptionsIdentity, AnalyzeBoundsIdentity, AnalyzeContentIdentity,
-        AnalyzeOptionsIdentity, AnalyzeRequestIdentity, AnalyzeResultIdentity, AnalyzeRunIdentity,
-        AnalyzeSubjectIdentity, METHOD_RESULT_VERSION,
+        AnalyzeImplementationIdentity, AnalyzeOptionsIdentity, AnalyzeRequestIdentity,
+        AnalyzeResultIdentity, AnalyzeRunIdentity, AnalyzeSubjectIdentity,
+        AnalyzeToolchainIdentity, ProviderRevision, METHOD_RESULT_VERSION,
     };
 
     fn envelope(method: AnalyzeMethod) -> AnalyzeResult {
         AnalyzeResult {
             contract_version: METHOD_RESULT_VERSION.into(),
+            provider_revision: ProviderRevision("rev".into()),
             method,
             outcome: AnalyzeOutcome::Failed,
             subject_identity: AnalyzeSubjectIdentity("subject".into()),
             run_identity: AnalyzeRunIdentity("run".into()),
             request_identity: AnalyzeRequestIdentity("request".into()),
+            implementation_identity: AnalyzeImplementationIdentity("implementation".into()),
+            toolchain_identity: AnalyzeToolchainIdentity("toolchain".into()),
             options_identity: AnalyzeOptionsIdentity("options".into()),
             assumptions_identity: AnalyzeAssumptionsIdentity("assumptions".into()),
             bounds_identity: AnalyzeBoundsIdentity("bounds".into()),
