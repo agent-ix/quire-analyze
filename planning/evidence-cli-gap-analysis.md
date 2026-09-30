@@ -10,7 +10,7 @@ type: Review
 | Issue #5 acceptance area | Evidence | Status |
 |---|---|---|
 | Versioned machine and human-readable reports | Strict `quire.differential-report/v1`, canonical renderer, stderr summary, complete query/engine bytes and identities | closed for differential-report v1 |
-| Positive and negative real-engine agreement | Explicit ignored/manual test against verified official Z3 5.1.0 and cvc5 1.3.4 assets; both SAT and UNSAT cases pass | closed for seeded Boolean SAT/UNSAT |
+| Positive and negative real-engine agreement | Explicit ignored/manual test against official Z3 and cvc5 assets; both SAT and UNSAT cases pass | closed for seeded Boolean SAT/UNSAT |
 | Unsupported, timeout, unavailable, disagreement, and incomplete states | Requirement-tagged deterministic fake-process/lowering fixtures preserve every state and both engine records | closed for controlled fixtures |
 | Same supported corpus through both real engines | SAT/UNSAT corpus runs through both; complete retained corpus/CLI campaign does not | partial; issue #24 |
 | Library-first API and deterministic CLI | Library executes and renders; CLI schema-validates, byte-preserves, refuses overwrite, and returns stable 0/1/2/3/4 classes | closed for v1 publisher boundary; direct analysis CLI is issue #24 |

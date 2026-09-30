@@ -24,4 +24,4 @@ Task-003 must be done and ADR-0010 accepted.
 
 TC-010 owns the executable issue slice: order invariance, exact Boolean operator encodings, explicit
 unsupported categories, binding validation, structural type-shape order, identity invalidation,
-statement resource bounds, golden bytes, and Rust 1.75 compatibility.
+statement resource bounds, and golden bytes.

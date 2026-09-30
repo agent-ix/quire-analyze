@@ -26,7 +26,7 @@ signal, not proof of semantic completeness.
   non-Boolean values, predicate-refuting assignments, and absent model output;
 - replay of every query assertion before verification, exact assertion role/source maps, complete
   variable origins, explicit two-origin binding groups, and model-purpose classification;
-- legacy lowering golden stability, Rust 1.75, documentation, lint, supply-chain, unsafe-comment,
+- legacy lowering golden stability, documentation, lint, supply-chain, unsafe-comment,
   specification, and coverage gates.
 
 ## Residual Test Gaps

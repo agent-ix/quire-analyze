@@ -26,7 +26,7 @@ is 91.00% overall, 88.96% for `src/report.rs`, 90.47% for `src/solver.rs`, and 7
 - CLI subprocess behavior for byte parity, empty stdout, stderr diagnostics, satisfied/refuted exit
   classes, invalid input, existing destination refusal, unchanged destination bytes, and no owned
   staging residue;
-- local fmt, warnings-as-errors lint, stable and Rust 1.75 tests, rustdoc, dependency advisories,
+- local fmt, warnings-as-errors lint, stable tests, rustdoc, dependency advisories,
   bans/licenses/sources, unsafe audit, specification validation, and coverage floor.
 
 ## Residual Test Gaps

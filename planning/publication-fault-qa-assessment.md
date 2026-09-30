@@ -9,7 +9,7 @@ type: Review
 
 The complete local gate executes 50 tests with zero failures and one separately controlled
 real-engine test ignored by default. LLVM line coverage is 91.49% overall and 91.62% for
-`src/report.rs`, above the enforced 90% project floor. The default and Rust 1.75 suites both execute
+`src/report.rs`, above the enforced 90% project floor. The default suite executes
 the fault state machine, five abrupt-termination child probes, and the production concurrency path.
 
 ## Covered Risk Classes

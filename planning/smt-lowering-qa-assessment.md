@@ -24,7 +24,7 @@ percentage is a regression signal, not proof of semantic completeness.
   invariance;
 - state observation identity, source/assertion maps, material-input digest invalidation, empty,
   duplicate, and over-limit statement requests;
-- Rust 1.75, no solver library, warning-free docs/lints, specification
+- no solver library, warning-free docs/lints, specification
   validation, and supply-chain policy.
 
 ## Residual Test Gaps
