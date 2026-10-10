@@ -1,43 +1,58 @@
 ---
-id: interface-001
+id: interface_001
 title: "Contract analysis API"
 type: interface
 ---
-# [interface-001] Contract analysis API
+# [interface_001] Contract analysis API
 
 ## Contract
 
 ```yaml
 name: ContractAnalysis
 version: draft-analysis-v1
+status: proposed interface; callable library stages exist, CLI publication only
 input:
-  package: validated quire-contract-ir package
+  package: typed statements and clause identities from quire-contract-ir
   request: closed analysis kind, ordered assumption/left/right/candidate groups, execution point, encoding profile, limits
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
   - name: prepare
-    output: AnalysisModel | DiagnosticSet
-    semantics: validates identity, types, shared variables, definedness, and bounds before lowering
+    entry_point: src/analysis.rs AnalysisRequest constructors
+    current: constructors check required groups and duplicate statement identities; remaining validation occurs during lowering
+    output: "Result<AnalysisRequest, Vec<AnalysisRequestError>>"
+    proposed_output: AnalysisModel | DiagnosticSet
+    semantics: proposed abstract prepare contract validates identity, types, shared variables, definedness, and bounds before solver execution
   - name: lower
-    output: QueryBundle | Unsupported
+    entry_point: src/analysis.rs lower_analysis_request; src/smt.rs lower_boolean_statements
+    current: implemented library Boolean-v1 lowering
+    output: QueryBundle | DiagnosticSet
     semantics: canonical exact SMT-LIB2 plus assertion and symbol maps; approximation is non-conclusive
   - name: execute
+    entry_point: src/solver.rs execute_solver
+    current: implemented library execution with caller-supplied query and solver configuration
     output: SolverRecord
     semantics: bounded argv-based process execution with exact engine/configuration identity
   - name: conclude
-    output: AnalysisReport
-    semantics: analysis-kind-specific sat/unsat classification and checked source mapping
+    entry_point: src/analysis.rs classify_analysis
+    current: classifies solver outcome before SAT replay; failed replay records Incomplete but retains a conclusive status
+    output: AnalysisConclusion
+    semantics: FR-004 and FR-005 require analysis-kind-specific classification with replay-checked source mapping for conclusive results
   - name: compare
-    output: DifferentialReport
+    entry_point: src/report.rs compare_solver_records
+    current: implemented library comparison; PGM-01 envelope unavailable
+    output: DifferentialRun
     semantics: retains both engine records; disagreement is non-conclusive until human-reviewed adjudication
   - name: cli_publish
+    entry_point: src/main.rs publish-report; src/report.rs validate_report_document and publish_report_new
+    current: sole implemented CLI command; consumes existing library report bytes
     input: authoritative canonical report rendered by the library
     output: byte-identical deterministic JSON report, stable exit class, and stderr diagnostics
     semantics: validates the closed report contract and atomically publishes without reconstructing trusted inputs
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
-  rule: only a complete recognized sat/unsat response under an exact encoding can become conclusive
+  rule: required conclusive results need a complete recognized sat/unsat response under an exact encoding and successful SAT replay where applicable
+  current_gap: individual AnalysisConclusion can remain conclusive after failed SAT replay; IR-357 code follow-up remains open
 exit_classes:
   0: satisfied
   1: refuted
@@ -55,11 +70,33 @@ lowering_v1:
   unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
-  publication: disabled until the human PGM-02 Wave 4 decision
+  source_release: requires the human PGM-02 Wave 4 decision
 ```
+
+## Features
+
+| Feature | Kind |
+|---|---|
+| Boolean-v1 analysis stages | Library API |
+| Differential evidence and existing-report publication | Library API and publish-only CLI |
 
 ## Invariants
 
 The raw query and response are retained before normalization. An adapter cannot directly construct a
-conclusive report; only the checked conclusion layer can do so. Missing identities invalidate the
-record. The library API never derives an executable path from untrusted query content.
+conclusion; `classify_analysis` owns its status. That implementation currently leaves an individual
+SAT conclusion conclusive when model replay fails, contrary to the required FR-004/FR-005
+fail-closed behavior. `compare_solver_records` guards same-status differential agreement separately.
+Missing identities invalidate the record. The library API never derives an executable path from
+untrusted query content. The listed library entry points are separate calls; no CLI command
+currently composes prepare through compare.
+Hybrid reachability and canonical synthesis are separate providers in `src/hybrid_synthesis.rs`,
+returning method outcomes through `crates/method-contract`; they are outside this Boolean SMT
+classification contract. The PGM-01 shared envelope remains unavailable pending
+`quire-contract-ir#20`, so a local placeholder cannot establish full evidence compliance.
+
+Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The current
+`CONTRACT_IR_REVISION` literal in `src/smt.rs`, its report validation in `src/report.rs`, and
+manifest/lockfile text scan in `tests/smt_lowering.rs` duplicate that identity; code follow-up
+must remove the repetition without weakening the canonical content digests that bind a report to
+its analyzed query and evidence. Report producer identity names the application version. Neither
+the draft interface nor automated output grants engine qualification or human release approval.
