@@ -8,7 +8,6 @@ description: "Contents of the PLAN-001 analysis plan bundle."
 ## Contents
 
 - [Plan overview](./plan.md)
-- [Update log](./log.md)
 - [Task-001: Foundation specification](./tasks/Task-001-foundation-spec.md)
 - [Task-002: Foundation verification](./tasks/Task-002-foundation-verification.md)
 - [Task-003: Analysis algebra](./tasks/Task-003-analysis-algebra.md)
