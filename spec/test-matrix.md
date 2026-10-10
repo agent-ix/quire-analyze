@@ -31,6 +31,7 @@ type: TestMatrix
 | FR-005 | FR-005-AC-2 | TC-007 | ⛔ Application schema complete; PGM-01 blocked on contract-ir#20 |
 | FR-005 | FR-005-AC-3 | TC-006 | 🚧 Differential states and real SAT/UNSAT complete; retained full corpus #24 open |
 | FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
+| FR-005 | FR-005-AC-6 | TC-007 | 🚧 Planned v2 schema, validator, and rejection tests; v1 remains current |
 | FR-007 | FR-007-AC-1, FR-007-AC-2, FR-007-AC-3 | TC-013 | ✅ Bounded hybrid reachability provider complete |
 | FR-008 | FR-008-AC-1, FR-008-AC-2, FR-008-AC-3 | TC-014 | ✅ Bounded canonical synthesis provider complete |
 
@@ -56,7 +57,7 @@ type: TestMatrix
 | TC-004 | Injective symbols and source mapping | Property | P0 | FR-002, FR-004 | 🚧 Planned |
 | TC-005 | Adapter resource and failure isolation | Integration | P0 | FR-003, NFR-001, NFR-002 | ✅ Linux adapter v1 complete |
 | TC-006 | Engine parity and counterexamples | Analysis | P0 | FR-003, FR-004, FR-005 | 🚧 Real SAT/UNSAT and controlled states complete; #24 open |
-| TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | ⛔ Application mutations complete; PGM-01 unavailable |
+| TC-007 | Evidence integrity | Integration | P0 | FR-003, FR-004, FR-005, NFR-002 | ⛔ Application mutations complete; PGM-01 unavailable; v2 identity and rejection lane planned |
 | TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Fault boundaries, concurrency, durability, and crash states covered; #24 and crash-residue signoff open |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |

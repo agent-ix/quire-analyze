@@ -69,6 +69,7 @@ stable exit classification, and shall retain cross-engine discrepancies without 
 | FR-005-AC-3 | Differential disagreement retains both results and cannot be reported as agreement. | Test (TC-006) |
 | FR-005-AC-4 | Failed publication leaves no partial result or modified developer-owned file. | Test (TC-008) |
 | FR-005-AC-5 | Every filed semantic defect maps to an executable retained regression fixture. | Inspection and test (TC-006) |
+| FR-005-AC-6 | When `quire.differential-report/v2` is implemented, its closed schema and validator accept a valid v2 report only when it retains `producer.name` and `producer.version`, every `assertions[].clauseDigest`, `bindingSetDigest`, `requestDigest`, `queryDigest`, `querySha256`, every engine's `stdoutSha256`, `stderrSha256`, and `modelSha256`, and `reportDigest`, with the canonical content digests verified against their retained content. They reject a v2 report containing `contractIrRevision`, a report missing any named identity or digest, and every `quire.differential-report/v1` document; no v1 fallback is accepted. This criterion is planned until the v2 renderer, schema, validator, and tests land. | Test (TC-007) |
 
 ## Dependencies
 
