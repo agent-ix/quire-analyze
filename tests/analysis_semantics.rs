@@ -1318,9 +1318,22 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
     assert!(validate_report_document(&bytes).is_err());
     assert!(validate_differential_report(&bytes, &query, &run).is_err());
 
+    // This fixture was accepted by validate_report_document at fbbf42f, before
+    // the v2 change. Its historical schema, revision, and report digest are
+    // intact, so this refusal tests the version boundary rather than malformed
+    // v1 evidence.
+    let historical = include_bytes!("fixtures/differential-report-v1.json");
+    let historical_value: serde_json::Value =
+        serde_json::from_slice(historical).expect("historical v1 fixture");
+    assert_eq!(historical_value["schema"], "quire.differential-report/v1");
+    assert!(historical_value["contractIrRevision"].is_string());
+    assert_eq!(reseal_report(historical_value.clone()), historical);
+    assert!(validate_report_document(historical).is_err());
+    assert!(validate_differential_report(historical, &query, &run).is_err());
+
     let mut v1 = value;
-    v1["schema"] = "quire.differential-report/v1".into();
-    v1["contractIrRevision"] = "0".repeat(40).into();
+    v1["schema"] = historical_value["schema"].clone();
+    v1["contractIrRevision"] = historical_value["contractIrRevision"].clone();
     let bytes = reseal_report(v1);
     assert!(validate_report_document(&bytes).is_err());
     assert!(validate_differential_report(&bytes, &query, &run).is_err());
