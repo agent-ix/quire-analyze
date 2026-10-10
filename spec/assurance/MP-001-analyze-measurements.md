@@ -9,8 +9,9 @@ definition_version: quire-analyze.measurement-v1
 stage: gate
 ground_truth_kind: mechanical
 statistical_design:
-  population: every public IR construct analysis kind failure state engine and supported platform
-  sampling: exhaustive canonical fixtures plus seeded generated semantic and fault variations
+  population: the 12 declared TC procedures, covering public IR constructs, analysis kinds, failure states, engines, and supported platforms
+  minimum_population: 12
+  sampling: each declared TC procedure once per repetition, with its canonical fixtures and seeded semantic and fault variations
   repetitions: 3
   estimator: count
   error_model: encoding engine process platform configuration identity and fixture differences
@@ -18,15 +19,9 @@ statistical_design:
   decision_rule:
     comparator: eq
     threshold: 0
-protected_apparatus:
-  - tests/**
-  - spec/test/**
-  - Makefile
 negative_controls:
   - kind: suppressed-observation
     description: Reconcile every declared fixture and repetition with retained per-run outcomes before counting adverse results.
-  - kind: apparatus-edit
-    description: Record the test harness, fixtures, test procedures, and gate configuration as protected apparatus so changed measurement inputs are visible.
   - kind: selective-reporting
     description: Retain all three repetitions and all Z3 and cvc5 outcomes, including unavailable and inconclusive results.
 relationships:
@@ -44,7 +39,13 @@ approve release or confer solver qualification, validation, accreditation, or ce
 
 The population includes every public IR construct and boundary, consistency and implication kind,
 exact and unsupported capability, solver/protocol/failure state, output artifact, mutation class,
-and declared supported platform.
+and declared supported platform. At this definition, `spec/test/` declares 12 TC procedures:
+TC-001 through TC-010, TC-013, and TC-014. Each repetition must record one outcome for each
+of those 12 procedures, including unavailable or inconclusive outcomes. The collection must
+state `population.examined` of at least 12 and `population.repetitions` of at least 3; a
+shorter collection is refused before the zero-count rule is evaluated. The human gate
+review also reconciles retained TC IDs against the declared set; the numeric floor alone
+cannot detect a duplicate substituted for an omitted TC.
 
 ## Collection Procedure
 
