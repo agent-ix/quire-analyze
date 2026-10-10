@@ -1,36 +1,49 @@
 ---
-id: interface-001
+id: interface_001
 title: "Contract analysis API"
 type: interface
 ---
-# [interface-001] Contract analysis API
+# [interface_001] Contract analysis API
 
 ## Contract
 
 ```yaml
 name: ContractAnalysis
 version: draft-analysis-v1
+status: proposed interface; callable library stages exist, CLI publication only
 input:
-  package: validated quire-contract-ir package
+  package: typed statements and clause identities from quire-contract-ir
   request: closed analysis kind, ordered assumption/left/right/candidate groups, execution point, encoding profile, limits
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
   - name: prepare
+    entry_point: src/analysis.rs AnalysisRequest constructors
+    current: implemented library request validation; caller supplies typed inputs
     output: AnalysisModel | DiagnosticSet
     semantics: validates identity, types, shared variables, definedness, and bounds before lowering
   - name: lower
-    output: QueryBundle | Unsupported
+    entry_point: src/analysis.rs lower_analysis_request; src/smt.rs lower_boolean_statements
+    current: implemented library Boolean-v1 lowering
+    output: QueryBundle | DiagnosticSet
     semantics: canonical exact SMT-LIB2 plus assertion and symbol maps; approximation is non-conclusive
   - name: execute
+    entry_point: src/solver.rs execute_solver
+    current: implemented library execution with caller-supplied query and solver configuration
     output: SolverRecord
     semantics: bounded argv-based process execution with exact engine/configuration identity
   - name: conclude
-    output: AnalysisReport
+    entry_point: src/analysis.rs classify_analysis
+    current: implemented library classification of a query and solver record
+    output: AnalysisConclusion
     semantics: analysis-kind-specific sat/unsat classification and checked source mapping
   - name: compare
-    output: DifferentialReport
+    entry_point: src/report.rs compare_solver_records
+    current: implemented library comparison; PGM-01 envelope unavailable
+    output: DifferentialRun
     semantics: retains both engine records; disagreement is non-conclusive until human-reviewed adjudication
   - name: cli_publish
+    entry_point: src/main.rs publish-report; src/report.rs validate_report_document and publish_report_new
+    current: sole implemented CLI command; consumes existing library report bytes
     input: authoritative canonical report rendered by the library
     output: byte-identical deterministic JSON report, stable exit class, and stderr diagnostics
     semantics: validates the closed report contract and atomically publishes without reconstructing trusted inputs
@@ -55,11 +68,30 @@ lowering_v1:
   unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
-  publication: disabled until the human PGM-02 Wave 4 decision
+  source_release: requires the human PGM-02 Wave 4 decision
 ```
+
+## Features
+
+| Feature | Kind |
+|---|---|
+| Boolean-v1 analysis stages | Library API |
+| Differential evidence and existing-report publication | Library API and publish-only CLI |
 
 ## Invariants
 
 The raw query and response are retained before normalization. An adapter cannot directly construct a
 conclusive report; only the checked conclusion layer can do so. Missing identities invalidate the
-record. The library API never derives an executable path from untrusted query content.
+record. The library API never derives an executable path from untrusted query content. The listed
+library entry points are separate calls; no CLI command currently composes prepare through compare.
+Hybrid reachability and canonical synthesis are separate providers in `src/hybrid_synthesis.rs`,
+returning method outcomes through `crates/method-contract`; they are outside this Boolean SMT
+classification contract. The PGM-01 shared envelope remains unavailable pending
+`quire-contract-ir#20`, so a local placeholder cannot establish full evidence compliance.
+
+Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The current
+`CONTRACT_IR_REVISION` literal in `src/smt.rs`, its report validation in `src/report.rs`, and
+manifest/lockfile text scan in `tests/smt_lowering.rs` duplicate that identity; code follow-up
+must remove the repetition without weakening the canonical content digests that bind a report to
+its analyzed query and evidence. Report producer identity names the application version. Neither
+the draft interface nor automated output grants engine qualification or human release approval.

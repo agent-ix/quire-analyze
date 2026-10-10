@@ -5,7 +5,7 @@ type: FR
 relationships:
   - target: ix://agent-ix/quire-analyze/StR-001
     type: satisfies
-  - target: ix://agent-ix/quire-analyze/interface-001
+  - target: ix://agent-ix/quire-analyze/interface_001
     type: implements
   - target: ix://agent-ix/quire-analyze/ADR-0010
     type: references

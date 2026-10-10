@@ -5,7 +5,7 @@ type: FR
 relationships:
   - target: ix://agent-ix/quire-analyze/FR-001
     type: depends_on
-  - target: ix://agent-ix/quire-analyze/interface-001
+  - target: ix://agent-ix/quire-analyze/interface_001
     type: implements
 ---
 # FR-002: Lower deterministic SMT-LIB2 with capability contracts
