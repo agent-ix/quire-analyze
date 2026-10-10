@@ -27,7 +27,7 @@ sha2 = "=0.10.9"
 quire-analyze-method-contract = { path = "crates/method-contract", version = "=0.1.0" }
 
 [dev-dependencies]
-proptest = "1.8.0"
+proptest = "~1.8.0"
 serde_yaml = "=0.9.34"
 
 [profile.release]
