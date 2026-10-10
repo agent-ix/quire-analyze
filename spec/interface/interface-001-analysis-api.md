@@ -18,9 +18,10 @@ analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antec
 operations:
   - name: prepare
     entry_point: src/analysis.rs AnalysisRequest constructors
-    current: implemented library request validation; caller supplies typed inputs
-    output: AnalysisModel | DiagnosticSet
-    semantics: validates identity, types, shared variables, definedness, and bounds before lowering
+    current: constructors check required groups and duplicate statement identities; remaining validation occurs during lowering
+    output: "Result<AnalysisRequest, Vec<AnalysisRequestError>>"
+    proposed_output: AnalysisModel | DiagnosticSet
+    semantics: proposed abstract prepare contract validates identity, types, shared variables, definedness, and bounds before solver execution
   - name: lower
     entry_point: src/analysis.rs lower_analysis_request; src/smt.rs lower_boolean_statements
     current: implemented library Boolean-v1 lowering
@@ -33,9 +34,9 @@ operations:
     semantics: bounded argv-based process execution with exact engine/configuration identity
   - name: conclude
     entry_point: src/analysis.rs classify_analysis
-    current: implemented library classification of a query and solver record
+    current: classifies solver outcome before SAT replay; failed replay records Incomplete but retains a conclusive status
     output: AnalysisConclusion
-    semantics: analysis-kind-specific sat/unsat classification and checked source mapping
+    semantics: FR-004 and FR-005 require analysis-kind-specific classification with replay-checked source mapping for conclusive results
   - name: compare
     entry_point: src/report.rs compare_solver_records
     current: implemented library comparison; PGM-01 envelope unavailable
@@ -50,7 +51,8 @@ operations:
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
-  rule: only a complete recognized sat/unsat response under an exact encoding can become conclusive
+  rule: required conclusive results need a complete recognized sat/unsat response under an exact encoding and successful SAT replay where applicable
+  current_gap: individual AnalysisConclusion can remain conclusive after failed SAT replay; IR-357 code follow-up remains open
 exit_classes:
   0: satisfied
   1: refuted
@@ -81,9 +83,12 @@ compatibility:
 ## Invariants
 
 The raw query and response are retained before normalization. An adapter cannot directly construct a
-conclusive report; only the checked conclusion layer can do so. Missing identities invalidate the
-record. The library API never derives an executable path from untrusted query content. The listed
-library entry points are separate calls; no CLI command currently composes prepare through compare.
+conclusion; `classify_analysis` owns its status. That implementation currently leaves an individual
+SAT conclusion conclusive when model replay fails, contrary to the required FR-004/FR-005
+fail-closed behavior. `compare_solver_records` guards same-status differential agreement separately.
+Missing identities invalidate the record. The library API never derives an executable path from
+untrusted query content. The listed library entry points are separate calls; no CLI command
+currently composes prepare through compare.
 Hybrid reachability and canonical synthesis are separate providers in `src/hybrid_synthesis.rs`,
 returning method outcomes through `crates/method-contract`; they are outside this Boolean SMT
 classification contract. The PGM-01 shared envelope remains unavailable pending
