@@ -27,23 +27,23 @@ The implemented Boolean-v1 derivation path is typed contract IR → closed `Anal
 canonical `QueryBundle` with assertion and variable maps → bounded Z3/cvc5 child process →
 `SolverRecord` → `classify_analysis` status and model replay record → differential report bytes.
 `classify_analysis` sets `Satisfied` or `Refuted` from the solver outcome before replaying a SAT
-model. On replay error it records `Incomplete` and a diagnostic but retains the conclusive status;
-`AnalysisConclusion::is_conclusive` reads that status. `compare_solver_records` separately requires
-verified SAT explanations for same-status conclusive agreement. That differential agreement guard
-does not make an individual conclusion fail closed. IR-357 code follow-up must resolve this
-FR-004/FR-005 gap before claiming replay-checked conclusive results.
+model. On replay error it retains that logical status and records `Incomplete` with a diagnostic,
+without representing a model or source value as verified. This is the FR-004 distinction between
+logical classification and explanation evidence. `AnalysisConclusion::is_conclusive` reads the
+logical status; `compare_solver_records` separately requires verified SAT explanations before
+same-status differential `Agreement`, as FR-005 requires.
 
 | Boundary | Owner and current entry point | Responsibility |
 |---|---|---|
 | Typed contract input | `quire-contract-ir` dependency; `src/smt.rs` `StatementInput`, `BindingGroup` | Consume authoritative expressions, clause identity, and explicit cross-requirement bindings; refuse unsupported shapes. |
 | Request and exact lowering | `src/analysis.rs` `AnalysisRequest`, `lower_analysis_request`; `src/smt.rs` `lower_boolean_statements` | Validate closed analysis kinds and produce the Boolean-v1 SMT-LIB2 query plus source maps. |
 | Bounded engine execution | `src/solver.rs` `execute_solver` | Run the external engine under resource bounds and retain a normalized record; never certify its answer. |
-| Conclusion classification | `src/analysis.rs` `classify_analysis` | Apply analysis-kind-specific sat/unsat rules and record Boolean model replay; a failed SAT replay currently leaves the individual status conclusive. |
+| Conclusion classification | `src/analysis.rs` `classify_analysis` | Apply analysis-kind-specific sat/unsat rules; preserve the logical status while recording a failed SAT model replay as incomplete explanation evidence. |
 | Differential evidence and publication | `src/report.rs` `execute_differential`, `render_differential_report`, `validate_report_document`, `publish_report_new`; `src/main.rs` `publish-report` | Compare and retain both engine records, render and validate report bytes, and atomically publish a pre-existing report through the CLI. |
 | Separate method providers | `src/hybrid_synthesis.rs` `reach`, `synthesize`, `validate_candidate`; `crates/method-contract` `AnalyzeOutcome` | Return bounded hybrid reachability and synthesis outcomes through their own method-result seam; these do not become SMT proof classifications. |
 
 The proof identity view binds selected clause content, explicit bindings, query bytes and maps,
-engine execution record, checked conclusion, and canonical report content. These content digests
+engine execution record, classified conclusion, and canonical report content. These content digests
 bind a proof to what it analyzed. Cargo.toml declares `quire-contract-ir` and Cargo.lock records
 its resolved source; they are the dependency identity authorities. The current implementation also
 duplicates that revision as `CONTRACT_IR_REVISION` in `src/smt.rs`, validates the same literal in
@@ -51,11 +51,12 @@ duplicates that revision as `CONTRACT_IR_REVISION` in `src/smt.rs`, validates th
 is a code follow-up, not an additional architecture authority. Report producer identity is the
 application name and version.
 
-The intended failure view routes invalid, unsupported, unknown, timed-out, cancelled, unavailable,
-malformed, truncated, contradictory, undecodable, discrepant, and internal states to a
-non-conclusive variant. The current exception is failed SAT model replay in an individual
-`AnalysisConclusion`; the differential same-status agreement check does not repair that API result.
-Adapters cannot construct conclusions directly.
+The failure view keeps invalid, unsupported, unknown, timed-out, cancelled, unavailable, malformed,
+truncated, and internal solver states distinct from logical `Satisfied` or `Refuted`. A failed SAT
+model replay leaves the logical status intact and marks explanation evidence incomplete; it cannot
+publish an unverified source value or yield same-status differential `Agreement`. Discrepant
+engine statuses retain both records with a non-conclusive differential disposition. Adapters cannot
+construct conclusions directly.
 
 The evidence view is incomplete: `src/report.rs` explicitly marks its PGM-01 envelope
 `unavailable` pending `quire-contract-ir#20`. FR-005-AC-2 and TC-007 cannot be claimed complete

@@ -34,9 +34,9 @@ operations:
     semantics: bounded argv-based process execution with exact engine/configuration identity
   - name: conclude
     entry_point: src/analysis.rs classify_analysis
-    current: classifies solver outcome before SAT replay; failed replay records Incomplete but retains a conclusive status
+    current: classifies the logical solver outcome; failed SAT replay retains that status and records Incomplete explanation without a verified model
     output: AnalysisConclusion
-    semantics: FR-004 and FR-005 require analysis-kind-specific classification with replay-checked source mapping for conclusive results
+    semantics: FR-004 preserves logical status while requiring verified evidence before publishing a mapped model or counterexample
   - name: compare
     entry_point: src/report.rs compare_solver_records
     current: implemented library comparison; PGM-01 envelope unavailable
@@ -51,8 +51,8 @@ operations:
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
-  rule: required conclusive results need a complete recognized sat/unsat response under an exact encoding and successful SAT replay where applicable
-  current_gap: individual AnalysisConclusion can remain conclusive after failed SAT replay; IR-357 code follow-up remains open
+  rule: complete recognized sat/unsat under exact encoding determines logical status; SAT replay determines whether model evidence is verified or incomplete
+  differential_agreement: FR-005 requires both matching conclusive statuses and every required SAT model replay-verified
 exit_classes:
   0: satisfied
   1: refuted
@@ -83,9 +83,10 @@ compatibility:
 ## Invariants
 
 The raw query and response are retained before normalization. An adapter cannot directly construct a
-conclusion; `classify_analysis` owns its status. That implementation currently leaves an individual
-SAT conclusion conclusive when model replay fails, contrary to the required FR-004/FR-005
-fail-closed behavior. `compare_solver_records` guards same-status differential agreement separately.
+conclusion; `classify_analysis` owns its logical status and its verified or incomplete explanation.
+FR-004 keeps that logical status when optional model evidence fails validation, without representing
+the evidence as verified. `compare_solver_records` requires verified SAT evidence for same-status
+differential `Agreement` under FR-005.
 Missing identities invalidate the record. The library API never derives an executable path from
 untrusted query content. The listed library entry points are separate calls; no CLI command
 currently composes prepare through compare.
