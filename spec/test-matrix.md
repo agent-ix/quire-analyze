@@ -7,7 +7,7 @@ type: TestMatrix
 
 ## Functional Requirement Coverage
 
-| Functional Req | Acceptance Criteria | Test Cases | Coverage Status |
+| Functional Req | Acceptance Criteria | Test Cases | Status |
 |---|---|---|---|
 | FR-001 | FR-001-AC-1, FR-001-AC-2 | TC-001, TC-009 | ✅ Boolean v1 analysis complete |
 | FR-001 | FR-001-AC-3 | TC-002, TC-009, TC-010 | ✅ Boolean v1 analysis complete |
