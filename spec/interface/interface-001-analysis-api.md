@@ -99,5 +99,9 @@ Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency
 `CONTRACT_IR_REVISION` literal in `src/smt.rs`, its report validation in `src/report.rs`, and
 manifest/lockfile text scan in `tests/smt_lowering.rs` duplicate that identity; code follow-up
 must remove the repetition without weakening the canonical content digests that bind a report to
-its analyzed query and evidence. Report producer identity names the application version. Neither
-the draft interface nor automated output grants engine qualification or human release approval.
+its analyzed query and evidence. The current runtime report is `quire.differential-report/v1`;
+`quire.differential-report/v2` is a planned closed contract without `contractIrRevision`, retaining
+producer application name/version and canonical clause, request, query, raw-stream, and report
+content digests. The v2 renderer and validator are not implemented, and no v1 fallback is planned.
+Neither the draft interface nor automated output grants engine qualification or human release
+approval.

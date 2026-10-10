@@ -31,10 +31,19 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   directory sync failure after rename reports `published-durability-unknown`, because complete
   destination bytes can already be visible. Callers do not delete or retry that state as though the
   destination were absent.
-- Runtime product output uses `quire.analysis-report/v1` and
-  `quire.differential-report/v1`. Canonical JSON is UTF-8, compact, recursively key-sorted, and has
-  no insignificant whitespace. `reportDigest` is SHA-256 over the canonical object with that field
-  omitted; validation re-derives every raw-stream and report digest.
+- The v1 product contracts name `quire.analysis-report/v1` and
+  `quire.differential-report/v1`; the currently implemented differential runtime report emits the
+  latter. Canonical JSON is UTF-8, compact, recursively key-sorted, and has no insignificant
+  whitespace. `reportDigest` is SHA-256 over the canonical object with that field omitted;
+  validation re-derives every raw-stream and report digest.
+- The planned `quire.differential-report/v2` closed contract removes the duplicated
+  `contractIrRevision` field. It retains the producer application name and version, complete clause
+  and source identities with canonical clause digests, request and query digests, exact query bytes
+  and their digest, raw solver-stream bytes and their digests, and the canonical report digest.
+  Dependency selection and resolution remain in `Cargo.toml` and `Cargo.lock`; their source revision
+  is not copied into report metadata. Until the v2 renderer, schema, and validator land, the runtime
+  continues to emit and validate v1. The v2 validator accepts the v2 contract only, with no v1
+  fallback or compatibility reader; this planned change does not make the PGM-01 envelope available.
 - Differential status is the closed set `agreement`, `disagreement`, `unavailable`, and
   `inconclusive`. Agreement is conclusive only when both exact engines return the same conclusive
   status and every required sat model is replay-verified. Different conclusive statuses are
@@ -60,6 +69,7 @@ stable exit classification, and shall retain cross-engine discrepancies without 
 | FR-005-AC-3 | Differential disagreement retains both results and cannot be reported as agreement. | Test (TC-006) |
 | FR-005-AC-4 | Failed publication leaves no partial result or modified developer-owned file. | Test (TC-008) |
 | FR-005-AC-5 | Every filed semantic defect maps to an executable retained regression fixture. | Inspection and test (TC-006) |
+| FR-005-AC-6 | When `quire.differential-report/v2` is implemented, its closed schema requires `producer.name` and `producer.version`; every `assertions[].clause`, `assertions[].source`, and `assertions[].clauseDigest`; `bindingSetDigest`, `requestDigest`, `queryDigest`, `queryHex`, `querySha256`, and `reportDigest`; and every engine's `stdoutHex`, `stdoutSha256`, `stderrHex`, `stderrSha256`, `modelHex`, and `modelSha256`. Standalone v2 validation verifies the query, raw-stream, model, and canonical report digests against retained bytes and derives `queryDigest` from retained `requestDigest` and query bytes. Validation bound to the authoritative `QueryBundle` and differential run rejects a report whose clause/source identities or clause, binding-set, or request digests differ from canonical reconstruction; standalone validation does not claim to derive those identities from absent source content. Both validation paths reject missing named fields, `contractIrRevision`, and every `quire.differential-report/v1` document, with no v1 fallback. This criterion remains planned until the v2 renderer, schema, validator, and tests land. | Test (TC-007) |
 
 ## Dependencies
 
