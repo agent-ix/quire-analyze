@@ -7,14 +7,28 @@ owner: analyze-maintainers
 metric: analysis_semantic_fault_differential_and_evidence_conformance
 definition_version: quire-analyze.measurement-v1
 stage: gate
+ground_truth_kind: mechanical
 statistical_design:
   population: every public IR construct analysis kind failure state engine and supported platform
   sampling: exhaustive canonical fixtures plus seeded generated semantic and fault variations
   repetitions: 3
-  estimator: exact discrepancies digest differences classifications cleanup and evidence mutation outcomes
+  estimator: count
   error_model: encoding engine process platform configuration identity and fixture differences
   uncertainty: retain unavailable skipped inconclusive unsupported unknown and differential states
-  decision_rule: escalate any semantic discrepancy false conclusion leaked process digest drift or evidence mutation pass
+  decision_rule:
+    comparator: eq
+    threshold: 0
+protected_apparatus:
+  - tests/**
+  - spec/test/**
+  - Makefile
+negative_controls:
+  - kind: suppressed-observation
+    description: Reconcile every declared fixture and repetition with retained per-run outcomes before counting adverse results.
+  - kind: apparatus-edit
+    description: Record the test harness, fixtures, test procedures, and gate configuration as protected apparatus so changed measurement inputs are visible.
+  - kind: selective-reporting
+    description: Retain all three repetitions and all Z3 and cvc5 outcomes, including unavailable and inconclusive results.
 relationships:
   - target: ix://agent-ix/quire-analyze/AP-001
     type: measures
@@ -37,6 +51,18 @@ and declared supported platform.
 Fake executables exercise
 process faults; independent finite enumeration and counterexample replay exercise semantics;
 Z3 and cvc5 runs exercise differential behavior; mutation probes exercise evidence integrity.
+
+## Mechanical Decision Rule
+
+For each declared fixture and each of the three repetitions, count every semantic-oracle
+discrepancy, false conclusive classification, surviving process tree or cleanup overrun,
+byte or identity-digest difference for identical material inputs, undisposed engine
+discrepancy, invalid counterexample replay, and accepted evidence mutation. The count is
+zero only when none of these adverse outcomes occurs. Retain each individual outcome and
+the declared fixture census. Any nonzero count is escalated. A zero count with an omitted
+fixture or repetition, an unavailable supported lane, or an inconclusive outcome is
+incomplete evidence and cannot support a clean claim. M-01, M-03, M-09, and M-10 remain
+separate review evidence for the human source-release decision.
 
 ## Measures
 
