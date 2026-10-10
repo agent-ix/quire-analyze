@@ -30,8 +30,10 @@ construct has a declared exact encoding under the selected profile.
 - State observations and execution points remain part of variable identity. Short-circuit and total
   Boolean operators share an encoding only after upstream validation establishes total Boolean
   operands and discharges definedness obligations.
-- The profile declares supported and unsupported constructs, logic and SMT-LIB version, exact
-  dependency revision, statement/expression/query byte limits, and named-assertion/model features.
+- The profile declares supported and unsupported constructs, logic and SMT-LIB version,
+  statement/expression/query byte limits, and named-assertion/model features. `Cargo.toml` declares
+  the `quire-contract-ir` dependency and `Cargo.lock` records its resolved source; the public
+  capability profile does not repeat that source revision.
 - Domain-separated statement, binding-set, analysis-request, and query digests bind sorted canonical
   identities, public limits, the encoding profile, and exact query bytes.
 - Unsupported or approximate semantics return `unsupported`; v0.1 never emits an approximate query

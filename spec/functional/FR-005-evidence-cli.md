@@ -31,10 +31,19 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   directory sync failure after rename reports `published-durability-unknown`, because complete
   destination bytes can already be visible. Callers do not delete or retry that state as though the
   destination were absent.
-- Runtime product output uses `quire.analysis-report/v1` and
-  `quire.differential-report/v1`. Canonical JSON is UTF-8, compact, recursively key-sorted, and has
-  no insignificant whitespace. `reportDigest` is SHA-256 over the canonical object with that field
-  omitted; validation re-derives every raw-stream and report digest.
+- The v1 product contracts name `quire.analysis-report/v1` and
+  `quire.differential-report/v1`; the currently implemented differential runtime report emits the
+  latter. Canonical JSON is UTF-8, compact, recursively key-sorted, and has no insignificant
+  whitespace. `reportDigest` is SHA-256 over the canonical object with that field omitted;
+  validation re-derives every raw-stream and report digest.
+- The planned `quire.differential-report/v2` closed contract removes the duplicated
+  `contractIrRevision` field. It retains the producer application name and version, complete clause
+  and source identities with canonical clause digests, request and query digests, exact query bytes
+  and their digest, raw solver-stream bytes and their digests, and the canonical report digest.
+  Dependency selection and resolution remain in `Cargo.toml` and `Cargo.lock`; their source revision
+  is not copied into report metadata. Until the v2 renderer, schema, and validator land, the runtime
+  continues to emit and validate v1. The v2 validator accepts the v2 contract only, with no v1
+  fallback or compatibility reader; this planned change does not make the PGM-01 envelope available.
 - Differential status is the closed set `agreement`, `disagreement`, `unavailable`, and
   `inconclusive`. Agreement is conclusive only when both exact engines return the same conclusive
   status and every required sat model is replay-verified. Different conclusive statuses are

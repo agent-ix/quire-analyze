@@ -49,7 +49,9 @@ its resolved source; they are the dependency identity authorities. The current i
 duplicates that revision as `CONTRACT_IR_REVISION` in `src/smt.rs`, validates the same literal in
 `src/report.rs`, and text-scans manifests and lockfile in `tests/smt_lowering.rs`. That repetition
 is a code follow-up, not an additional architecture authority. Report producer identity is the
-application name and version.
+application name and version. The current differential report is v1 and includes that repeated
+revision. A planned v2 closed report removes it while retaining canonical proof-to-content digests
+and producer application identity. No v2 renderer or validator exists yet; v2 has no v1 fallback.
 
 The failure view keeps invalid, unsupported, unknown, timed-out, cancelled, unavailable, malformed,
 truncated, and internal solver states distinct from logical `Satisfied` or `Refuted`. A failed SAT
