@@ -84,6 +84,8 @@ compatibility:
 
 The raw query and response are retained before normalization. An adapter cannot directly construct a
 conclusion; `classify_analysis` owns its logical status and its verified or incomplete explanation.
+A conclusive logical status follows only a complete recognized sat/unsat response under the exact
+encoding profile.
 FR-004 keeps that logical status when optional model evidence fails validation, without representing
 the evidence as verified. `compare_solver_records` requires verified SAT evidence for same-status
 differential `Agreement` under FR-005.
