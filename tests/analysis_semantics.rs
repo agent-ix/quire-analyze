@@ -193,6 +193,21 @@ fn reseal_report(mut value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("sealed report")
 }
 
+fn expected_query_digest(request_digest: &str, query: &[u8]) -> String {
+    let request = (0..32)
+        .map(|index| {
+            u8::from_str_radix(&request_digest[index * 2..index * 2 + 2], 16).expect("hex")
+        })
+        .collect::<Vec<_>>();
+    let mut hasher = Sha256::new();
+    hasher.update(b"quire-analyze\0query\0");
+    for field in [b"quire.smtlib2/v1".as_slice(), request.as_slice(), query] {
+        hasher.update((field.len() as u64).to_be_bytes());
+        hasher.update(field);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
 fn write_solver(directory: &Path, response: &str, slow: bool) -> PathBuf {
     let path = directory.join("solver");
     let action = if slow {
@@ -840,7 +855,7 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
     validate_differential_report(&first, &query, &run).expect("valid report");
     let value: serde_json::Value = serde_json::from_slice(&first).expect("JSON");
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../schemas/differential-report-v1.schema.json"
+        "../schemas/differential-report-v2.schema.json"
     ))
     .expect("schema JSON");
     let validator = jsonschema::JSONSchema::options()
@@ -1105,13 +1120,208 @@ fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
         validate_report_document(&reseal_report(relabelled_query)).is_err(),
         "the query bytes were replaced and queryDigest still validated against them"
     );
+}
 
-    // A report produced under a different contract-IR revision was produced
-    // under different clause-digest semantics.
-    let mut other_revision = value.clone();
-    other_revision["contractIrRevision"] = serde_json::Value::String("0".repeat(40));
-    assert!(
-        validate_report_document(&reseal_report(other_revision)).is_err(),
-        "a foreign contract-IR revision validated"
+/// Trace: TC-007, FR-005-AC-6
+#[test]
+fn differential_v2_requires_retained_identities_and_rejects_v1() {
+    let request = AnalysisRequest::dead_antecedent(
+        vec![],
+        statement("v2-identity", literal(false), &[]),
+        vec![],
+    )
+    .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let run = compare_solver_records(
+        &query,
+        &execute_engine_response(&query, "unsat\n", SolverEngine::Z3),
+        &execute_engine_response(&query, "unsat\n", SolverEngine::Cvc5),
     );
+    let report = render_differential_report(&query, &run).expect("v2 report");
+    let value: serde_json::Value = serde_json::from_slice(&report).expect("report JSON");
+    assert_eq!(value["schema"], "quire.differential-report/v2");
+    assert_eq!(value["producer"]["name"], env!("CARGO_PKG_NAME"));
+    assert_eq!(value["producer"]["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        value["assertions"][0]["clause"],
+        "agent-ix/analysis-test:REQ-v2-identity@1:C-v2-identity"
+    );
+    assert_eq!(
+        value["assertions"][0]["source"]["document"],
+        "analysis-test"
+    );
+    assert_eq!(value["assertions"][0]["source"]["revision"], 1);
+    assert_eq!(value["assertions"][0]["source"]["start"]["byte"], 11);
+    assert_eq!(value["assertions"][0]["source"]["end"]["byte"], 12);
+    assert_eq!(
+        value["queryHex"],
+        query
+            .query()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    assert_eq!(
+        value["querySha256"],
+        format!("{:x}", Sha256::digest(query.query().as_bytes()))
+    );
+    assert_eq!(value["engines"][0]["stdoutHex"], "756e7361740a");
+    assert_eq!(
+        value["engines"][0]["stdoutSha256"],
+        format!("{:x}", Sha256::digest(b"unsat\n"))
+    );
+    assert!(value.get("contractIrRevision").is_none());
+    validate_report_document(&report).expect("standalone v2");
+    validate_differential_report(&report, &query, &run).expect("bound v2");
+
+    for field in [
+        "bindingSetDigest",
+        "requestDigest",
+        "queryDigest",
+        "queryHex",
+        "querySha256",
+        "reportDigest",
+    ] {
+        let mut missing = value.clone();
+        missing.as_object_mut().expect("object").remove(field);
+        let bytes = if field == "reportDigest" {
+            serde_json::to_vec(&missing).expect("JSON")
+        } else {
+            reseal_report(missing)
+        };
+        assert!(
+            validate_report_document(&bytes).is_err(),
+            "missing {field} passed standalone"
+        );
+        assert!(
+            validate_differential_report(&bytes, &query, &run).is_err(),
+            "missing {field} passed bound"
+        );
+    }
+    for field in ["name", "version"] {
+        let mut missing = value.clone();
+        missing["producer"]
+            .as_object_mut()
+            .expect("producer")
+            .remove(field);
+        assert!(
+            validate_report_document(&reseal_report(missing)).is_err(),
+            "missing producer.{field}"
+        );
+    }
+    for field in ["clause", "source", "clauseDigest"] {
+        let mut missing = value.clone();
+        missing["assertions"][0]
+            .as_object_mut()
+            .expect("assertion")
+            .remove(field);
+        assert!(
+            validate_report_document(&reseal_report(missing)).is_err(),
+            "missing assertion.{field}"
+        );
+    }
+    for field in [
+        "stdoutHex",
+        "stdoutSha256",
+        "stderrHex",
+        "stderrSha256",
+        "modelHex",
+        "modelSha256",
+    ] {
+        let mut missing = value.clone();
+        missing["engines"][0]
+            .as_object_mut()
+            .expect("engine")
+            .remove(field);
+        assert!(
+            validate_report_document(&reseal_report(missing)).is_err(),
+            "missing engine.{field}"
+        );
+    }
+
+    for (hex_field, digest_field) in [
+        ("queryHex", "querySha256"),
+        ("engines.0.stdoutHex", "engines.0.stdoutSha256"),
+        ("engines.0.stderrHex", "engines.0.stderrSha256"),
+        ("engines.0.modelHex", "engines.0.modelSha256"),
+    ] {
+        let mut changed = value.clone();
+        let (record, hex_key, digest_key) = if hex_field == "queryHex" {
+            (&mut changed, hex_field, digest_field)
+        } else {
+            (
+                &mut changed["engines"][0],
+                &hex_field[10..],
+                &digest_field[10..],
+            )
+        };
+        record[hex_key] = "00".into();
+        assert!(
+            validate_report_document(&reseal_report(changed)).is_err(),
+            "changed {hex_field}"
+        );
+        let mut changed = value.clone();
+        let record = if hex_field == "queryHex" {
+            &mut changed
+        } else {
+            &mut changed["engines"][0]
+        };
+        record[digest_key] = "0".repeat(64).into();
+        assert!(
+            validate_report_document(&reseal_report(changed)).is_err(),
+            "changed {digest_field}"
+        );
+    }
+    let mut changed = value.clone();
+    changed["reportDigest"] = "0".repeat(64).into();
+    assert!(validate_report_document(&serde_json::to_vec(&changed).expect("JSON")).is_err());
+
+    for field in [
+        "clause",
+        "source",
+        "clauseDigest",
+        "bindingSetDigest",
+        "requestDigest",
+    ] {
+        let mut substituted = value.clone();
+        match field {
+            "clause" => substituted["assertions"][0][field] = "other:REQ@1:C1".into(),
+            "source" => substituted["assertions"][0][field]["document"] = "other-document".into(),
+            "clauseDigest" => substituted["assertions"][0][field] = "0".repeat(64).into(),
+            "bindingSetDigest" => substituted[field] = "0".repeat(64).into(),
+            "requestDigest" => {
+                substituted[field] = "0".repeat(64).into();
+                substituted["queryDigest"] = expected_query_digest(
+                    substituted[field].as_str().expect("digest"),
+                    query.query().as_bytes(),
+                )
+                .into();
+                let query_digest = substituted["queryDigest"].clone();
+                for engine in substituted["engines"].as_array_mut().expect("engines") {
+                    engine["queryDigest"] = query_digest.clone();
+                }
+            }
+            _ => unreachable!(),
+        }
+        let bytes = reseal_report(substituted);
+        validate_report_document(&bytes).expect("internally consistent report");
+        assert!(
+            validate_differential_report(&bytes, &query, &run).is_err(),
+            "substituted {field} passed bound"
+        );
+    }
+
+    let mut removed_field = value.clone();
+    removed_field["contractIrRevision"] = "0".repeat(40).into();
+    let bytes = reseal_report(removed_field);
+    assert!(validate_report_document(&bytes).is_err());
+    assert!(validate_differential_report(&bytes, &query, &run).is_err());
+
+    let mut v1 = value;
+    v1["schema"] = "quire.differential-report/v1".into();
+    v1["contractIrRevision"] = "0".repeat(40).into();
+    let bytes = reseal_report(v1);
+    assert!(validate_report_document(&bytes).is_err());
+    assert!(validate_differential_report(&bytes, &query, &run).is_err());
 }
