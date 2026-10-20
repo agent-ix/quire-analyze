@@ -5,15 +5,12 @@
 Quire Analyze is a Rust library and command-line tool that checks requirement
 contracts with an SMT solver.
 
-It takes the checked clauses of requirement contracts from
-[Contract IR](https://github.com/agent-ix/quire-contract-ir) and answers "are
-these consistent?" and "does A imply B?". It lowers the clauses to a small
-SMT-LIB query, runs a pinned Z3 or cvc5 binary on it, and translates the reply
-into a typed answer. A claim such as "these contracts conflict" comes with a
-model that names the clauses and values that produced it, and the library
-re-checks that model against the query before it reports it. When the solver
-cannot decide, runs out of time, or is not the pinned solver, the library
-reports that state.
+It reads requirement contracts from
+[Contract IR](https://github.com/agent-ix/quire-contract-ir), checks whether
+they are consistent and whether one implies another, and returns a typed answer.
+A conflict comes with a model naming the clauses and values involved, re-checked
+before it is reported. Undecided, timed-out and wrong-solver runs are reported
+as their own states.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
