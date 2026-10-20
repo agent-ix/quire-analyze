@@ -2,20 +2,15 @@
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/k8DVhuYBR2)
 
-Requirements contradict each other more often than anyone notices. One says a
-feature flag must be on whenever a job runs; another says the job runs only when
-the flag is off. Each reads fine alone, and the clash only shows up in
-production. Quire Analyze asks a solver instead of a reviewer: it takes the
-checked clauses of requirement contracts and answers *are these consistent?* and
-*does A imply B?* with a witness you can read.
+Quire Analyze is a Rust library and command-line tool that checks requirement
+contracts with an SMT solver.
 
-It turns clauses from [Contract IR](https://github.com/agent-ix/quire-contract-ir)
-into a small SMT-LIB query, runs a pinned Z3 or cvc5 binary on it, and
-translates the reply into a typed answer. A claim like "these contracts
-conflict" arrives with a model that names which clauses and which values
-produced it, and the library re-checks that model against the query before it
-reports it. When the solver cannot decide, runs out of time, or is not the
-solver you pinned, you get exactly that, never a guess dressed up as a result.
+It reads requirement contracts from
+[Contract IR](https://github.com/agent-ix/quire-contract-ir), checks whether
+they are consistent and whether one implies another, and returns a typed answer.
+A conflict comes with a model naming the clauses and values involved, re-checked
+before it is reported. Undecided, timed-out and wrong-solver runs are reported
+as their own states.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
@@ -27,12 +22,12 @@ solver you pinned, you get exactly that, never a guess dressed up as a result.
 > other platforms the library builds and reports `unsupported`. Expect breaking
 > changes.
 
-## The five questions
+## Analysis kinds
 
 An analysis request names its statements by role. The role decides what is
-asserted, and the kind of question decides how a solver reply is read: for
-consistency a `sat` reply is the good news, for the other four the query asserts
-a negation, so `unsat` is the good news and `sat` is a counterexample.
+asserted, and the kind of question decides how a solver reply is read. For
+consistency, a `sat` reply means satisfied. For the other four, the query asserts
+a negation, so `unsat` means satisfied and `sat` is a counterexample.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/kinds-dark.svg">
@@ -47,13 +42,13 @@ a negation, so `unsat` is the good news and `sat` is a counterexample.
 | `redundancy` | Do the peers already force the candidate? | `Distinguishing`: peers hold, candidate fails |
 | `dead_antecedent` | Can the antecedent ever be true? | `Activation`: an assignment that makes it true |
 
-## What the solver can and cannot be asked
+## Supported constructs
 
 Queries are in SMT-LIB 2.6, logic `QF_UF`, over Boolean variables. Lowering
 accepts Boolean literals, value references, `not`, `and`, `or` (both short-circuit
-and total forms), implication, and Boolean equality and inequality. Anything
-else is refused when the request is lowered, with a typed error naming the
-construct, rather than being approximated: integers, rationals, text, enums,
+and total forms), implication, and Boolean equality and inequality. Any other
+construct is refused when the request is lowered, with a typed error naming it:
+integers, rationals, text, enums,
 records, options, collections, field access, arithmetic, ordering, quantifiers,
 pure function calls and local references. (The authoritative list is
 `CAPABILITY_CONTRACT` in [`src/smt.rs`](src/smt.rs).)
@@ -65,7 +60,7 @@ from. A sample is in [`tests/golden/boolean-v1.smt2`](tests/golden/boolean-v1.sm
 
 ## Outcomes
 
-Every analysis ends in one `AnalysisStatus`. Only the first two are answers.
+Every analysis ends in one `AnalysisStatus`. Only `satisfied` and `refuted` are answers.
 
 | Status | Meaning |
 | --- | --- |
@@ -81,12 +76,12 @@ with fixed arguments and bounded input, output, model and time limits
 (`AdapterLimits`), and records its raw stdout, stderr and exit. A model is
 verified by parsing it, checking it assigns exactly the declared symbols, and
 replaying every assertion against it; if that fails the answer stays
-conclusive but the explanation is marked `Incomplete`, and a differential run
-will not call it an agreement.
+conclusive, the explanation is marked `Incomplete`, and a differential run does
+not count it as an agreement.
 
-## A first analysis
+## Usage
 
-This is the heart of the test `model_decode_mapping_and_replay_are_fail_closed`
+This example is from the test `model_decode_mapping_and_replay_are_fail_closed`
 in [`tests/analysis_semantics.rs`](tests/analysis_semantics.rs). The helpers
 `statement` and `execute_response` build a clause from a Contract IR package
 and run a stand-in solver script; they live in the same test file.
@@ -126,11 +121,10 @@ let cancelled = classify_analysis(&query, &cancelled_record);
 assert_eq!(cancelled.status(), AnalysisStatus::Timeout);
 ```
 
-## Two solvers, one verdict
+## Differential runs
 
 `execute_differential` runs the same query on Z3 and cvc5 and keeps both
-records before comparing them. Two engines that agree are much harder to fool
-than one.
+records, and compares them.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/differential-dark.svg">
@@ -148,8 +142,8 @@ than one.
 `quire.differential-report/v1` document (schema in
 [`schemas/`](schemas/differential-report-v1.schema.json)) with a digest over the
 whole report, and `validate_report_document` re-derives every digest and the
-conclusion from the retained raw evidence, so a hand-edited report is refused.
-`publish_report_new` writes it atomically and never overwrites an existing file.
+conclusion from the retained raw evidence. A hand-edited report is refused.
+`publish_report_new` writes it atomically and does not overwrite an existing file.
 
 ## Command line
 
@@ -171,18 +165,16 @@ quire-analyze publish-report --input REPORT.json --output NEW_REPORT.json
 ## Hybrid reachability and synthesis
 
 Two further providers, in [`src/hybrid_synthesis.rs`](src/hybrid_synthesis.rs),
-follow the same rule of typed non-conclusions. `reach` returns a bounded
-enclosure, never a point estimate, and `replay_hybrid` replays a retained
+return typed non-conclusions. `reach` returns a bounded enclosure, and `replay_hybrid` replays a retained
 witness against the exact model and bound. `synthesize` searches a finite
 canonical space and returns a candidate that `validate_candidate` must confirm
-independently. Both report `incomplete`, `failed` or `refused` instead of
-claiming success. Their shared result vocabulary lives in the small
+independently. Both report `incomplete`, `failed` or `refused` when they cannot succeed. Their shared result vocabulary lives in the small
 `quire-analyze-method-contract` crate in [`crates/method-contract`](crates/method-contract),
 which has no dependency on the rest of Quire.
 
-## The Quire ecosystem
+## Quire ecosystem
 
-Quire Analyze is a backend: it reads the Contract IR that the language layer
+Quire Analyze is a backend. It reads the Contract IR that the language layer
 produces and answers questions about it. It depends on
 [quire-contract-ir](https://github.com/agent-ix/quire-contract-ir) for the
 contract model, and its method-outcome crate is shared with quire-verification
@@ -203,7 +195,7 @@ Everything runs through `make`; see `make help` for the full list.
 | `make lint` | Clippy with warnings denied. |
 | `make fmt-check` | Verify formatting. |
 | `make spec` | Validate the specification and plan with `quire validate`. |
-| `make ci` | Every gate: format, lint, test, licence and advisory checks, unsafe-comment audit, spec, MSRV (Rust 1.75), rustdoc and the coverage floor. |
+| `make ci` | Every gate: format, lint, test, license and advisory checks, unsafe-comment audit, spec, MSRV (Rust 1.75), rustdoc and the coverage floor. |
 
 One test, `official_z3_cvc5_differential_corpus_agrees`, is ignored by default.
 Run it with the real binaries by setting `QUIRE_Z3` and `QUIRE_CVC5` to their
@@ -220,6 +212,6 @@ are updated before implementation, the repository's gates must pass, and a
 human maintainer reviews and owns release decisions. Agent-assisted
 contributions meet the same bar. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Licence
+## License
 
 AGPL-3.0-or-later. See [LICENSE](LICENSE).
