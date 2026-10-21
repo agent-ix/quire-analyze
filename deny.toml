@@ -12,12 +12,13 @@ allow = [
 ]
 confidence-threshold = 0.9
 # First-party agent-ix crates are AGPL-3.0-or-later (owner decision 2026-09-14,
-# agent-ix/quire-analyze#31). The exception is scoped to this crate so the
-# third-party allow-list stays permissive-only.
+# agent-ix/quire-analyze#31). Exceptions are scoped to first-party crates so
+# the third-party allow-list stays permissive-only.
 exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "quire-analyze" },
     { allow = ["AGPL-3.0-or-later"], crate = "quire-analyze-method-contract" },
     { allow = ["AGPL-3.0-or-later"], crate = "quire-contract-ir" },
+    { allow = ["AGPL-3.0-or-later"], crate = "ix-cli-kit" },
 ]
 
 [bans]
@@ -37,4 +38,4 @@ ignore = ["RUSTSEC-2026-0009"]
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/agent-ix/quire-contract-ir"]
+allow-git = ["https://github.com/agent-ix/quire-contract-ir", "https://github.com/agent-ix/ix-cli-kit"]
