@@ -17,6 +17,12 @@ path = "src/lib.rs"
 members = [".", "crates/method-contract"]
 resolver = "2"
 
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[lints]
+workspace = true
+
 [dependencies]
 ix-cli-kit = { git = "https://github.com/agent-ix/ix-cli-kit", branch = "main" }
 jsonschema = { version = "=0.17.1", default-features = false }
