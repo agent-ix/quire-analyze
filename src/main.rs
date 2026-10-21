@@ -1,18 +1,34 @@
 use std::{env, fs, path::PathBuf, process::ExitCode};
 
+use ix_cli_kit::{
+    exit::caller_exit_code,
+    streams::{Diagnostics, Record},
+};
 use quire_analyze::{
     publish_report_new, validate_report_document, DifferentialDisposition, MAX_REPORT_BYTES,
 };
 use serde_json::Value;
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(class) => ExitCode::from(class),
+    let class = match run() {
+        Ok(class) => class,
         Err((class, message)) => {
-            eprintln!("quire-analyze: {message}");
-            ExitCode::from(class)
+            emit_error(&message);
+            class
+        }
+    };
+    match caller_exit_code(class) {
+        Ok(code) => code,
+        Err(error) => {
+            emit_error(&error.to_string());
+            ExitCode::from(4)
         }
     }
+}
+
+fn emit_error(message: &str) {
+    Record::error("QuireAnalyze", &format!("quire-analyze: {message}"))
+        .emit(Diagnostics::default());
 }
 
 fn run() -> Result<u8, (u8, String)> {

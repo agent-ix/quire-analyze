@@ -21,7 +21,7 @@ help:
 	@echo "  make lint             - Clippy with -D warnings"
 	@echo "  make test             - cargo test"
 	@echo "  make spec             - Quire-validate the specification and plan"
-	@echo "  make msrv             - Test the locked graph with Rust 1.75"
+	@echo "  make msrv             - Test the locked graph with Rust 1.98.1"
 	@echo "  make rustdoc          - Build warning-free public documentation"
 	@echo "  make coverage         - Enforce the local line-coverage floor"
 	@echo "  make build            - Release build"
@@ -56,7 +56,7 @@ spec:
 
 .PHONY: msrv
 msrv:
-	$(CARGO) +1.75.0 test --locked
+	$(CARGO) +1.98.1 test --locked
 
 .PHONY: rustdoc
 rustdoc:

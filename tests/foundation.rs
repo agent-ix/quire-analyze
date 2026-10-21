@@ -30,16 +30,13 @@ const PLAN: &str = include_str!("../plan/PLAN-001-analyze-v01/plan.md");
 fn foundation_keeps_license_publication_and_ci_authority_bounded() {
     assert!(CARGO_MANIFEST.contains("license = \"AGPL-3.0-or-later\""));
     assert!(CARGO_MANIFEST.contains("publish = false"));
-    let workflow: serde_yaml::Value =
-        serde_yaml::from_str(CI_WORKFLOW).expect("valid workflow YAML");
+    let workflow: serde_json::Value =
+        serde_saphyr::from_str(CI_WORKFLOW).expect("valid workflow YAML");
     let triggers = workflow
         .get("on")
-        .and_then(serde_yaml::Value::as_mapping)
+        .and_then(serde_json::Value::as_object)
         .expect("workflow on mapping");
-    let trigger_names: BTreeSet<_> = triggers
-        .keys()
-        .map(|key| key.as_str().expect("string trigger"))
-        .collect();
+    let trigger_names: BTreeSet<_> = triggers.keys().map(String::as_str).collect();
     assert_eq!(trigger_names, BTreeSet::from(["workflow_dispatch"]));
     assert!(ASSURANCE_ARGUMENT.contains("status: open"));
     assert!(ASSURANCE_ARGUMENT.contains("No automated sufficiency decision"));

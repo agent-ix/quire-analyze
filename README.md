@@ -195,7 +195,7 @@ Everything runs through `make`; see `make help` for the full list.
 | `make lint` | Clippy with warnings denied. |
 | `make fmt-check` | Verify formatting. |
 | `make spec` | Validate the specification and plan with `quire validate`. |
-| `make ci` | Every gate: format, lint, test, license and advisory checks, unsafe-comment audit, spec, MSRV (Rust 1.75), rustdoc and the coverage floor. |
+| `make ci` | Every gate: format, lint, test, license and advisory checks, unsafe-comment audit, spec, MSRV (Rust 1.98.1), rustdoc and the coverage floor. |
 
 One test, `official_z3_cvc5_differential_corpus_agrees`, is ignored by default.
 Run it with the real binaries by setting `QUIRE_Z3` and `QUIRE_CVC5` to their
