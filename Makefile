@@ -27,8 +27,7 @@ help:
 	@echo "  make build            - Release build"
 	@echo "  make clean            - cargo clean"
 	@echo "  make deny             - cargo deny check licenses"
-	@echo "  make audit-unsafe     - Enforce // SAFETY: comments on unsafe blocks"
-	@echo "  make ci               - All CI gates locally (fmt-check + lint + test + deny + audit-unsafe)"
+	@echo "  make ci               - All CI gates locally (fmt-check + lint + test + deny + spec + msrv + rustdoc + coverage)"
 
 # =============================================================================
 # Format / Lint / Test
@@ -97,13 +96,9 @@ deny-sources:
 cargo-audit:
 	$(CARGO) audit
 
-.PHONY: audit-unsafe
-audit-unsafe:
-	bash scripts/check_unsafe_comments.sh
-
 # =============================================================================
 # Composite
 # =============================================================================
 
 .PHONY: ci
-ci: fmt-check lint test deny audit-unsafe spec msrv rustdoc coverage
+ci: fmt-check lint test deny spec msrv rustdoc coverage

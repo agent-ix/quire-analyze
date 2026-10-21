@@ -22,14 +22,13 @@ make test           # cargo test
 make build          # release build
 make clean          # cargo clean
 make deny           # cargo deny check licenses
-make audit-unsafe   # check that every unsafe block has a // SAFETY: comment
 make ci             # every local gate
 ```
 
 ## Safety scaffolding
 
 - `deny.toml` allow-lists licenses and denies unknown registries/git sources
-- `scripts/check_unsafe_comments.sh` runs in CI and locally via `make audit-unsafe`. Every `unsafe {` block must have a `// SAFETY:` comment within the 3 preceding lines, or be listed in `scripts/unsafe_comment_baseline.txt`. Update the baseline with `bash scripts/check_unsafe_comments.sh --update-baseline`.
+- Workspace Clippy `undocumented_unsafe_blocks` checks safety comments in both crates.
 - `rustfmt.toml` uses 100-char width and `StdExternalCrate` import grouping. CI fails on drift.
 
 ## Layout
