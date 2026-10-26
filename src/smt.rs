@@ -15,8 +15,6 @@ use sha2::{Digest as _, Sha256};
 pub const ANALYSIS_MODEL_PROFILE: &str = "quire.analysis-model/v1";
 /// The first exact SMT-LIB2 encoding profile.
 pub const SMTLIB2_PROFILE: &str = "quire.smtlib2/v1";
-/// Exact accepted contract-IR source revision.
-pub const CONTRACT_IR_REVISION: &str = "bb5d30cbb1519b7ac286250114c96ba967661cba";
 /// Bound on a generated query before any solver is invoked.
 pub const MAX_QUERY_BYTES: usize = 16 * 1024 * 1024;
 /// Bound on statements in one query.

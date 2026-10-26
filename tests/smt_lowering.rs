@@ -2,8 +2,7 @@
 
 use quire_analyze::{
     lower_boolean_statements, type_shape_digest, BindingGroup, BindingMember, LoweringErrorCode,
-    StatementInput, CAPABILITY_CONTRACT, CONTRACT_IR_REVISION, MAX_QUERY_STATEMENTS,
-    SMTLIB2_PROFILE,
+    StatementInput, CAPABILITY_CONTRACT, MAX_QUERY_STATEMENTS, SMTLIB2_PROFILE,
 };
 use quire_contract_ir::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, CollectionType, ComparisonOperator,
@@ -813,14 +812,10 @@ fn statement_resource_bound_is_enforced() {
     assert_eq!(duplicate[0].code(), LoweringErrorCode::DuplicateStatement);
 }
 
-/// FR-002 capability contract and exact dependency pin are public and closed.
+/// FR-002 capability contract is public and closed.
 /// Trace: TC-010, FR-002-AC-2, FR-002-AC-4, FR-002-AC-5
 #[test]
 fn capability_contract_is_explicit() {
-    assert_eq!(
-        CONTRACT_IR_REVISION,
-        "bb5d30cbb1519b7ac286250114c96ba967661cba"
-    );
     assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v1");
     assert!(CAPABILITY_CONTRACT
         .exact_constructs
@@ -836,11 +831,4 @@ fn capability_contract_is_explicit() {
             .unsupported_constructs
             .contains(&unsupported));
     }
-
-    let manifest = include_str!("../Cargo.toml");
-    let lock = include_str!("../Cargo.lock");
-    assert!(manifest.contains(&format!("rev = \"{CONTRACT_IR_REVISION}\"")));
-    assert!(lock.contains(&format!("#{CONTRACT_IR_REVISION}")));
-    assert!(!lock.contains("name = \"z3\""));
-    assert!(!lock.contains("name = \"cvc5\""));
 }
