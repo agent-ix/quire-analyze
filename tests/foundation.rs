@@ -1,5 +1,6 @@
 //! Requirement-backed tests for the specification and assurance foundation.
 
+use ix_trace_rs::trace;
 use std::collections::BTreeSet;
 
 const CARGO_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -25,7 +26,7 @@ const ASSURANCE_ARGUMENT: &str = include_str!("../spec/assurance/AA-001-analyze-
 const PLAN: &str = include_str!("../plan/PLAN-001-analyze-v01/plan.md");
 
 /// Issue #2 baseline and policy gate; NFR-002-AC-4.
-/// Trace: NFR-002-AC-4
+#[trace("NFR-002-AC-4")]
 #[test]
 fn foundation_keeps_license_publication_and_ci_authority_bounded() {
     assert!(CARGO_MANIFEST.contains("license = \"AGPL-3.0-or-later\""));
@@ -43,7 +44,7 @@ fn foundation_keeps_license_publication_and_ci_authority_bounded() {
 }
 
 /// Issue #2 specification corpus and failure-domain gate; NFR-002-AC-2.
-/// Trace: NFR-002-AC-2
+#[trace("NFR-002-AC-2")]
 #[test]
 fn foundation_defines_closed_requirements_and_non_conclusive_states() {
     assert!(MASTER_SPEC.contains("FR-001 through FR-005, FR-007 and FR-008"));
@@ -104,7 +105,7 @@ fn foundation_names_assurance_boundary_evidence_and_owner() {
 }
 
 /// PLAN-001 workflow gate: only the first unfinished DAG child advances.
-/// Trace: PLAN-001
+#[trace("PLAN-001")]
 #[test]
 fn foundation_plan_advances_only_first_unblocked_child() {
     for issue in ["#6", "#7", "#3", "#4", "#5"] {
