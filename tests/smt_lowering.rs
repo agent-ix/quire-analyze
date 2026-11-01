@@ -831,4 +831,8 @@ fn capability_contract_is_explicit() {
             .unsupported_constructs
             .contains(&unsupported));
     }
+
+    let lock = include_str!("../Cargo.lock");
+    assert!(!lock.contains("name = \"z3\""));
+    assert!(!lock.contains("name = \"cvc5\""));
 }
