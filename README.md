@@ -139,8 +139,8 @@ records, and compares them.
 | `inconclusive` | Anything else, such as `unknown`, a timeout, or an unverified model. |
 
 `render_differential_report` writes the run as a canonical-JSON
-`quire.differential-report/v1` document (schema in
-[`schemas/`](schemas/differential-report-v1.schema.json)) with a digest over the
+`quire.differential-report/v2` document (schema in
+[`schemas/`](schemas/differential-report-v2.schema.json)) with a digest over the
 whole report, and `validate_report_document` re-derives every digest and the
 conclusion from the retained raw evidence. A hand-edited report is refused.
 `publish_report_new` writes it atomically and does not overwrite an existing file.

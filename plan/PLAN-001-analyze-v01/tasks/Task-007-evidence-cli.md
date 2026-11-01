@@ -25,7 +25,7 @@ adopt that reviewed component or record a reviewed plan delta explaining the rem
 
 ## Plan Delta
 
-The application-owned `quire.analysis-report/v1` and `quire.differential-report/v1` formats remain
+The application-owned `quire.analysis-report/v1` and `quire.differential-report/v2` formats remain
 in this crate because they are runtime product outputs, not assurance collectors. Retained suite-run
 transcription and audit adopt Quoin 0.23.1; no local collector, envelope builder, or verifier script
 is added. Because `quire-contract-ir#20` has not selected the shared PGM-01 envelope/integrity

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://agent-ix.github.io/quire-analyze/schemas/differential-report-v1.schema.json",
-  "title": "quire.differential-report/v1",
+  "$id": "https://agent-ix.github.io/quire-analyze/schemas/differential-report-v2.schema.json",
+  "title": "quire.differential-report/v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,7 +9,6 @@
     "analysisKind",
     "assertions",
     "bindingSetDigest",
-    "contractIrRevision",
     "differential",
     "encodingProfile",
     "engines",
@@ -44,7 +43,6 @@
       }
     },
     "bindingSetDigest": { "$ref": "#/definitions/digest" },
-    "contractIrRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "differential": {
       "type": "object",
       "additionalProperties": false,
@@ -85,7 +83,7 @@
     "querySha256": { "$ref": "#/definitions/digest" },
     "reportDigest": { "$ref": "#/definitions/digest" },
     "requestDigest": { "$ref": "#/definitions/digest" },
-    "schema": { "const": "quire.differential-report/v1" }
+    "schema": { "const": "quire.differential-report/v2" }
   },
   "definitions": {
     "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

@@ -97,13 +97,11 @@ returning method outcomes through `crates/method-contract`; they are outside thi
 classification contract. The PGM-01 shared envelope remains unavailable pending
 `quire-contract-ir#20`, so a local placeholder cannot establish full evidence compliance.
 
-Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The current
-`CONTRACT_IR_REVISION` literal in `src/smt.rs`, its report validation in `src/report.rs`, and
-manifest/lockfile text scan in `tests/smt_lowering.rs` duplicate that identity; code follow-up
-must remove the repetition without weakening the canonical content digests that bind a report to
-its analyzed query and evidence. The current runtime report is `quire.differential-report/v1`;
-`quire.differential-report/v2` is a planned closed contract without `contractIrRevision`, retaining
-producer application name/version and canonical clause, request, query, raw-stream, and report
-content digests. The v2 renderer and validator are not implemented, and no v1 fallback is planned.
+Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The runtime
+report uses `quire.differential-report/v2`, a closed contract without `contractIrRevision`. It
+retains producer application name/version and canonical clause, request, query, raw-stream, and
+report content digests. The standalone validator accepts v2 only; the bound validator also
+reconstructs identities from the authoritative query and differential run. No v1 fallback is
+provided.
 Neither the draft interface nor automated output grants engine qualification or human release
 approval.

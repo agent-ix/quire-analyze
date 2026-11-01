@@ -12,10 +12,9 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     classify_analysis, execute_solver, AnalysisConclusion, AnalysisStatus, CancellationToken,
     ExplanationState, QueryBundle, SolverConfig, SolverEngine, SolverOutcome, SolverRecord,
-    CONTRACT_IR_REVISION,
 };
 
-pub const DIFFERENTIAL_REPORT_SCHEMA: &str = "quire.differential-report/v1";
+pub const DIFFERENTIAL_REPORT_SCHEMA: &str = "quire.differential-report/v2";
 pub const PGM01_ENVELOPE_DEPENDENCY: &str = "agent-ix/quire-contract-ir#20";
 pub const MAX_REPORT_BYTES: usize = 64 * 1024 * 1024;
 static PUBLICATION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -237,7 +236,6 @@ pub fn render_differential_report(
             "source": source_value(&assertion.source),
         })).collect::<Vec<_>>(),
         "bindingSetDigest": query.binding_set_digest().to_string(),
-        "contractIrRevision": CONTRACT_IR_REVISION,
         "differential": {
             "agreedStatus": run.agreed_status.map(AnalysisStatus::as_str),
             "disposition": run.disposition.as_str(),
@@ -302,11 +300,11 @@ pub fn validate_differential_report(
 
 pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition, String> {
     if bytes.len() > MAX_REPORT_BYTES {
-        return Err("report exceeds the v1 byte bound".to_owned());
+        return Err("report exceeds the v2 byte bound".to_owned());
     }
     let mut value: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     let schema: Value = serde_json::from_str(include_str!(
-        "../schemas/differential-report-v1.schema.json"
+        "../schemas/differential-report-v2.schema.json"
     ))
     .map_err(|error| format!("embedded report schema is invalid: {error}"))?;
     let validator = jsonschema::JSONSchema::options()
@@ -329,7 +327,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
                 "analysisKind",
                 "assertions",
                 "bindingSetDigest",
-                "contractIrRevision",
                 "differential",
                 "encodingProfile",
                 "engines",
@@ -352,11 +349,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             ("analysisModelProfile", "quire.analysis-model/v1"),
             ("encodingProfile", "quire.smtlib2/v1"),
             ("logic", "QF_UF"),
-            // Pinned like the profiles above. A report produced under a
-            // different contract-IR revision was produced under different
-            // clause-digest semantics, and a bare 40-hex shape check does not
-            // notice that.
-            ("contractIrRevision", CONTRACT_IR_REVISION),
         ] {
             if object.get(field).and_then(Value::as_str) != Some(expected) {
                 return Err(format!("report {field} is absent or unsupported"));
