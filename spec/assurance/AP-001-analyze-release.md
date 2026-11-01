@@ -4,7 +4,7 @@ title: "Contract analysis v0.1 decision profile"
 type: AssuranceProfile
 status: proposed
 owner: human-release-owner
-profile_version: 0.2
+schema_version: 0.2
 profile_kind: general
 scope: one quire-analyze v0.1 source candidate
 impact_assessments:
