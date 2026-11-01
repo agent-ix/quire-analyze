@@ -687,8 +687,8 @@ fn digest(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod contract_tests {
-    use ix_trace_rs::trace;
     use super::*;
+    use ix_trace_rs::trace;
     use quire_analyze_method_contract::{
         AnalyzeAssumptionsIdentity, AnalyzeBoundsIdentity, AnalyzeContentIdentity,
         AnalyzeImplementationIdentity, AnalyzeOptionsIdentity, AnalyzeRequestIdentity,

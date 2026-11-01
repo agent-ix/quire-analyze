@@ -205,7 +205,15 @@ fn implication(left: &str, right: &str) -> Expression {
 }
 
 /// FR-002-AC-1/3 and TC-002/TC-004: lowering is byte deterministic and names complete identities.
-#[trace("TC-002", "TC-004", "TC-010", "FR-002-AC-1", "FR-002-AC-3", "FR-002-AC-5", "NFR-001-AC-1")]
+#[trace(
+    "TC-002",
+    "TC-004",
+    "TC-010",
+    "FR-002-AC-1",
+    "FR-002-AC-3",
+    "FR-002-AC-5",
+    "NFR-001-AC-1"
+)]
 #[test]
 fn golden_query_is_order_independent_and_source_mapped() {
     let first = bool_statement(

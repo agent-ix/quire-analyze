@@ -535,7 +535,14 @@ fn all_ten_truth_table_cells_match_independent_finite_models() {
 }
 
 /// FR-004-AC-2/3/4: only complete replaying models become source-mapped verified evidence.
-#[trace("TC-004", "TC-006", "TC-007", "FR-004-AC-2", "FR-004-AC-3", "FR-004-AC-4")]
+#[trace(
+    "TC-004",
+    "TC-006",
+    "TC-007",
+    "FR-004-AC-2",
+    "FR-004-AC-3",
+    "FR-004-AC-4"
+)]
 #[test]
 fn model_decode_mapping_and_replay_are_fail_closed() {
     let request = AnalysisRequest::consistency(
