@@ -7,6 +7,9 @@ license = "AGPL-3.0-or-later"
 description = "Dependency-light method outcome contract for quire-analyze consumers"
 publish = false
 
+[lints]
+workspace = true
+
 [lib]
 name = "quire_analyze_method_contract"
 path = "src/lib.rs"

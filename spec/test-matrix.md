@@ -37,7 +37,7 @@ type: TestMatrix
 
 ## Nonfunctional and Stakeholder Coverage
 
-| Requirement | Acceptance Criteria | Test Cases | Coverage Status |
+| Requirement | Acceptance Criteria | Test Cases | Status |
 |---|---|---|---|
 | StR-001 | StR-001-VC-1 | TC-002, TC-007 | 🚧 Planned |
 | StR-001 | StR-001-VC-2 | TC-006 | 🚧 Planned |

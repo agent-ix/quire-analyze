@@ -780,7 +780,7 @@ fn inspect_executable(
         Some(SolverOutcome::IoError)
     } else if raw.stdout.exceeded
         || raw.stderr.exceeded
-        || raw.exit.as_ref().map_or(true, |status| !status.success())
+        || raw.exit.as_ref().is_none_or(|status| !status.success())
     {
         Some(SolverOutcome::IdentityError)
     } else {
