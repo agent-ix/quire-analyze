@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Agent-IX
 
+use ix_trace_rs::trace;
 use proptest::prelude::*;
 use quire_analyze::{
     hybrid_method_outcome, reach, replay_hybrid, synthesis_method_outcome, synthesize,
@@ -41,7 +42,7 @@ impl CandidateValidator for MismatchedValidator {
 }
 
 proptest! {
-    /// Trace: TC-014, FR-008-AC-1.
+    #[trace("TC-014", "FR-008-AC-1")]
     #[test]
     fn tc_014_canonicalizes_arbitrary_finite_set_like_inputs(
         atoms in prop::collection::vec("[a-z]{1,4}", 1..32)
@@ -81,7 +82,7 @@ fn model() -> HybridRequest {
     }
 }
 
-/// Trace: TC-013, FR-007-AC-1, FR-007-AC-3.
+#[trace("TC-013", "FR-007-AC-1", "FR-007-AC-3")]
 #[test]
 fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
     let request = model();
@@ -113,7 +114,7 @@ fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
     assert!(!replay_hybrid(&changed, &witness));
 }
 
-/// Trace: TC-013, FR-007-AC-2.
+#[trace("TC-013", "FR-007-AC-2")]
 #[test]
 fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     let mut bounded = model();
@@ -149,7 +150,7 @@ fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
     ));
 }
 
-/// Trace: TC-014, FR-008-AC-1, FR-008-AC-2.
+#[trace("TC-014", "FR-008-AC-1", "FR-008-AC-2")]
 #[test]
 fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     let request = SynthesisRequest {
@@ -234,7 +235,7 @@ fn tc_014_canonical_candidate_requires_exact_independent_validation() {
     ));
 }
 
-/// Trace: TC-014, FR-008-AC-3.
+#[trace("TC-014", "FR-008-AC-3")]
 #[test]
 fn tc_014_distinguishes_exhaustive_no_candidate_from_incomplete_search() {
     let exhaustive = SynthesisRequest {
@@ -262,7 +263,7 @@ fn tc_014_distinguishes_exhaustive_no_candidate_from_incomplete_search() {
     ));
 }
 
-/// Trace: TC-014, FR-008-AC-1, FR-008-AC-3.
+#[trace("TC-014", "FR-008-AC-1", "FR-008-AC-3")]
 #[test]
 fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
     let single_atom = SynthesisRequest {
@@ -323,7 +324,7 @@ fn tc_014_distinguishes_delimited_atoms_and_stops_at_search_bound() {
     ));
 }
 
-/// Trace: TC-014, FR-008-AC-1.
+#[trace("TC-014", "FR-008-AC-1")]
 #[test]
 fn tc_014_enforces_aggregate_atom_byte_boundary() {
     let at_limit = SynthesisRequest {

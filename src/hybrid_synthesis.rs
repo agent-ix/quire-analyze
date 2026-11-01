@@ -687,6 +687,7 @@ fn digest(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod contract_tests {
+    use ix_trace_rs::trace;
     use super::*;
     use quire_analyze_method_contract::{
         AnalyzeAssumptionsIdentity, AnalyzeBoundsIdentity, AnalyzeContentIdentity,
@@ -714,7 +715,7 @@ mod contract_tests {
         }
     }
 
-    /// Trace: TC-013, TC-014.
+    #[trace("TC-013", "TC-014")]
     #[test]
     fn binders_preserve_exact_envelope_and_refuse_wrong_method() {
         let hybrid = reach(&HybridRequest {

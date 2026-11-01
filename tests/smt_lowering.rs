@@ -1,5 +1,6 @@
 //! Requirement-tagged tests for deterministic SMT-LIB2 lowering (issue #7).
 
+use ix_trace_rs::trace;
 use quire_analyze::{
     lower_boolean_statements, type_shape_digest, BindingGroup, BindingMember, LoweringErrorCode,
     StatementInput, CAPABILITY_CONTRACT, MAX_QUERY_STATEMENTS, SMTLIB2_PROFILE,
@@ -204,7 +205,7 @@ fn implication(left: &str, right: &str) -> Expression {
 }
 
 /// FR-002-AC-1/3 and TC-002/TC-004: lowering is byte deterministic and names complete identities.
-/// Trace: TC-002, TC-004, TC-010, FR-002-AC-1, FR-002-AC-3, FR-002-AC-5, NFR-001-AC-1
+#[trace("TC-002", "TC-004", "TC-010", "FR-002-AC-1", "FR-002-AC-3", "FR-002-AC-5", "NFR-001-AC-1")]
 #[test]
 fn golden_query_is_order_independent_and_source_mapped() {
     let first = bool_statement(
@@ -243,7 +244,7 @@ fn golden_query_is_order_independent_and_source_mapped() {
 }
 
 /// FR-001-AC-4 and NFR-002-AC-1: unverified clause identities cannot enter a query bundle.
-/// Trace: TC-003, TC-010, FR-001-AC-4, NFR-002-AC-1
+#[trace("TC-003", "TC-010", "FR-001-AC-4", "NFR-002-AC-1")]
 #[test]
 fn statement_input_recomputes_identity_and_rejects_provenance_mismatch() {
     let valid_environment = boolean_environment("REQ-valid", 1, &["ready"]);
@@ -310,7 +311,7 @@ fn statement_input_recomputes_identity_and_rejects_provenance_mismatch() {
 }
 
 /// FR-002-AC-1/2: every exact Boolean v1 operator has a stable concrete encoding.
-/// Trace: TC-010, FR-002-AC-1, FR-002-AC-2
+#[trace("TC-010", "FR-002-AC-1", "FR-002-AC-2")]
 #[test]
 fn every_supported_boolean_operator_has_an_exact_encoding() {
     let operators = [
@@ -373,7 +374,7 @@ fn every_supported_boolean_operator_has_an_exact_encoding() {
 }
 
 /// FR-002-AC-2/4 and TC-003: unsupported arithmetic fails before solver execution.
-/// Trace: TC-003, TC-010, FR-002-AC-2, FR-002-AC-4
+#[trace("TC-003", "TC-010", "FR-002-AC-2", "FR-002-AC-4")]
 #[test]
 fn arithmetic_is_explicitly_unsupported() {
     let integer = IntegerType::new(IntegerDomain::Signed, 0, 10, OverflowPolicy::Reject)
@@ -413,7 +414,7 @@ fn arithmetic_is_explicitly_unsupported() {
 }
 
 /// FR-002-AC-2/4 and TC-003: quantification and non-Boolean data fail explicitly.
-/// Trace: TC-003, TC-010, FR-002-AC-2, FR-002-AC-4
+#[trace("TC-003", "TC-010", "FR-002-AC-2", "FR-002-AC-4")]
 #[test]
 fn quantification_and_data_types_are_explicitly_unsupported() {
     let collection_type = CollectionType::new(ValueType::Boolean, 4).expect("collection type");
@@ -477,7 +478,7 @@ fn quantification_and_data_types_are_explicitly_unsupported() {
 }
 
 /// FR-001-AC-2 and FR-002-AC-3: reviewed bindings merge exact compatible roots only.
-/// Trace: TC-004, TC-010, FR-001-AC-2, FR-002-AC-3
+#[trace("TC-004", "TC-010", "FR-001-AC-2", "FR-002-AC-3")]
 #[test]
 fn explicit_binding_merges_two_complete_origins() {
     let first_environment = boolean_environment("REQ-left", 1, &["active"]);
@@ -518,7 +519,7 @@ fn explicit_binding_merges_two_complete_origins() {
 }
 
 /// FR-002-AC-3: state observations remain distinct in symbols and binding compatibility.
-/// Trace: TC-004, TC-010, FR-001-AC-2, FR-002-AC-3
+#[trace("TC-004", "TC-010", "FR-001-AC-2", "FR-002-AC-3")]
 #[test]
 fn state_observations_are_identity_bearing() {
     let environment = boolean_state_environment("REQ-state", 1, &["ready"]);
@@ -554,7 +555,7 @@ fn state_observations_are_identity_bearing() {
 }
 
 /// FR-001-AC-2/4: duplicate group identities and unused members fail closed.
-/// Trace: TC-003, TC-010, FR-001-AC-2, FR-001-AC-4
+#[trace("TC-003", "TC-010", "FR-001-AC-2", "FR-001-AC-4")]
 #[test]
 fn malformed_binding_sets_are_rejected_before_query_generation() {
     let first_environment = boolean_environment("REQ-left", 1, &["active"]);
@@ -668,7 +669,7 @@ fn malformed_binding_sets_are_rejected_before_query_generation() {
 }
 
 /// ADR-0010 and TC-009: type shape ignores owner but changes with complete structure.
-/// Trace: TC-002, TC-009, TC-010, FR-001-AC-3
+#[trace("TC-002", "TC-009", "TC-010", "FR-001-AC-3")]
 #[test]
 fn type_shape_is_owner_independent_and_structural() {
     let left = boolean_environment("REQ-left", 1, &["active"]);
@@ -703,7 +704,7 @@ fn type_shape_is_owner_independent_and_structural() {
 }
 
 /// ADR-0010 and TC-002: structural enum and record identities ignore authored declaration order.
-/// Trace: TC-002, TC-010, FR-001-AC-3
+#[trace("TC-002", "TC-010", "FR-001-AC-3")]
 #[test]
 fn named_type_shape_is_declaration_order_independent() {
     fn environment(reverse: bool) -> DeclarationEnvironment {
@@ -766,7 +767,7 @@ fn named_type_shape_is_declaration_order_independent() {
 }
 
 /// FR-001-AC-3/5: clause and request mutations invalidate downstream identities.
-/// Trace: TC-002, TC-010, FR-001-AC-3, FR-001-AC-5
+#[trace("TC-002", "TC-010", "FR-001-AC-3", "FR-001-AC-5")]
 #[test]
 fn material_input_changes_invalidate_request_and_query_digests() {
     let first = bool_statement("REQ-digest", 1, "C-one", &["ready"], value("ready"), 0x71);
@@ -781,7 +782,7 @@ fn material_input_changes_invalidate_request_and_query_digests() {
 }
 
 /// NFR-001-AC-2/3: the public statement bound rejects work before lowering.
-/// Trace: TC-003, TC-010, NFR-001-AC-2, NFR-001-AC-3
+#[trace("TC-003", "TC-010", "NFR-001-AC-2", "NFR-001-AC-3")]
 #[test]
 fn statement_resource_bound_is_enforced() {
     let statement = bool_statement(
@@ -813,7 +814,7 @@ fn statement_resource_bound_is_enforced() {
 }
 
 /// FR-002 capability contract is public and closed.
-/// Trace: TC-010, FR-002-AC-2, FR-002-AC-4, FR-002-AC-5
+#[trace("TC-010", "FR-002-AC-2", "FR-002-AC-4", "FR-002-AC-5")]
 #[test]
 fn capability_contract_is_explicit() {
     assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v1");

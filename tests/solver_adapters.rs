@@ -2,6 +2,7 @@
 
 #![cfg(target_os = "linux")]
 
+use ix_trace_rs::trace;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -204,7 +205,7 @@ fn execute_mode(mode: &str, limits: AdapterLimits) -> quire_analyze::SolverRecor
 }
 
 /// FR-003-AC-2/3: both engines share the exact normalized sat/unsat/unknown contract.
-/// Trace: TC-005, TC-006, FR-003-AC-2, FR-003-AC-3
+#[trace("TC-005", "TC-006", "FR-003-AC-2", "FR-003-AC-3")]
 #[test]
 fn exact_engine_contract_and_protocol_states() {
     for (mode, expected) in [
@@ -269,7 +270,7 @@ fn exact_engine_contract_and_protocol_states() {
 }
 
 /// FR-003-AC-5: absolute metacharacter paths are direct argv inputs, never shell programs.
-/// Trace: TC-005, FR-003-AC-5
+#[trace("TC-005", "FR-003-AC-5")]
 #[test]
 fn paths_are_absolute_pinned_and_not_shell_interpreted() {
     let directory = TempDirectory::new("path;metacharacters");
@@ -328,7 +329,7 @@ fn paths_are_absolute_pinned_and_not_shell_interpreted() {
 }
 
 /// FR-003-AC-2/4: identity-probe failures stay distinct from solver answers.
-/// Trace: TC-005, FR-003-AC-2, FR-003-AC-4
+#[trace("TC-005", "FR-003-AC-2", "FR-003-AC-4")]
 #[test]
 fn executable_identity_probe_fails_closed() {
     for (mode, expected) in [
@@ -407,7 +408,7 @@ fn executable_identity_probe_fails_closed() {
 }
 
 /// NFR-001-AC-2/3: the closed numeric profile rejects every one-over boundary.
-/// Trace: TC-005, NFR-001-AC-2, NFR-001-AC-3
+#[trace("TC-005", "NFR-001-AC-2", "NFR-001-AC-3")]
 #[test]
 fn every_adapter_owned_limit_is_finite_and_enforced() {
     let defaults = AdapterLimits::default();
@@ -653,7 +654,7 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
 }
 
 /// NFR-001-AC-2/3: full stdin and output pipes cannot block the wall-time monitor.
-/// Trace: TC-005, NFR-001-AC-2, NFR-001-AC-3
+#[trace("TC-005", "NFR-001-AC-2", "NFR-001-AC-3")]
 #[test]
 fn hostile_pipe_pressure_remains_bounded() {
     let flooded = execute_mode(
@@ -721,7 +722,7 @@ fn process_exists(pid: i32) -> bool {
 }
 
 /// FR-003-AC-1: timeout and cancellation reap the whole isolated group in the numeric bound.
-/// Trace: TC-005, FR-003-AC-1, NFR-001-AC-2
+#[trace("TC-005", "FR-003-AC-1", "NFR-001-AC-2")]
 #[test]
 fn timeout_and_cancellation_cleanup_are_measured() {
     let mut durations = Vec::new();
@@ -782,7 +783,7 @@ fn timeout_and_cancellation_cleanup_are_measured() {
 /// conclusive `unsat` — under `Z3` only, while the identical bytes under `cvc5`
 /// were correctly `nonzero-exit`.
 ///
-/// Trace: TC-005, FR-003-AC-2, FR-003-AC-4, NFR-002-AC-2
+#[trace("TC-005", "FR-003-AC-2", "FR-003-AC-4", "NFR-002-AC-2")]
 #[test]
 fn a_nonzero_exit_is_not_a_conclusion_for_either_engine() {
     let directory = TempDirectory::new("exit-one");

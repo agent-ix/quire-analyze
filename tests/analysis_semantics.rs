@@ -2,6 +2,7 @@
 
 #![cfg(target_os = "linux")]
 
+use ix_trace_rs::trace;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -275,7 +276,7 @@ fn evaluate_not(value: bool) -> bool {
 }
 
 /// FR-001-AC-1/4: constructors make every role and polarity explicit and reject ambiguity.
-/// Trace: TC-001, TC-003, FR-001-AC-1, FR-001-AC-4
+#[trace("TC-001", "TC-003", "FR-001-AC-1", "FR-001-AC-4")]
 #[test]
 fn dedicated_requests_are_role_exact_deterministic_and_fail_closed() {
     let assumption = statement("assumption", literal(true), &[]);
@@ -378,7 +379,7 @@ struct TruthCase {
 }
 
 /// FR-001-AC-1 and FR-004-AC-1/5: all ten classifications match independent finite evaluation.
-/// Trace: TC-001, TC-005, FR-001-AC-1, FR-004-AC-1, FR-004-AC-5
+#[trace("TC-001", "TC-005", "FR-001-AC-1", "FR-004-AC-1", "FR-004-AC-5")]
 #[test]
 fn all_ten_truth_table_cells_match_independent_finite_models() {
     let cases = vec![
@@ -534,7 +535,7 @@ fn all_ten_truth_table_cells_match_independent_finite_models() {
 }
 
 /// FR-004-AC-2/3/4: only complete replaying models become source-mapped verified evidence.
-/// Trace: TC-004, TC-006, TC-007, FR-004-AC-2, FR-004-AC-3, FR-004-AC-4
+#[trace("TC-004", "TC-006", "TC-007", "FR-004-AC-2", "FR-004-AC-3", "FR-004-AC-4")]
 #[test]
 fn model_decode_mapping_and_replay_are_fail_closed() {
     let request = AnalysisRequest::consistency(
@@ -633,7 +634,7 @@ fn model_decode_mapping_and_replay_are_fail_closed() {
 }
 
 /// FR-004-AC-4/5: unknown, cancellation, and tool failures never become success.
-/// Trace: TC-005, TC-007, FR-004-AC-4, FR-004-AC-5
+#[trace("TC-005", "TC-007", "FR-004-AC-4", "FR-004-AC-5")]
 #[test]
 fn nonconclusive_adapter_states_remain_nonconclusive() {
     let request =
@@ -683,7 +684,7 @@ fn nonconclusive_adapter_states_remain_nonconclusive() {
 }
 
 /// FR-005-AC-3: agreement, disagreement, unavailability, and incomplete evidence stay distinct.
-/// Trace: TC-006, FR-005-AC-3, StR-001-VC-2
+#[trace("TC-006", "FR-005-AC-3", "StR-001-VC-2")]
 #[test]
 fn differential_disposition_requires_two_verified_conclusive_results() {
     let request = AnalysisRequest::consistency(
@@ -761,7 +762,7 @@ fn differential_disposition_requires_two_verified_conclusive_results() {
 }
 
 /// FR-005-AC-3: official engines agree on independently selected sat and unsat cases.
-/// Trace: TC-006, FR-005-AC-3, MP-001-M-06
+#[trace("TC-006", "FR-005-AC-3", "MP-001-M-06")]
 #[test]
 #[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
 fn official_z3_cvc5_differential_corpus_agrees() {
@@ -839,7 +840,7 @@ fn official_z3_cvc5_differential_corpus_agrees() {
 }
 
 /// FR-005-AC-1/2/4: one canonical renderer backs validation and no-replace atomic publication.
-/// Trace: TC-007, TC-008, FR-005-AC-1, FR-005-AC-2, FR-005-AC-4
+#[trace("TC-007", "TC-008", "FR-005-AC-1", "FR-005-AC-2", "FR-005-AC-4")]
 #[test]
 fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
     let request =
@@ -1051,7 +1052,7 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
 /// `satisfied` one, resealed, and validated — and the CLI turned that into exit
 /// zero.
 ///
-/// Trace: TC-007, FR-005-AC-2, NFR-002-AC-1, NFR-002-AC-3
+#[trace("TC-007", "FR-005-AC-2", "NFR-002-AC-1", "NFR-002-AC-3")]
 #[test]
 fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
     let request =
@@ -1122,7 +1123,7 @@ fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
     );
 }
 
-/// Trace: TC-007, FR-005-AC-6
+#[trace("TC-007", "FR-005-AC-6")]
 #[test]
 fn differential_v2_requires_retained_identities_and_rejects_v1() {
     let request = AnalysisRequest::dead_antecedent(

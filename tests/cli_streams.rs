@@ -1,6 +1,7 @@
+use ix_trace_rs::trace;
 use std::process::Command;
 
-/// Trace: TC-008, FR-005-AC-1
+#[trace("TC-008", "FR-005-AC-1")]
 #[test]
 fn invalid_argv_preserves_exit_and_diagnostic_streams() {
     let output = Command::new(env!("CARGO_BIN_EXE_quire-analyze"))
