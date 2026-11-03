@@ -10,7 +10,7 @@ type: interface
 ```yaml
 name: ContractAnalysis
 version: current-library-v1
-status: proposed acceptance candidate under IR-1294; callable library stages and publication-only CLI
+status: accepted under IR-1294; callable library stages and publication-only CLI
 input:
   package: typed statements and clause identities from quire-contract-ir
   request: closed analysis kind, kind-specific ordered statement groups and explicit bindings; statements carry execution points
@@ -106,6 +106,6 @@ report content digests. The standalone validator accepts v2 only; the bound vali
 reconstructs identities from the authoritative query and differential run. No v1 fallback is
 provided.
 Neither acceptance of this interface nor automated output grants engine qualification or human
-release approval. The acceptance scope and decision dispositions are recorded in AD-001. This
-interface remains an acceptance candidate until the independent IR-1294 review is resolved; the
-accepted ADR-0010 alone does not accept it.
+release approval. The acceptance scope and decision dispositions are recorded in AD-001. AD-001 and this
+interface are accepted by the independent IR-1294 architecture review within that scope; accepted
+ADR-0010 alone does not establish this acceptance.

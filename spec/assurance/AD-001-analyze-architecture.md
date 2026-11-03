@@ -2,7 +2,7 @@
 id: AD-001
 title: "Contract analysis architecture"
 type: ArchitectureDescription
-status: proposed
+status: accepted
 owner: analyze-maintainers
 system: quire-analyze v0.1
 relationships:
@@ -18,9 +18,10 @@ closed-request validation, Boolean-v1 lowering, bounded solver execution, conclu
 source mapping, and differential report rendering. The solver engines and operating-system process
 behavior remain external. The CLI currently validates and publishes an existing library report;
 it does not run the analysis pipeline. Human reviewers retain release and consuming-project
-qualification authority. Architecture acceptance is scoped to this implemented structure and the explicit limitations below;
-it does not qualify an engine or authorize source release. This acceptance candidate remains
-proposed until the independent IR-1294 architecture review is resolved.
+qualification authority. Architecture acceptance is scoped to this implemented structure and the
+explicit limitations below; it does not qualify an engine or authorize source release.
+AD-001 and interface_001 are accepted by the independent IR-1294 architecture review for the
+implemented structure and explicit limitations described here.
 
 ## Views
 
@@ -94,8 +95,8 @@ this description.
 
 IR-1294 reviews this description and interface_001 against the current implementation as one
 architecture decision. ADR-0010 accepts the algebra and identity rules; its acceptance does not
-accept these two artifacts. The independent review must resolve findings before either artifact
-is marked accepted. Acceptance records conformance of the described boundaries, not completion of
+accept these two artifacts. The independent IR-1294 architecture review accepts these two
+artifacts for this scope. Acceptance records conformance of the described boundaries, not completion of
 all requirements, measurement campaigns, platform lanes, or release qualification.
 
 | Concern | Decision and current implementation | Disposition |
@@ -113,4 +114,4 @@ The conformance rule for this scope is that each callable library stage and the 
 retain the ownership, source identities, failure detail and evidence distinction above. Changes
 that compose a new analysis CLI, widen the exact fragment, alter variable sharing, change report
 compatibility, or promote another method's outcomes into SMT conclusions require a separately
-reviewed contract change. No such behavior is implied by this acceptance candidate.
+reviewed contract change. No such behavior is implied by this acceptance.
