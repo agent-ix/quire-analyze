@@ -2,7 +2,7 @@
 id: AD-001
 title: "Contract analysis architecture"
 type: ArchitectureDescription
-status: proposed
+status: accepted
 owner: analyze-maintainers
 system: quire-analyze v0.1
 relationships:
@@ -18,8 +18,10 @@ closed-request validation, Boolean-v1 lowering, bounded solver execution, conclu
 source mapping, and differential report rendering. The solver engines and operating-system process
 behavior remain external. The CLI currently validates and publishes an existing library report;
 it does not run the analysis pipeline. Human reviewers retain release and consuming-project
-qualification authority. This description is proposed; it does not accept AD-001 or qualify an
-engine.
+qualification authority. Architecture acceptance is scoped to this implemented structure and the
+explicit limitations below; it does not qualify an engine or authorize source release.
+AD-001 and interface_001 are accepted by the independent IR-1294 architecture review for the
+implemented structure and explicit limitations described here.
 
 ## Views
 
@@ -85,6 +87,31 @@ exposes only `publish-report`.
 
 Encoding drift, solver defects, platform process differences, unbounded output, identity collisions,
 model-decoding errors, and unavailable cross-platform execution can weaken evidence. The measurement
-plan retains these outcomes and no automated control may waive them into success. AD-001 acceptance,
-the upstream PGM-01 envelope, engine qualification, and source-release authority remain open
-decisions; this proposed description does not resolve them.
+plan retains these outcomes and no automated control may waive them into success. The upstream PGM-01 envelope, engine qualification, and source-release authority are excluded
+from architecture acceptance. Their absence remains visible and cannot be waived by accepting
+this description.
+
+## Acceptance Scope and Decision Disposition
+
+IR-1294 reviews this description and interface_001 against the current implementation as one
+architecture decision. ADR-0010 accepts the algebra and identity rules; its acceptance does not
+accept these two artifacts. The independent IR-1294 architecture review accepts these two
+artifacts for this scope. Acceptance records conformance of the described boundaries, not completion of
+all requirements, measurement campaigns, platform lanes, or release qualification.
+
+| Concern | Decision and current implementation | Disposition |
+|---|---|---|
+| Semantic authority and aliasing | Retain typed `quire-contract-ir` expressions and explicit structurally validated binding groups; never infer cross-requirement aliases from names. `src/smt.rs` owns lowering and source maps. | Resolved by ADR-0010; accepted scope is the implemented Boolean-v1 subset. |
+| Request validation timing | `AnalysisRequest` constructors reject missing groups and duplicate statement identities. `lower_analysis_request` delegates remaining semantic/binding/capability checks to lowering before execution. | Resolved: a separate fully validated `AnalysisModel` prepare result is not part of the current API contract. |
+| Status and explanation | `classify_analysis` preserves the logical SAT-derived status on replay failure; no verified model is returned. Differential agreement requires verified SAT evidence. | Resolved: logical classification and explanation evidence are distinct, as FR-004/FR-005 require. |
+| Failure detail | `SolverRecord` retains cancellation, absence and protocol/process outcomes; `AnalysisStatus` maps cancellation and timeout to `Timeout`, unsupported platform to `Unsupported`, and other failures to `ToolError`. | Resolved: consumers inspect the retained solver record for detail; interface_001 states both levels. |
+| CLI scope | `publish-report` validates existing v2 report bytes and publishes them; it does not compose or execute analysis stages. | Resolved: analysis orchestration is outside the current CLI contract. |
+| Shared assurance envelope | `src/report.rs` requires the explicit unavailable envelope placeholder. | Dependency work remains `agent-ix/quire-contract-ir#20`; this architecture accepts the visible limitation, not envelope compliance. |
+| Separate methods | Hybrid reachability and synthesis return method outcomes through `crates/method-contract`. | Resolved: these providers do not establish Boolean SMT conclusions or engine qualification. |
+| Qualification and release | AP-001 retains the human source-release boundary; MP-001 supplies evidence only. | Resolved boundary: no architecture acceptance, automated status or zero-count observation grants qualification or release authority. |
+
+The conformance rule for this scope is that each callable library stage and the publication CLI
+retain the ownership, source identities, failure detail and evidence distinction above. Changes
+that compose a new analysis CLI, widen the exact fragment, alter variable sharing, change report
+compatibility, or promote another method's outcomes into SMT conclusions require a separately
+reviewed contract change. No such behavior is implied by this acceptance.

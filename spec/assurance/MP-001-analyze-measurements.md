@@ -35,6 +35,16 @@ relationships:
 Measurements inform a later human source-release decision for one candidate. They do not
 approve release or confer solver qualification, validation, accreditation, or certification.
 
+This is an evidence-admission gate for independently supplied observations, not a declaration
+of a self-producing runnable measurement campaign. The collector supplies the complete TC census,
+per-repetition outcomes, method and platform context; the human gate reviewer independently
+reconciles them against this plan before using the zero-count result. No `execution_procedure`
+or `apparatus-edit` control is declared, and no protected apparatus inventory is asserted.
+Under the conditional MeasurementPlan contract, omission of `protected_apparatus` does not waive
+the gate, ground truth, negative controls, typed decision rule, or completeness checks below.
+A future self-producing procedure must separately declare its actual apparatus and receive review;
+this plan does not claim that procedure or any executed observation exists.
+
 ## Population
 
 The population includes every public IR construct and boundary, consistency and implication kind,
