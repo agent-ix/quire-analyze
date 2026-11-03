@@ -9,23 +9,23 @@ type: interface
 
 ```yaml
 name: ContractAnalysis
-version: draft-analysis-v1
-status: proposed interface; callable library stages exist, CLI publication only
+version: current-library-v1
+status: proposed acceptance candidate under IR-1294; callable library stages and publication-only CLI
 input:
   package: typed statements and clause identities from quire-contract-ir
-  request: closed analysis kind, ordered assumption/left/right/candidate groups, execution point, encoding profile, limits
+  request: closed analysis kind, kind-specific ordered statement groups and explicit bindings; statements carry execution points
+  profiles_and_limits: lowering uses fixed Boolean-v1 profiles and ceilings; execution receives caller-supplied SolverConfig
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
   - name: prepare
     entry_point: src/analysis.rs AnalysisRequest constructors
     current: constructors check required groups and duplicate statement identities; remaining validation occurs during lowering
     output: "Result<AnalysisRequest, Vec<AnalysisRequestError>>"
-    proposed_output: AnalysisModel | DiagnosticSet
-    semantics: proposed abstract prepare contract validates identity, types, shared variables, definedness, and bounds before solver execution
+    semantics: constructors validate required groups and duplicate identities; lowering performs remaining checks before solver execution
   - name: lower
     entry_point: src/analysis.rs lower_analysis_request; src/smt.rs lower_boolean_statements
     current: implemented library Boolean-v1 lowering
-    output: QueryBundle | DiagnosticSet
+    output: "Result<QueryBundle, Vec<LoweringError>>"
     semantics: canonical exact SMT-LIB2 plus assertion and symbol maps; approximation is non-conclusive
   - name: execute
     entry_point: src/solver.rs execute_solver
@@ -46,19 +46,21 @@ operations:
     entry_point: src/main.rs publish-report; src/report.rs validate_report_document and publish_report_new
     current: sole implemented CLI command; consumes existing library report bytes
     input: authoritative canonical report rendered by the library
-    output: byte-identical deterministic JSON report, stable exit class, and stderr diagnostics
+    output: byte-identical report file, stable exit class, and stderr diagnostics
     semantics: validates the closed report contract and atomically publishes without reconstructing trusted inputs
 outcome:
   conclusive: [satisfied, refuted]
-  non_conclusive: [unknown, unsupported, timed-out, cancelled, tool-unavailable, tool-error, invalid-input, internal-error]
+  non_conclusive_library_status: [unknown, unsupported, timeout, tool-error]
+  detail: SolverRecord retains original outcomes; cancellation maps to timeout, unsupported-platform to unsupported, other failures to tool-error
+  rejected_requests: constructor and lowering errors return Result errors before an AnalysisConclusion exists
   rule: complete recognized sat/unsat under exact encoding determines logical status; SAT replay determines whether model evidence is verified or incomplete
   differential_agreement: FR-005 requires both matching conclusive statuses and every required SAT model replay-verified
 exit_classes:
-  0: satisfied
-  1: refuted
-  2: invalid-input-or-unsupported
-  3: unknown-or-timeout-or-cancelled
-  4: tool-or-internal-error
+  0: published differential agreement on satisfied
+  1: published differential agreement on refuted
+  2: usage or input-read or report-validation error
+  3: published report with any non-agreement differential disposition
+  4: publication or exit-code conversion error
 resource_limits:
   lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
   adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, executable_bytes, path_bytes]
@@ -103,5 +105,7 @@ retains producer application name/version and canonical clause, request, query, 
 report content digests. The standalone validator accepts v2 only; the bound validator also
 reconstructs identities from the authoritative query and differential run. No v1 fallback is
 provided.
-Neither the draft interface nor automated output grants engine qualification or human release
-approval.
+Neither acceptance of this interface nor automated output grants engine qualification or human
+release approval. The acceptance scope and decision dispositions are recorded in AD-001. This
+interface remains an acceptance candidate until the independent IR-1294 review is resolved; the
+accepted ADR-0010 alone does not accept it.
