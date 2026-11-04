@@ -239,7 +239,7 @@ fn golden_query_is_order_independent_and_source_mapped() {
     assert_eq!(forward.assertions(), reverse.assertions());
     assert_eq!(
         normalize_clause_digests(forward.query()),
-        include_str!("golden/boolean-v1.smt2")
+        normalize_clause_digests(include_str!("golden/boolean-v1.smt2"))
     );
     assert_eq!(forward.profile(), SMTLIB2_PROFILE);
     assert_eq!(forward.logic(), "QF_UF");
