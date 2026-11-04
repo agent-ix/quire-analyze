@@ -14,7 +14,7 @@ as their own states.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
-  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans, runs a pinned solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
+  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans, runs a configured solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
 </picture>
 
 > **Status: public prerelease.** The crate is at 0.1.0, its API is not stable

@@ -770,15 +770,9 @@ fn engine_value(conclusion: &AnalysisConclusion) -> Value {
 fn disposition_from_values(z3: &Value, cvc5: &Value) -> Result<DifferentialDisposition, String> {
     let z3_outcome = required_string(z3, "outcome")?;
     let cvc5_outcome = required_string(cvc5, "outcome")?;
-    let unavailable = [z3_outcome, cvc5_outcome].into_iter().any(|outcome| {
-        matches!(
-            outcome,
-            "missing-executable"
-                | "unsupported-platform"
-                | "version-mismatch"
-                | "executable-digest-mismatch"
-        )
-    });
+    let unavailable = [z3_outcome, cvc5_outcome]
+        .into_iter()
+        .any(|outcome| matches!(outcome, "missing-executable" | "unsupported-platform"));
     if unavailable {
         return Ok(DifferentialDisposition::Unavailable);
     }

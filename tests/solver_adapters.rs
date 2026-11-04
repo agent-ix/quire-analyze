@@ -124,7 +124,6 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "version_nonzero" => "exit 9".to_owned(),
         "version_invalid" => "printf '\\377'".to_owned(),
         "version_slow" => "/bin/sleep 30".to_owned(),
-        "version_mutates" => format!("printf '{VERSION}\\n'; printf '# changed\\n' >> \"$0\""),
         _ => format!("printf '{VERSION}\\n'"),
     };
     let action = match mode {
@@ -146,7 +145,6 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "model" => "printf 'sat\\n(aaaaaa)\\n'".to_owned(),
         "flood" => "/bin/dd if=/dev/zero bs=131072 count=1 2>/dev/null & /bin/dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null; wait".to_owned(),
         "slow" => "/bin/sleep 30".to_owned(),
-        "mutate_query" => "printf '# changed\\n' >> \"$0\"; printf 'sat\\n'".to_owned(),
         // SR-001 H1: a status with a failed exit and no error text at all.
         "unsat_exit_one" => "printf 'unsat\\n'; exit 1".to_owned(),
         "unknown_exit_one" => "printf 'unknown\\n'; exit 1".to_owned(),
@@ -154,8 +152,7 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "version_empty"
         | "version_nonzero"
         | "version_invalid"
-        | "version_slow"
-        | "version_mutates" => {
+        | "version_slow" => {
             "printf 'sat\\n'".to_owned()
         }
         "slow_tree" => {
