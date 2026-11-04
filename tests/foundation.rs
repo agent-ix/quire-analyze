@@ -1,6 +1,7 @@
 //! Requirement-backed tests for the specification and assurance foundation.
 
 use ix_trace_rs::trace;
+use quire_analyze::{AnalysisStatus, SolverOutcome};
 use std::collections::BTreeSet;
 
 const CARGO_MANIFEST: &str = include_str!("../Cargo.toml");
@@ -58,21 +59,47 @@ fn foundation_defines_closed_requirements_and_non_conclusive_states() {
         assert!(TEST_MATRIX.contains(requirement));
     }
 
-    for outcome in [
-        "unknown",
-        "unsupported",
-        "timed-out",
-        "cancelled",
-        "tool-unavailable",
-        "tool-error",
-        "invalid-input",
-        "internal-error",
-    ] {
-        assert!(INTERFACE.contains(outcome), "missing outcome {outcome}");
-    }
-
-    assert!(INTERFACE.contains("conclusive: [satisfied, refuted]"));
-    assert!(INTERFACE.contains("only a complete recognized sat/unsat response"));
+    let yaml = INTERFACE
+        .split_once("```yaml\n")
+        .expect("interface YAML block")
+        .1
+        .split_once("\n```")
+        .expect("interface YAML block end")
+        .0;
+    let interface: serde_json::Value = serde_saphyr::from_str(yaml).expect("valid interface YAML");
+    let outcome = &interface["outcome"];
+    assert_eq!(
+        outcome["conclusive"],
+        serde_json::json!([
+            AnalysisStatus::Satisfied.as_str(),
+            AnalysisStatus::Refuted.as_str(),
+        ])
+    );
+    assert_eq!(
+        outcome["non_conclusive_library_status"],
+        serde_json::json!([
+            AnalysisStatus::Unknown.as_str(),
+            AnalysisStatus::Unsupported.as_str(),
+            AnalysisStatus::Timeout.as_str(),
+            AnalysisStatus::ToolError.as_str(),
+        ])
+    );
+    assert_eq!(
+        outcome["raw_solver_examples"],
+        serde_json::json!([
+            SolverOutcome::Unknown.as_str(),
+            SolverOutcome::TimedOut.as_str(),
+            SolverOutcome::Cancelled.as_str(),
+            SolverOutcome::MissingExecutable.as_str(),
+            SolverOutcome::UnsupportedPlatform.as_str(),
+            SolverOutcome::SolverError.as_str(),
+            SolverOutcome::MalformedOutput.as_str(),
+        ])
+    );
+    assert!(outcome["rule"]
+        .as_str()
+        .expect("outcome rule")
+        .contains("complete recognized sat/unsat under exact encoding"));
     for analysis in [
         "consistency",
         "contradiction",
