@@ -30,14 +30,14 @@ in the execution record but excluded from the deterministic semantic-outcome pro
 | Captured stdout / stderr | at most 16,777,216 / 1,048,576 bytes | profile ceilings | hostile stream tests |
 | Parsed model within stdout | at most 8,388,608 bytes | 8,388,608 bytes | oversized-model test |
 | Solver execution / graceful cleanup / total cleanup | at most 5,000 / 100 / 1,000 ms | profile ceilings | monotonic-clock measurement |
-| Version output / executable bytes / canonical path | at most 65,536 / 536,870,912 / 4,096 bytes | profile ceilings | boundary tests and metadata inspection |
+| Observed version output / canonical executable path | at most 65,536 / 4,096 UTF-8 bytes | profile ceilings | exact boundary tests |
 
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
 |---|---|---|
 | NFR-001-AC-1 | Repetition and irrelevant-order permutation preserve query and normalized evidence bytes. | Test (TC-002) |
-| NFR-001-AC-2 | Every adapter process, time, input, output, model, executable-identity, and path boundary has a numeric limit and exact boundary test; lowering recursion remains owned by TC-010. | Test (TC-005, TC-010) |
+| NFR-001-AC-2 | Every adapter process, time, input, output, model, and path boundary has a numeric limit and exact boundary test; lowering recursion remains owned by TC-010. | Test (TC-005, TC-010) |
 | NFR-001-AC-3 | A breached limit is explicit and never conclusive. | Test (TC-005) |
 
 ## Verification
