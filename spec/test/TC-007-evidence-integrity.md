@@ -16,9 +16,9 @@ Verify retained evidence detects missing, altered, extra, and contradicted recor
 
 ## Test Procedure
 
-Validate every report and envelope against their schemas. Remove and mutate each required identity,
-artifact, digest, status, limitation, engine field, and output. Contradict raw responses and declared
-outcomes, and alter the artifact census.
+Validate every report and available envelope against their schemas. Remove and mutate each required
+proof-input identity, artifact, status, limitation, engine field, and output. Contradict raw responses
+and declared outcomes, and alter the artifact census.
 
 Runtime report validation checks canonical JSON, canonical query identity, and differential
 disposition. The PGM-01 envelope lane must return
@@ -29,7 +29,9 @@ and against its authoritative query and differential run. Omit each required pro
 `assertions[].clause`, `assertions[].source`, every canonical proof-input identity, and every
 retained-byte field; standalone validation must reject each omission. Mutate retained query bytes
 without updating `queryDigest`; standalone validation must reject the mismatch. Mutate raw solver
-bytes and check that the retained result remains visible without a duplicate stream hash.
+bytes alone and check that a contradiction with the declared result is refused. Then change the raw
+bytes and all dependent result fields consistently: standalone validation may admit this self-consistent
+record, while validation against the unchanged authoritative run must refuse the substitution.
 Separately mutate
 the clause/source identities and clause, binding-set, or request digests, then recompute dependent
 query identity so the document is internally consistent; validation against the unchanged
@@ -40,8 +42,11 @@ the removed mismatch outcomes.
 
 ## Expected Results
 
-The valid corpus passes. Every omission, mutation, contradiction, or census change fails closed with
-a stable diagnostic. Optional explanation evidence is never inferred as present.
+The valid corpus passes. Every omission, canonical proof-input identity mismatch, outcome
+contradiction, or census change fails closed with a stable diagnostic. A standalone report cannot
+authenticate substituted raw solver bytes when the dependent result fields agree with them;
+authoritative-run comparison rejects that substitution. Optional explanation evidence is never
+inferred as present.
 The v2 standalone lane checks the query identity derivable from retained bytes; the
 authoritative-input lane rejects substituted clause/source identities and clause, binding-set, or
 request digests even when the document's own digests were recomputed. Both reject the duplicate
