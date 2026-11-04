@@ -19,7 +19,7 @@ use quire_analyze::{
     MAX_SOLVER_PATH_BYTES, MAX_SOLVER_STDERR_BYTES, MAX_SOLVER_STDIN_BYTES,
     MAX_SOLVER_STDOUT_BYTES, MAX_SOLVER_VERSION_BYTES, MAX_SOLVER_WALL_TIME_MS,
 };
-use quire_contract_ir::{
+use quire_contract_model::{
     AnchorName, Clause, ClauseId, ClauseKind, ContractPackage, DeclarationEnvironment,
     ExecutionPoint, Expression, ExpressionKind, PackageId, Requirement, RequirementId,
     RequirementRef, RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity,

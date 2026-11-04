@@ -723,7 +723,7 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
-fn source_value(source: &quire_contract_ir::SourceSpan) -> Value {
+fn source_value(source: &quire_contract_model::SourceSpan) -> Value {
     json!({
         "document": source.source().document().as_str(),
         "end": {"byte": source.end().byte_offset(), "column": source.end().column(), "line": source.end().line()},

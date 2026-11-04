@@ -24,7 +24,7 @@ use quire_analyze::{
     ExplanationState, ModelPurpose, QueryBundle, SolverConfig, SolverEngine, SolverOutcome,
     StatementInput, StatementRole,
 };
-use quire_contract_ir::{
+use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ContractPackage,
     DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, PackageId, Requirement,
     RequirementId, RequirementRef, RequirementRevision, SchemaVersion, SourceDocumentId,

@@ -5,7 +5,7 @@ use quire_analyze::{
     lower_boolean_statements, type_shape_digest, BindingGroup, BindingMember, LoweringErrorCode,
     StatementInput, CAPABILITY_CONTRACT, MAX_QUERY_STATEMENTS, SMTLIB2_PROFILE,
 };
-use quire_contract_ir::{
+use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, CollectionType, ComparisonOperator,
     ContractPackage, DeclarationEnvironment, EnumDeclaration, EnumVariantDeclaration,
     ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType, OverflowPolicy,

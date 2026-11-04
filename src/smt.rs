@@ -3,7 +3,7 @@ use std::{
     fmt,
 };
 
-use quire_contract_ir::{
+use quire_contract_model::{
     BooleanOperator, CanonicalDigest, CanonicalProfile, Clause, ClauseRef, ComparisonOperator,
     ContractPackage, DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind,
     IntegerDomain, OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation,
