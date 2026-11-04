@@ -25,8 +25,8 @@ Run timeout and cancellation cleanup three times each. For every repetition, rec
 completion with a monotonic clock, probe the isolated process group after cleanup, and retain the six
 durations plus their maximum. Fail if any group member survives or any duration exceeds 1,000 ms.
 Exercise exact-at-limit and one-byte-over-limit inputs for query, stdout, stderr, model, version
-output, executable identity input, and canonical path. Validate the closed set of limit fields against
-the profile census rather than relying on line coverage.
+output, and canonical path. Validate the closed set of limit fields against the profile census
+rather than relying on line coverage.
 
 ## Expected Results
 

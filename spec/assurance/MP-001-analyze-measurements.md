@@ -102,8 +102,7 @@ separate review evidence for the human source-release decision.
 | captured stdout | 16,777,216 bytes | drain after ceiling, mark truncated, never conclusive |
 | captured stderr | 1,048,576 bytes | drain after ceiling, mark truncated, never conclusive |
 | parsed model | 8,388,608 bytes | exact boundary and one-byte-over response fixture |
-| version output | 65,536 bytes | bounded identity probe; excess is tool error |
-| executable identity input | 536,870,912 bytes | metadata check before fixed-buffer SHA-256 streaming |
+| observed version output | 65,536 bytes | bounded probe; excess is tool error |
 | canonical executable path | 4,096 UTF-8 bytes | reject before spawn if absent, relative, non-UTF-8, or excessive |
 
 These are v1 profile ceilings, not performance estimates. TC-005 measures cleanup against the

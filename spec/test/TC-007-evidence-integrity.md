@@ -20,25 +20,29 @@ Validate every report and envelope against their schemas. Remove and mutate each
 artifact, digest, status, limitation, engine field, and output. Contradict raw responses and declared
 outcomes, and alter the artifact census.
 
-Runtime report validation re-derives canonical JSON, report digest, raw stdout/stderr/model digests,
-query/configuration identities, and differential disposition. The PGM-01 envelope lane must return
+Runtime report validation checks canonical JSON, canonical query identity, and differential
+disposition. The PGM-01 envelope lane must return
 unavailable until the component selected by `quire-contract-ir#20` is adopted.
 
 For the `quire.differential-report/v2` lane, validate a genuine v2 document both standalone
 and against its authoritative query and differential run. Omit each required producer field,
-`assertions[].clause`, `assertions[].source`, and every named digest or retained-byte field; standalone
-validation must reject each omission. Mutate retained query, stdout, stderr, and model bytes or their
-digests, and the report digest; standalone validation must reject each mismatch. Separately mutate
+`assertions[].clause`, `assertions[].source`, every canonical proof-input identity, and every
+retained-byte field; standalone validation must reject each omission. Mutate retained query bytes
+without updating `queryDigest`; standalone validation must reject the mismatch. Mutate raw solver
+bytes and check that the retained result remains visible without a duplicate stream hash.
+Separately mutate
 the clause/source identities and clause, binding-set, or request digests, then recompute dependent
-query and report digests so the document is internally consistent; validation against the unchanged
+query identity so the document is internally consistent; validation against the unchanged
 authoritative query and run must still reject it. Add `contractIrRevision` to a v2 document and pass
-a valid v1 document to each v2 validation path; both paths must reject them.
+a valid v1 document to each v2 validation path; both paths must reject them. Add each removed solver
+pin and redundant hash field to a v2 document; the closed schema must reject those fields and
+the removed mismatch outcomes.
 
 ## Expected Results
 
 The valid corpus passes. Every omission, mutation, contradiction, or census change fails closed with
 a stable diagnostic. Optional explanation evidence is never inferred as present.
-The v2 standalone lane checks identities and digests derivable from retained bytes; the
+The v2 standalone lane checks the query identity derivable from retained bytes; the
 authoritative-input lane rejects substituted clause/source identities and clause, binding-set, or
 request digests even when the document's own digests were recomputed. Both reject the duplicate
 revision field, omitted required fields, and v1 documents without a fallback.
