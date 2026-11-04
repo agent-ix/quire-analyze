@@ -3,7 +3,7 @@ id: SR-17023
 title: "IR-1290 PR #76 code and Rust review"
 type: SpecReview
 analysis: code-review
-scope: "agent-ix/quire-analyze; IR-1290 PR #76; Cargo.toml, Cargo.lock, README.md, schemas/differential-report-v2.schema.json, src/report.rs, src/smt.rs, src/solver.rs, tests/analysis_semantics.rs, tests/golden/boolean-v1.smt2, tests/smt_lowering.rs, tests/solver_adapters.rs, tests/foundation.rs, planning/smt-lowering-gap-analysis.md; context spec/interface/interface-001-analysis-api.md"
+scope: "agent-ix/quire-analyze; IR-1290 PR #76; Cargo.toml, Cargo.lock, deny.toml, README.md, schemas/differential-report-v2.schema.json, src/report.rs, src/smt.rs, src/solver.rs, tests/analysis_semantics.rs, tests/golden/boolean-v1.smt2, tests/smt_lowering.rs, tests/solver_adapters.rs, tests/foundation.rs, planning/smt-lowering-gap-analysis.md; context spec/interface/interface-001-analysis-api.md"
 review_set: subset
 ---
 # SR-17023: IR-1290 PR #76 code and Rust review
@@ -46,3 +46,7 @@ At PR head `ecef279e1cccb5d756d5544dd7cc13bf34f55237`, FND-001 and FND-002 are f
 ## Rebase recheck
 
 At PR head `813eb7ee5f19ca864325ec97ad2d504e8ea8c477` on base `9ba5014d1c36bd4ca1d2c0223cc6e96c428bd806`, the production diff remains reviewed. The newly changed `tests/foundation.rs` parses the merged interface YAML and value-asserts its normalized statuses and raw solver examples against the public enums. The previous string search for unsupported status labels is gone. The merged interface owns the updated model dependency and solver record contract. This scoped recheck found no new defect; the code lead runs the final aggregate gate.
+
+## Supply policy recheck
+
+At PR head `7af84312f643619e9bfb4232312863d940e500ae`, the `deny.toml` change adds only the first-party crate names and Git hosts now present in `Cargo.lock`, plus permissive MIT-0 and Apache-2.0 WITH LLVM-exception expressions. It removes the obsolete `quire-contract-ir` crate exception. `unknown-git = "deny"` remains, `Cargo.toml` uses the model crate from `branch = "main"`, and no CI/workflow or new pin changed. Focused `cargo deny check licenses sources` passed per code lead. No new review finding.

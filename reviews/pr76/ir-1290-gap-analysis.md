@@ -3,7 +3,7 @@ id: SR-17024
 title: "IR-1290 PR #76 trace gap analysis"
 type: SpecReview
 analysis: gap-analysis
-scope: "agent-ix/quire-analyze; IR-1290 PR #76; FR-003-AC-4, FR-005-AC-6, FR-002-AC-3, FR-002-AC-5, NFR-002-AC-1, NFR-002-AC-3 and changed tests/source/planning, including tests/foundation.rs; context interface_001"
+scope: "agent-ix/quire-analyze; IR-1290 PR #76; FR-003-AC-4, FR-005-AC-6, FR-002-AC-3, FR-002-AC-5, NFR-002-AC-1, NFR-002-AC-3 and changed tests/source/planning and deny.toml, including tests/foundation.rs; context interface_001"
 review_set: subset
 ---
 # SR-17024: IR-1290 PR #76 trace gap analysis
@@ -29,3 +29,7 @@ Plan completion: not assessed. `quoin matrix --repo . --json` on PR head and exa
 ## Rebase recheck
 
 At PR head `813eb7ee5f19ca864325ec97ad2d504e8ea8c477`, the new foundation test remains tagged to NFR-002-AC-2 and asserts the merged interface values through parsed YAML. No new trace gap was introduced by the rebase.
+
+## Supply policy recheck
+
+The added `deny.toml` allow lists correspond to the newly selected first-party model dependency tree in `Cargo.lock`; they add no new requirement behavior or test trace obligation.
