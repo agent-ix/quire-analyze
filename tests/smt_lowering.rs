@@ -58,7 +58,7 @@ fn owner(requirement: &str, revision: u64) -> RequirementRef {
 
 fn point() -> ExecutionPoint {
     ExecutionPoint::Pre {
-        operation: AnchorName::new("check").expect("anchor"),
+        operation: AnchorName::new("check").expect("anchor").into(),
     }
 }
 
@@ -181,7 +181,7 @@ fn package_from_parts(
     .expect("requirement");
     ContractPackage::new(
         environment.owner().package().clone(),
-        SchemaVersion::V1_0,
+        SchemaVersion::V1_1,
         source_identity(),
         vec![requirement],
     )

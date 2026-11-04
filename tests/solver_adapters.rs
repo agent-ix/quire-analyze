@@ -73,7 +73,7 @@ fn statement(index: usize) -> quire_analyze::StatementInput {
     let environment =
         DeclarationEnvironment::new(owner, vec![], vec![], vec![]).expect("environment");
     let point = ExecutionPoint::Pre {
-        operation: AnchorName::new("solve").expect("anchor"),
+        operation: AnchorName::new("solve").expect("anchor").into(),
     };
     let expression = Expression::new(ExpressionKind::BooleanLiteral { value: true }, span());
     let checked = environment
@@ -96,7 +96,7 @@ fn statement(index: usize) -> quire_analyze::StatementInput {
     )
     .expect("requirement");
     let source = span().source().clone();
-    let package = ContractPackage::new(package_id, SchemaVersion::V1_0, source, vec![requirement])
+    let package = ContractPackage::new(package_id, SchemaVersion::V1_1, source, vec![requirement])
         .expect("package");
     quire_analyze::StatementInput::from_clause(
         &package,

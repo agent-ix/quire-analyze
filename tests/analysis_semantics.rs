@@ -74,7 +74,7 @@ fn span(offset: u64) -> SourceSpan {
 
 fn point() -> ExecutionPoint {
     ExecutionPoint::Pre {
-        operation: AnchorName::new("analyze").expect("anchor"),
+        operation: AnchorName::new("analyze").expect("anchor").into(),
     }
 }
 
@@ -159,7 +159,7 @@ fn statement_with_environment(
     .expect("requirement");
     let package = ContractPackage::new(
         package_id,
-        SchemaVersion::V1_0,
+        SchemaVersion::V1_1,
         span(0).source().clone(),
         vec![requirement],
     )
