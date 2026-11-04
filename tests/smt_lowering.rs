@@ -250,6 +250,16 @@ fn golden_query_is_order_independent_and_source_mapped() {
         .all(|item| item.name.contains("_c")));
     assert_eq!(first.clause(), &forward.assertions()[0].clause);
     assert_eq!(first.clause_digest(), forward.assertions()[0].clause_digest);
+    let changed_content = bool_statement(
+        "REQ-alpha",
+        1,
+        "C-one",
+        &["ready", "blocked"],
+        value("ready"),
+        0x11,
+    );
+    assert_eq!(first.clause(), changed_content.clause());
+    assert_ne!(first.clause_digest(), changed_content.clause_digest());
     assert_eq!(first.execution_point(), &point());
     assert_eq!(first.expression(), &implication("ready", "blocked"));
 }

@@ -1113,6 +1113,33 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
     validate_report_document(&report).expect("standalone v2");
     validate_differential_report(&report, &query, &run).expect("bound v2");
 
+    let changed_request = AnalysisRequest::dead_antecedent(
+        vec![],
+        statement("v2-identity", literal(true), &[]),
+        vec![],
+    )
+    .expect("changed clause content");
+    let changed_query = lower_analysis_request(&changed_request).expect("changed query");
+    assert_eq!(
+        query.assertions()[0].clause,
+        changed_query.assertions()[0].clause
+    );
+    assert_ne!(
+        query.assertions()[0].clause_digest,
+        changed_query.assertions()[0].clause_digest
+    );
+    let mut stale_clause = value.clone();
+    stale_clause["assertions"][0]["clauseDigest"] = changed_query.assertions()[0]
+        .clause_digest
+        .to_string()
+        .into();
+    let stale_bytes = canonical_report(stale_clause);
+    validate_report_document(&stale_bytes).expect("standalone cannot reconstruct clause content");
+    assert!(
+        validate_differential_report(&stale_bytes, &query, &run).is_err(),
+        "changed canonical clause content passed authoritative report comparison"
+    );
+
     for field in ["querySha256", "reportDigest"] {
         let mut obsolete = value.clone();
         obsolete[field] = "0".repeat(64).into();
