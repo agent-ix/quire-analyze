@@ -14,19 +14,17 @@ use std::{
 
 use quire_analyze::{
     execute_solver, lower_boolean_statements, AdapterLimits, CancellationToken, SolverConfig,
-    SolverDigest, SolverEngine, SolverOutcome, SolverPin, MAX_SOLVER_CLEANUP_TIME_MS,
-    MAX_SOLVER_EXECUTABLE_BYTES, MAX_SOLVER_GRACEFUL_CLEANUP_MS, MAX_SOLVER_MODEL_BYTES,
-    MAX_SOLVER_MONITOR_INTERVAL_MS, MAX_SOLVER_PATH_BYTES, MAX_SOLVER_STDERR_BYTES,
-    MAX_SOLVER_STDIN_BYTES, MAX_SOLVER_STDOUT_BYTES, MAX_SOLVER_VERSION_BYTES,
-    MAX_SOLVER_WALL_TIME_MS,
+    SolverEngine, SolverOutcome, MAX_SOLVER_CLEANUP_TIME_MS, MAX_SOLVER_GRACEFUL_CLEANUP_MS,
+    MAX_SOLVER_MODEL_BYTES, MAX_SOLVER_MONITOR_INTERVAL_MS, MAX_SOLVER_PATH_BYTES,
+    MAX_SOLVER_STDERR_BYTES, MAX_SOLVER_STDIN_BYTES, MAX_SOLVER_STDOUT_BYTES,
+    MAX_SOLVER_VERSION_BYTES, MAX_SOLVER_WALL_TIME_MS,
 };
-use quire_contract_ir::{
+use quire_contract_model::{
     AnchorName, Clause, ClauseId, ClauseKind, ContractPackage, DeclarationEnvironment,
     ExecutionPoint, Expression, ExpressionKind, PackageId, Requirement, RequirementId,
     RequirementRef, RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity,
     SourceLocation, SourceRevision, SourceSpan, TypedExpression, ValueType,
 };
-use sha2::{Digest as _, Sha256};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 const VERSION: &str = "fake-solver 1.0";
@@ -75,7 +73,7 @@ fn statement(index: usize) -> quire_analyze::StatementInput {
     let environment =
         DeclarationEnvironment::new(owner, vec![], vec![], vec![]).expect("environment");
     let point = ExecutionPoint::Pre {
-        operation: AnchorName::new("solve").expect("anchor"),
+        operation: AnchorName::new("solve").expect("anchor").into(),
     };
     let expression = Expression::new(ExpressionKind::BooleanLiteral { value: true }, span());
     let checked = environment
@@ -98,7 +96,7 @@ fn statement(index: usize) -> quire_analyze::StatementInput {
     )
     .expect("requirement");
     let source = span().source().clone();
-    let package = ContractPackage::new(package_id, SchemaVersion::V1_0, source, vec![requirement])
+    let package = ContractPackage::new(package_id, SchemaVersion::V1_1, source, vec![requirement])
         .expect("package");
     quire_analyze::StatementInput::from_clause(
         &package,
@@ -126,7 +124,6 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "version_nonzero" => "exit 9".to_owned(),
         "version_invalid" => "printf '\\377'".to_owned(),
         "version_slow" => "/bin/sleep 30".to_owned(),
-        "version_mutates" => format!("printf '{VERSION}\\n'; printf '# changed\\n' >> \"$0\""),
         _ => format!("printf '{VERSION}\\n'"),
     };
     let action = match mode {
@@ -148,7 +145,6 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "model" => "printf 'sat\\n(aaaaaa)\\n'".to_owned(),
         "flood" => "/bin/dd if=/dev/zero bs=131072 count=1 2>/dev/null & /bin/dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null; wait".to_owned(),
         "slow" => "/bin/sleep 30".to_owned(),
-        "mutate_query" => "printf '# changed\\n' >> \"$0\"; printf 'sat\\n'".to_owned(),
         // SR-001 H1: a status with a failed exit and no error text at all.
         "unsat_exit_one" => "printf 'unsat\\n'; exit 1".to_owned(),
         "unknown_exit_one" => "printf 'unknown\\n'; exit 1".to_owned(),
@@ -156,8 +152,7 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
         "version_empty"
         | "version_nonzero"
         | "version_invalid"
-        | "version_slow"
-        | "version_mutates" => {
+        | "version_slow" => {
             "printf 'sat\\n'".to_owned()
         }
         "slow_tree" => {
@@ -180,18 +175,8 @@ fn make_script(directory: &Path, name: &str, mode: &str, pid_file: Option<&Path>
     path
 }
 
-fn digest(path: &Path) -> SolverDigest {
-    SolverDigest::from_bytes(Sha256::digest(fs::read(path).expect("read script")).into())
-}
-
 fn config(engine: SolverEngine, executable: &Path, limits: AdapterLimits) -> SolverConfig {
-    SolverConfig::new(
-        engine,
-        executable,
-        SolverPin::new(VERSION, digest(executable)),
-        limits,
-    )
-    .expect("solver config")
+    SolverConfig::new(engine, executable, limits).expect("solver config")
 }
 
 fn execute_mode(mode: &str, limits: AdapterLimits) -> quire_analyze::SolverRecord {
@@ -256,10 +241,9 @@ fn exact_engine_contract_and_protocol_states() {
         );
         assert_eq!(record.identity().expect("identity").version, VERSION);
         assert_eq!(
-            record.identity().expect("identity").sha256,
-            digest(&executable)
+            record.identity().expect("identity").canonical_path,
+            executable
         );
-        assert!(!record.configuration_digest().to_string().is_empty());
         assert!(!record.query_digest().is_empty());
         let repeated = execute_solver(&query(), &solver_config, &CancellationToken::default());
         assert_eq!(
@@ -272,7 +256,7 @@ fn exact_engine_contract_and_protocol_states() {
 /// FR-003-AC-5: absolute metacharacter paths are direct argv inputs, never shell programs.
 #[trace("TC-005", "FR-003-AC-5")]
 #[test]
-fn paths_are_absolute_pinned_and_not_shell_interpreted() {
+fn paths_are_absolute_and_not_shell_interpreted() {
     let directory = TempDirectory::new("path;metacharacters");
     let marker = directory.path().join("must-not-exist");
     let executable = make_script(directory.path(), "solver;touch must-not-exist", "sat", None);
@@ -286,45 +270,16 @@ fn paths_are_absolute_pinned_and_not_shell_interpreted() {
     assert!(SolverConfig::new(
         SolverEngine::Z3,
         PathBuf::from("relative-solver"),
-        SolverPin::new(VERSION, digest(&executable)),
         AdapterLimits::default(),
     )
     .is_err());
 
     let missing = directory.path().join("missing");
-    let missing_config = SolverConfig::new(
-        SolverEngine::Z3,
-        &missing,
-        SolverPin::new(VERSION, SolverDigest::from_bytes([0; 32])),
-        AdapterLimits::default(),
-    )
-    .expect("missing path is syntactically valid");
+    let missing_config = SolverConfig::new(SolverEngine::Z3, &missing, AdapterLimits::default())
+        .expect("missing path is syntactically valid");
     assert_eq!(
         execute_solver(&query(), &missing_config, &CancellationToken::default()).outcome(),
         SolverOutcome::MissingExecutable
-    );
-
-    let wrong_pin = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        SolverPin::new(VERSION, SolverDigest::from_bytes([0; 32])),
-        AdapterLimits::default(),
-    )
-    .expect("wrong pin config");
-    assert_eq!(
-        execute_solver(&query(), &wrong_pin, &CancellationToken::default()).outcome(),
-        SolverOutcome::ExecutableDigestMismatch
-    );
-    let wrong_version = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        SolverPin::new("fake-solver 9.9", digest(&executable)),
-        AdapterLimits::default(),
-    )
-    .expect("wrong version config");
-    assert_eq!(
-        execute_solver(&query(), &wrong_version, &CancellationToken::default()).outcome(),
-        SolverOutcome::VersionMismatch
     );
 }
 
@@ -336,7 +291,6 @@ fn executable_identity_probe_fails_closed() {
         ("version_empty", SolverOutcome::IdentityError),
         ("version_nonzero", SolverOutcome::IdentityError),
         ("version_invalid", SolverOutcome::IdentityError),
-        ("version_mutates", SolverOutcome::ExecutableChanged),
     ] {
         assert_eq!(
             execute_mode(mode, AdapterLimits::default()).outcome(),
@@ -344,19 +298,11 @@ fn executable_identity_probe_fails_closed() {
             "mode {mode}"
         );
     }
-    assert_eq!(
-        execute_mode("mutate_query", AdapterLimits::default()).outcome(),
-        SolverOutcome::ExecutableChanged
-    );
 
     let directory = TempDirectory::new("identity-probe");
-    let directory_config = SolverConfig::new(
-        SolverEngine::Z3,
-        directory.path(),
-        SolverPin::new(VERSION, SolverDigest::from_bytes([0; 32])),
-        AdapterLimits::default(),
-    )
-    .expect("directory is syntactically valid");
+    let directory_config =
+        SolverConfig::new(SolverEngine::Z3, directory.path(), AdapterLimits::default())
+            .expect("directory is syntactically valid");
     assert_eq!(
         execute_solver(&query(), &directory_config, &CancellationToken::default()).outcome(),
         SolverOutcome::IdentityError
@@ -421,12 +367,10 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
     assert_eq!(defaults.stderr_bytes, MAX_SOLVER_STDERR_BYTES);
     assert_eq!(defaults.model_bytes, MAX_SOLVER_MODEL_BYTES);
     assert_eq!(defaults.version_bytes, MAX_SOLVER_VERSION_BYTES);
-    assert_eq!(defaults.executable_bytes, MAX_SOLVER_EXECUTABLE_BYTES);
     assert_eq!(defaults.path_bytes, MAX_SOLVER_PATH_BYTES);
 
     let directory = TempDirectory::new("limits");
     let executable = make_script(directory.path(), "solver", "sat", None);
-    let pin = SolverPin::new(VERSION, digest(&executable));
     for invalid in [
         AdapterLimits {
             wall_time_ms: 0,
@@ -465,15 +409,11 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
             ..defaults
         },
         AdapterLimits {
-            executable_bytes: MAX_SOLVER_EXECUTABLE_BYTES + 1,
-            ..defaults
-        },
-        AdapterLimits {
             path_bytes: MAX_SOLVER_PATH_BYTES + 1,
             ..defaults
         },
     ] {
-        assert!(SolverConfig::new(SolverEngine::Z3, &executable, pin.clone(), invalid).is_err());
+        assert!(SolverConfig::new(SolverEngine::Z3, &executable, invalid).is_err());
     }
 
     let query = query();
@@ -570,41 +510,10 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
         SolverOutcome::ModelLimit
     );
 
-    let file_size = fs::metadata(&executable).expect("metadata").len();
-    let exact_executable = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        pin.clone(),
-        AdapterLimits {
-            executable_bytes: file_size,
-            ..defaults
-        },
-    )
-    .expect("exact executable bound");
-    assert_eq!(
-        execute_solver(&query, &exact_executable, &CancellationToken::default()).outcome(),
-        SolverOutcome::Sat
-    );
-    let identity_limited = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        pin.clone(),
-        AdapterLimits {
-            executable_bytes: file_size - 1,
-            ..defaults
-        },
-    )
-    .expect("syntactically valid identity limit");
-    assert_eq!(
-        execute_solver(&query, &identity_limited, &CancellationToken::default()).outcome(),
-        SolverOutcome::IdentityError
-    );
-
     let path_length = executable.to_str().expect("UTF-8 path").len();
     let exact_path = SolverConfig::new(
         SolverEngine::Z3,
         &executable,
-        pin.clone(),
         AdapterLimits {
             path_bytes: path_length,
             ..defaults
@@ -618,7 +527,6 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
     assert!(SolverConfig::new(
         SolverEngine::Z3,
         &executable,
-        pin,
         AdapterLimits {
             path_bytes: path_length - 1,
             ..defaults

@@ -5,7 +5,7 @@ use quire_analyze::{
     lower_boolean_statements, type_shape_digest, BindingGroup, BindingMember, LoweringErrorCode,
     StatementInput, CAPABILITY_CONTRACT, MAX_QUERY_STATEMENTS, SMTLIB2_PROFILE,
 };
-use quire_contract_ir::{
+use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, CollectionType, ComparisonOperator,
     ContractPackage, DeclarationEnvironment, EnumDeclaration, EnumVariantDeclaration,
     ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType, OverflowPolicy,
@@ -58,7 +58,7 @@ fn owner(requirement: &str, revision: u64) -> RequirementRef {
 
 fn point() -> ExecutionPoint {
     ExecutionPoint::Pre {
-        operation: AnchorName::new("check").expect("anchor"),
+        operation: AnchorName::new("check").expect("anchor").into(),
     }
 }
 
@@ -181,7 +181,7 @@ fn package_from_parts(
     .expect("requirement");
     ContractPackage::new(
         environment.owner().package().clone(),
-        SchemaVersion::V1_0,
+        SchemaVersion::V1_1,
         source_identity(),
         vec![requirement],
     )
@@ -247,6 +247,16 @@ fn golden_query_is_order_independent_and_source_mapped() {
         .all(|item| item.name.contains("_c")));
     assert_eq!(first.clause(), &forward.assertions()[0].clause);
     assert_eq!(first.clause_digest(), forward.assertions()[0].clause_digest);
+    let changed_content = bool_statement(
+        "REQ-alpha",
+        1,
+        "C-one",
+        &["ready", "blocked"],
+        value("ready"),
+        0x11,
+    );
+    assert_eq!(first.clause(), changed_content.clause());
+    assert_ne!(first.clause_digest(), changed_content.clause_digest());
     assert_eq!(first.execution_point(), &point());
     assert_eq!(first.expression(), &implication("ready", "blocked"));
 }

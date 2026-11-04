@@ -16,7 +16,7 @@ type: Review
 | Equivalent supported packages emit byte-identical SMT-LIB2 | Forward/reverse statement order and forward/reverse named-type declaration order tests | closed |
 | Every assertion has stable requirement/clause identity | Domain-separated statement digest and injective readable assertion symbol; golden and source-map assertions | closed |
 | Unsupported arithmetic, quantification, and data types return Unsupported | Requirement-tagged representative fixtures assert `UnsupportedConstruct` | closed |
-| Golden encodings are independently reviewable | `tests/golden/boolean-v1.smt2` is byte-compared to production output | closed |
+| Golden encodings are independently reviewable | `tests/golden/boolean-v1.smt2` contains real canonical clause identities and is byte-compared to production output | closed |
 | Code review, tests, gap analysis, and retained review record | REV-007, TC-010, this review, and the issue #7 validation record | closed after validation |
 
 ## Open Downstream Gaps

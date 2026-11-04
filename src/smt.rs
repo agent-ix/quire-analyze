@@ -3,11 +3,11 @@ use std::{
     fmt,
 };
 
-use quire_contract_ir::{
-    BooleanOperator, CanonicalDigest, CanonicalProfile, Clause, ClauseRef, ComparisonOperator,
-    ContractPackage, DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind,
-    IntegerDomain, OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation,
-    SymbolName, TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
+use quire_contract_model::{
+    BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
+    DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain,
+    OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation, SymbolName,
+    TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -159,7 +159,7 @@ impl fmt::Display for AnalysisDigest {
 #[derive(Clone, Debug)]
 pub struct StatementInput {
     clause: ClauseRef,
-    clause_digest: CanonicalDigest,
+    clause_digest: AnalysisDigest,
     execution_point: ExecutionPoint,
     environment: DeclarationEnvironment,
     expression: Expression,
@@ -229,7 +229,7 @@ impl StatementInput {
                 execution_point.expect("execution point exists when there are no errors");
             Ok(Self {
                 clause: ClauseRef::new(requirement_ref, clause.id().clone()),
-                clause_digest: canonical.digest(),
+                clause_digest: hash_fields("clause", &[canonical.bytes().as_slice()]),
                 execution_point,
                 environment,
                 expression: clause.body().expression().clone(),
@@ -244,7 +244,7 @@ impl StatementInput {
     pub fn clause(&self) -> &ClauseRef {
         &self.clause
     }
-    pub const fn clause_digest(&self) -> CanonicalDigest {
+    pub const fn clause_digest(&self) -> AnalysisDigest {
         self.clause_digest
     }
     pub fn execution_point(&self) -> &ExecutionPoint {
@@ -438,7 +438,7 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
 pub struct AssertionMap {
     pub name: String,
     pub clause: ClauseRef,
-    pub clause_digest: CanonicalDigest,
+    pub clause_digest: AnalysisDigest,
     pub source: SourceSpan,
     pub role: StatementRole,
     pub polarity: AssertionPolarity,
