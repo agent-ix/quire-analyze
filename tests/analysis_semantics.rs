@@ -21,8 +21,8 @@ use quire_analyze::{
     render_differential_summary, validate_differential_report, validate_report_document,
     AdapterLimits, AnalysisKind, AnalysisRequest, AnalysisRequestErrorCode, AnalysisStatus,
     AssertionPolarity, BindingGroup, BindingMember, CancellationToken, DifferentialDisposition,
-    ExplanationState, ModelPurpose, QueryBundle, SolverConfig, SolverDigest, SolverEngine,
-    SolverOutcome, SolverPin, StatementInput, StatementRole,
+    ExplanationState, ModelPurpose, QueryBundle, SolverConfig, SolverEngine, SolverOutcome,
+    StatementInput, StatementRole,
 };
 use quire_contract_ir::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ContractPackage,
@@ -174,24 +174,8 @@ fn statement_with_environment(
     (statement, environment)
 }
 
-fn digest(path: &Path) -> SolverDigest {
-    SolverDigest::from_bytes(Sha256::digest(fs::read(path).expect("script")).into())
-}
-
-fn reseal_report(mut value: serde_json::Value) -> Vec<u8> {
-    value
-        .as_object_mut()
-        .expect("report object")
-        .remove("reportDigest");
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(&value).expect("canonical payload"))
-    );
-    value
-        .as_object_mut()
-        .expect("report object")
-        .insert("reportDigest".to_owned(), serde_json::Value::String(digest));
-    serde_json::to_vec(&value).expect("sealed report")
+fn canonical_report(value: serde_json::Value) -> Vec<u8> {
+    serde_json::to_vec(&value).expect("canonical report")
 }
 
 fn expected_query_digest(request_digest: &str, query: &[u8]) -> String {
@@ -237,13 +221,7 @@ fn execute_engine_response(
 ) -> quire_analyze::SolverRecord {
     let directory = TempDirectory::new("response");
     let executable = write_solver(directory.path(), response, false);
-    let config = SolverConfig::new(
-        engine,
-        &executable,
-        SolverPin::new(VERSION, digest(&executable)),
-        AdapterLimits::default(),
-    )
-    .expect("config");
+    let config = SolverConfig::new(engine, &executable, AdapterLimits::default()).expect("config");
     execute_solver(query, &config, &CancellationToken::default())
 }
 
@@ -661,13 +639,8 @@ fn nonconclusive_adapter_states_remain_nonconclusive() {
     cancellation.cancel();
     let directory = TempDirectory::new("cancelled");
     let executable = write_solver(directory.path(), "", true);
-    let config = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        SolverPin::new(VERSION, digest(&executable)),
-        AdapterLimits::default(),
-    )
-    .expect("config");
+    let config =
+        SolverConfig::new(SolverEngine::Z3, &executable, AdapterLimits::default()).expect("config");
     let cancelled_record = execute_solver(&query, &config, &cancellation);
     let cancelled = classify_analysis(&query, &cancelled_record);
     assert_eq!(cancelled.status(), AnalysisStatus::Timeout);
@@ -729,21 +702,11 @@ fn differential_disposition_requires_two_verified_conclusive_results() {
 
     let directory = TempDirectory::new("differential-unavailable");
     let executable = write_solver(directory.path(), "unsat\n", false);
-    let z3_config = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        SolverPin::new(VERSION, digest(&executable)),
-        AdapterLimits::default(),
-    )
-    .expect("z3 config");
+    let z3_config = SolverConfig::new(SolverEngine::Z3, &executable, AdapterLimits::default())
+        .expect("z3 config");
     let missing = directory.path().join("missing-cvc5");
-    let cvc5_config = SolverConfig::new(
-        SolverEngine::Cvc5,
-        &missing,
-        SolverPin::new(VERSION, SolverDigest::from_bytes([0; 32])),
-        AdapterLimits::default(),
-    )
-    .expect("cvc5 config");
+    let cvc5_config = SolverConfig::new(SolverEngine::Cvc5, &missing, AdapterLimits::default())
+        .expect("cvc5 config");
     let unavailable = execute_differential(
         &query,
         &z3_config,
@@ -775,43 +738,10 @@ fn differential_disposition_requires_two_verified_conclusive_results() {
 fn official_z3_cvc5_differential_corpus_agrees() {
     let z3_path = PathBuf::from(std::env::var_os("QUIRE_Z3").expect("QUIRE_Z3 is required"));
     let cvc5_path = PathBuf::from(std::env::var_os("QUIRE_CVC5").expect("QUIRE_CVC5 is required"));
-    let z3_digest = digest(&z3_path);
-    let cvc5_digest = digest(&cvc5_path);
-    let z3_version = String::from_utf8(
-        Command::new(&z3_path)
-            .arg("-version")
-            .output()
-            .expect("Z3 version probe")
-            .stdout,
-    )
-    .expect("Z3 version UTF-8")
-    .trim()
-    .to_owned();
-    let cvc5_version = String::from_utf8(
-        Command::new(&cvc5_path)
-            .arg("--version")
-            .output()
-            .expect("cvc5 version probe")
-            .stdout,
-    )
-    .expect("cvc5 version UTF-8")
-    .trim()
-    .to_owned();
-
-    let z3 = SolverConfig::new(
-        SolverEngine::Z3,
-        z3_path,
-        SolverPin::new(z3_version, z3_digest),
-        AdapterLimits::default(),
-    )
-    .expect("Z3 configuration");
-    let cvc5 = SolverConfig::new(
-        SolverEngine::Cvc5,
-        cvc5_path,
-        SolverPin::new(cvc5_version, cvc5_digest),
-        AdapterLimits::default(),
-    )
-    .expect("cvc5 configuration");
+    let z3 = SolverConfig::new(SolverEngine::Z3, z3_path, AdapterLimits::default())
+        .expect("Z3 configuration");
+    let cvc5 = SolverConfig::new(SolverEngine::Cvc5, cvc5_path, AdapterLimits::default())
+        .expect("cvc5 configuration");
     let corpus = [
         AnalysisRequest::consistency(
             vec![],
@@ -886,31 +816,31 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
         .remove("queryDigest");
     assert!(!validator.is_valid(&omitted));
     mutated["differential"]["disposition"] = serde_json::Value::String("disagreement".to_owned());
-    let mutated = reseal_report(mutated);
+    let mutated = canonical_report(mutated);
     assert!(validate_differential_report(&mutated, &query, &run).is_err());
 
     let mut unknown_field = value.clone();
     unknown_field["unexpected"] = serde_json::Value::Bool(true);
-    assert!(validate_report_document(&reseal_report(unknown_field)).is_err());
+    assert!(validate_report_document(&canonical_report(unknown_field)).is_err());
 
     let mut raw_mismatch = value.clone();
     raw_mismatch["engines"][0]["stdoutHex"] = serde_json::Value::String("00".to_owned());
-    assert!(validate_report_document(&reseal_report(raw_mismatch)).is_err());
+    assert!(validate_report_document(&canonical_report(raw_mismatch)).is_err());
 
     let mut query_mismatch = value.clone();
     query_mismatch["queryHex"] = serde_json::Value::String("00".to_owned());
-    assert!(validate_report_document(&reseal_report(query_mismatch)).is_err());
+    assert!(validate_report_document(&canonical_report(query_mismatch)).is_err());
 
     let mut swapped = value.clone();
     swapped["engines"]
         .as_array_mut()
         .expect("engines")
         .swap(0, 1);
-    assert!(validate_report_document(&reseal_report(swapped)).is_err());
+    assert!(validate_report_document(&canonical_report(swapped)).is_err());
 
     let mut false_status = value.clone();
     false_status["engines"][0]["status"] = serde_json::Value::String("refuted".to_owned());
-    assert!(validate_report_document(&reseal_report(false_status)).is_err());
+    assert!(validate_report_document(&canonical_report(false_status)).is_err());
 
     let mut noncanonical = first.clone();
     noncanonical.push(b'\n');
@@ -1050,10 +980,7 @@ fn report_bytes_are_canonical_reconstructed_and_published_without_overwrite() {
 
 /// A report's conclusion must be re-derivable from the evidence it retains.
 ///
-/// Regression for SR-001 H2. Validation proved `stdoutHex` matched
-/// `stdoutSha256` and that `reportDigest` covered the payload — all
-/// self-consistency, which an author editing both halves together satisfies. It
-/// never asked the retained stdout whether it agreed with the claimed outcome,
+/// Validation must ask whether retained stdout agrees with the claimed outcome,
 /// nor re-derived `queryDigest` from the `requestDigest` and query bytes the
 /// document already carries. A `refuted` report could be forged into a
 /// `satisfied` one, resealed, and validated — and the CLI turned that into exit
@@ -1088,15 +1015,14 @@ fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
         forged["engines"][index]["explanation"] = serde_json::Value::String("verified".to_owned());
     }
     forged["differential"]["agreedStatus"] = serde_json::Value::String("refuted".to_owned());
-    let forged = reseal_report(forged);
+    let forged = canonical_report(forged);
     assert!(
         validate_report_document(&forged).is_err(),
         "a report whose retained stdout says unsat validated as sat"
     );
 
     // The same attack in the other direction: leave the outcome alone and swap
-    // the retained bytes for a `sat` transcript, fixing the paired digest so the
-    // self-consistency check passes.
+    // the retained bytes for a `sat` transcript.
     let mut swapped_evidence = value.clone();
     let sat_bytes = b"sat\n";
     let sat_hex = sat_bytes
@@ -1104,16 +1030,14 @@ fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     swapped_evidence["engines"][0]["stdoutHex"] = serde_json::Value::String(sat_hex);
-    swapped_evidence["engines"][0]["stdoutSha256"] =
-        serde_json::Value::String(format!("{:x}", Sha256::digest(sat_bytes)));
     assert!(
-        validate_report_document(&reseal_report(swapped_evidence)).is_err(),
-        "retained stdout was replaced wholesale, digest and all, and still validated"
+        validate_report_document(&canonical_report(swapped_evidence)).is_err(),
+        "retained stdout was replaced and still validated with the old outcome"
     );
 
     // `queryDigest` must be re-derived from `requestDigest` and the query bytes,
     // both of which the document carries. Replacing the query with a different
-    // program and its paired digest must not pass.
+    // program must not pass.
     let mut relabelled_query = value.clone();
     let other = b"(set-logic QF_UF)\n(check-sat)\n";
     relabelled_query["queryHex"] = serde_json::Value::String(
@@ -1122,10 +1046,8 @@ fn a_forged_conclusion_is_refused_by_re_derivation_from_retained_evidence() {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),
     );
-    relabelled_query["querySha256"] =
-        serde_json::Value::String(format!("{:x}", Sha256::digest(other)));
     assert!(
-        validate_report_document(&reseal_report(relabelled_query)).is_err(),
+        validate_report_document(&canonical_report(relabelled_query)).is_err(),
         "the query bytes were replaced and queryDigest still validated against them"
     );
 }
@@ -1170,15 +1092,15 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     );
-    assert_eq!(
-        value["querySha256"],
-        format!("{:x}", Sha256::digest(query.query().as_bytes()))
-    );
     assert_eq!(value["engines"][0]["stdoutHex"], "756e7361740a");
-    assert_eq!(
-        value["engines"][0]["stdoutSha256"],
-        format!("{:x}", Sha256::digest(b"unsat\n"))
-    );
+    assert_eq!(value["engines"][0]["identity"]["version"], VERSION);
+    assert!(value["engines"][0]["identity"].get("sha256").is_none());
+    assert!(value["engines"][0].get("expectedVersion").is_none());
+    assert!(value["engines"][0]
+        .get("expectedExecutableSha256")
+        .is_none());
+    assert!(value["engines"][0].get("configurationDigest").is_none());
+    assert!(value.get("reportDigest").is_none());
     assert!(value.get("contractIrRevision").is_none());
     validate_report_document(&report).expect("standalone v2");
     validate_differential_report(&report, &query, &run).expect("bound v2");
@@ -1188,16 +1110,10 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
         "requestDigest",
         "queryDigest",
         "queryHex",
-        "querySha256",
-        "reportDigest",
     ] {
         let mut missing = value.clone();
         missing.as_object_mut().expect("object").remove(field);
-        let bytes = if field == "reportDigest" {
-            serde_json::to_vec(&missing).expect("JSON")
-        } else {
-            reseal_report(missing)
-        };
+        let bytes = canonical_report(missing);
         assert!(
             validate_report_document(&bytes).is_err(),
             "missing {field} passed standalone"
@@ -1214,7 +1130,7 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
             .expect("producer")
             .remove(field);
         assert!(
-            validate_report_document(&reseal_report(missing)).is_err(),
+            validate_report_document(&canonical_report(missing)).is_err(),
             "missing producer.{field}"
         );
     }
@@ -1225,65 +1141,36 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
             .expect("assertion")
             .remove(field);
         assert!(
-            validate_report_document(&reseal_report(missing)).is_err(),
+            validate_report_document(&canonical_report(missing)).is_err(),
             "missing assertion.{field}"
         );
     }
-    for field in [
-        "stdoutHex",
-        "stdoutSha256",
-        "stderrHex",
-        "stderrSha256",
-        "modelHex",
-        "modelSha256",
-    ] {
+    for field in ["stdoutHex", "stderrHex", "modelHex"] {
         let mut missing = value.clone();
         missing["engines"][0]
             .as_object_mut()
             .expect("engine")
             .remove(field);
         assert!(
-            validate_report_document(&reseal_report(missing)).is_err(),
+            validate_report_document(&canonical_report(missing)).is_err(),
             "missing engine.{field}"
         );
     }
 
-    for (hex_field, digest_field) in [
-        ("queryHex", "querySha256"),
-        ("engines.0.stdoutHex", "engines.0.stdoutSha256"),
-        ("engines.0.stderrHex", "engines.0.stderrSha256"),
-        ("engines.0.modelHex", "engines.0.modelSha256"),
-    ] {
+    let mut changed_query = value.clone();
+    changed_query["queryHex"] = "00".into();
+    assert!(validate_report_document(&canonical_report(changed_query)).is_err());
+
+    for field in ["stderrHex", "modelHex"] {
         let mut changed = value.clone();
-        let (record, hex_key, digest_key) = if hex_field == "queryHex" {
-            (&mut changed, hex_field, digest_field)
-        } else {
-            (
-                &mut changed["engines"][0],
-                &hex_field[10..],
-                &digest_field[10..],
-            )
-        };
-        record[hex_key] = "00".into();
+        changed["engines"][0][field] = "00".into();
+        let bytes = canonical_report(changed);
+        validate_report_document(&bytes).expect("standalone report remains internally consistent");
         assert!(
-            validate_report_document(&reseal_report(changed)).is_err(),
-            "changed {hex_field}"
-        );
-        let mut changed = value.clone();
-        let record = if hex_field == "queryHex" {
-            &mut changed
-        } else {
-            &mut changed["engines"][0]
-        };
-        record[digest_key] = "0".repeat(64).into();
-        assert!(
-            validate_report_document(&reseal_report(changed)).is_err(),
-            "changed {digest_field}"
+            validate_differential_report(&bytes, &query, &run).is_err(),
+            "changed engine.{field} passed authoritative run comparison"
         );
     }
-    let mut changed = value.clone();
-    changed["reportDigest"] = "0".repeat(64).into();
-    assert!(validate_report_document(&serde_json::to_vec(&changed).expect("JSON")).is_err());
 
     for field in [
         "clause",
@@ -1312,7 +1199,7 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
             }
             _ => unreachable!(),
         }
-        let bytes = reseal_report(substituted);
+        let bytes = canonical_report(substituted);
         validate_report_document(&bytes).expect("internally consistent report");
         assert!(
             validate_differential_report(&bytes, &query, &run).is_err(),
@@ -1322,7 +1209,7 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
 
     let mut removed_field = value.clone();
     removed_field["contractIrRevision"] = "0".repeat(40).into();
-    let bytes = reseal_report(removed_field);
+    let bytes = canonical_report(removed_field);
     assert!(validate_report_document(&bytes).is_err());
     assert!(validate_differential_report(&bytes, &query, &run).is_err());
 
@@ -1335,14 +1222,14 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
         serde_json::from_slice(historical).expect("historical v1 fixture");
     assert_eq!(historical_value["schema"], "quire.differential-report/v1");
     assert!(historical_value["contractIrRevision"].is_string());
-    assert_eq!(reseal_report(historical_value.clone()), historical);
+    assert_eq!(canonical_report(historical_value.clone()), historical);
     assert!(validate_report_document(historical).is_err());
     assert!(validate_differential_report(historical, &query, &run).is_err());
 
     let mut v1 = value;
     v1["schema"] = historical_value["schema"].clone();
     v1["contractIrRevision"] = historical_value["contractIrRevision"].clone();
-    let bytes = reseal_report(v1);
+    let bytes = canonical_report(v1);
     assert!(validate_report_document(&bytes).is_err());
     assert!(validate_differential_report(&bytes, &query, &run).is_err());
 }

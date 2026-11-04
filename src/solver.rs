@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read},
     path::{Path, PathBuf},
     process::ExitStatus,
     sync::{
@@ -26,8 +26,6 @@ use std::os::{
     unix::process::{CommandExt, ExitStatusExt},
 };
 
-use sha2::{Digest as _, Sha256};
-
 use crate::QueryBundle;
 
 pub const SOLVER_PROCESS_PROFILE: &str = "quire.solver-process/v1";
@@ -42,28 +40,6 @@ pub const MAX_SOLVER_MODEL_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_SOLVER_VERSION_BYTES: usize = 64 * 1024;
 pub const MAX_SOLVER_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_SOLVER_PATH_BYTES: usize = 4 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SolverDigest([u8; 32]);
-
-impl SolverDigest {
-    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    pub const fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl fmt::Display for SolverDigest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in self.0 {
-            write!(formatter, "{byte:02x}")?;
-        }
-        Ok(())
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SolverEngine {
@@ -91,29 +67,6 @@ impl SolverEngine {
             Self::Z3 => &["-version"],
             Self::Cvc5 => &["--version"],
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SolverPin {
-    version: String,
-    executable_sha256: SolverDigest,
-}
-
-impl SolverPin {
-    pub fn new(version: impl Into<String>, executable_sha256: SolverDigest) -> Self {
-        Self {
-            version: version.into(),
-            executable_sha256,
-        }
-    }
-
-    pub fn version(&self) -> &str {
-        &self.version
-    }
-
-    pub const fn executable_sha256(&self) -> SolverDigest {
-        self.executable_sha256
     }
 }
 
@@ -252,7 +205,6 @@ impl std::error::Error for SolverConfigError {}
 pub struct SolverConfig {
     engine: SolverEngine,
     executable: PathBuf,
-    pin: SolverPin,
     limits: AdapterLimits,
 }
 
@@ -260,25 +212,14 @@ impl SolverConfig {
     pub fn new(
         engine: SolverEngine,
         executable: impl Into<PathBuf>,
-        pin: SolverPin,
         limits: AdapterLimits,
     ) -> Result<Self, SolverConfigError> {
         let executable = executable.into();
         let limits = limits.validate()?;
         validate_path(&executable, limits.path_bytes)?;
-        if pin.version.trim().is_empty()
-            || pin.version.as_bytes().contains(&0)
-            || pin.version.len() > limits.version_bytes
-        {
-            return Err(SolverConfigError::new(
-                "pin.version",
-                "expected version must be non-empty and within the version-output bound",
-            ));
-        }
         Ok(Self {
             engine,
             executable,
-            pin,
             limits,
         })
     }
@@ -289,10 +230,6 @@ impl SolverConfig {
 
     pub fn executable(&self) -> &Path {
         &self.executable
-    }
-
-    pub fn pin(&self) -> &SolverPin {
-        &self.pin
     }
 
     pub const fn limits(&self) -> AdapterLimits {
@@ -348,9 +285,6 @@ pub enum SolverOutcome {
     MissingExecutable,
     SpawnError,
     IdentityError,
-    ExecutableDigestMismatch,
-    ExecutableChanged,
-    VersionMismatch,
     SolverError,
     MalformedOutput,
     ContradictoryOutput,
@@ -377,9 +311,6 @@ impl SolverOutcome {
             Self::MissingExecutable => "missing-executable",
             Self::SpawnError => "spawn-error",
             Self::IdentityError => "identity-error",
-            Self::ExecutableDigestMismatch => "executable-digest-mismatch",
-            Self::ExecutableChanged => "executable-changed",
-            Self::VersionMismatch => "version-mismatch",
             Self::SolverError => "solver-error",
             Self::MalformedOutput => "malformed-output",
             Self::ContradictoryOutput => "contradictory-output",
@@ -405,7 +336,6 @@ impl SolverOutcome {
 pub struct ExecutableIdentity {
     pub canonical_path: PathBuf,
     pub byte_length: u64,
-    pub sha256: SolverDigest,
     pub version: String,
 }
 
@@ -422,10 +352,7 @@ pub struct SolverRecord {
     outcome: SolverOutcome,
     identity: Option<ExecutableIdentity>,
     configured_executable: PathBuf,
-    expected_version: String,
-    expected_executable_sha256: SolverDigest,
     argv: Vec<String>,
-    configuration_digest: SolverDigest,
     query_digest: String,
     limits: AdapterLimits,
     stdout: Vec<u8>,
@@ -458,20 +385,8 @@ impl SolverRecord {
         &self.configured_executable
     }
 
-    pub fn expected_version(&self) -> &str {
-        &self.expected_version
-    }
-
-    pub const fn expected_executable_sha256(&self) -> SolverDigest {
-        self.expected_executable_sha256
-    }
-
     pub fn argv(&self) -> &[String] {
         &self.argv
-    }
-
-    pub const fn configuration_digest(&self) -> SolverDigest {
-        self.configuration_digest
     }
 
     pub fn query_digest(&self) -> &str {
@@ -519,7 +434,35 @@ impl SolverRecord {
         push_field(&mut bytes, SOLVER_PROCESS_PROFILE.as_bytes());
         push_field(&mut bytes, self.engine.as_str().as_bytes());
         push_field(&mut bytes, self.outcome.as_str().as_bytes());
-        push_field(&mut bytes, self.configuration_digest.as_bytes());
+        push_field(
+            &mut bytes,
+            self.configured_executable.to_string_lossy().as_bytes(),
+        );
+        for argument in &self.argv {
+            push_field(&mut bytes, argument.as_bytes());
+        }
+        for value in [
+            self.limits.wall_time_ms,
+            self.limits.cleanup_time_ms,
+            self.limits.graceful_cleanup_ms,
+            self.limits.monitor_interval_ms,
+            self.limits.stdin_bytes as u64,
+            self.limits.stdout_bytes as u64,
+            self.limits.stderr_bytes as u64,
+            self.limits.model_bytes as u64,
+            self.limits.version_bytes as u64,
+            self.limits.executable_bytes,
+            self.limits.path_bytes as u64,
+        ] {
+            push_field(&mut bytes, &value.to_be_bytes());
+        }
+        if let Some(identity) = &self.identity {
+            push_field(
+                &mut bytes,
+                identity.canonical_path.to_string_lossy().as_bytes(),
+            );
+            push_field(&mut bytes, identity.version.as_bytes());
+        }
         push_field(&mut bytes, self.query_digest.as_bytes());
         push_field(&mut bytes, &self.model);
         bytes
@@ -538,17 +481,13 @@ pub fn execute_solver(
         .iter()
         .map(|argument| (*argument).to_owned())
         .collect::<Vec<_>>();
-    let config_digest = configuration_digest(config, &argv);
     let mut record = SolverRecord {
         profile: SOLVER_PROCESS_PROFILE,
         engine: config.engine,
         outcome: SolverOutcome::IdentityError,
         identity: None,
         configured_executable: config.executable.clone(),
-        expected_version: config.pin.version.clone(),
-        expected_executable_sha256: config.pin.executable_sha256,
         argv: argv.clone(),
-        configuration_digest: config_digest,
         query_digest,
         limits: config.limits,
         stdout: Vec::new(),
@@ -585,16 +524,6 @@ pub fn execute_solver(
             return record;
         }
     };
-    if identity.sha256 != config.pin.executable_sha256 {
-        record.outcome = SolverOutcome::ExecutableDigestMismatch;
-        record.identity = Some(identity);
-        return record;
-    }
-    if identity.version != config.pin.version {
-        record.outcome = SolverOutcome::VersionMismatch;
-        record.identity = Some(identity);
-        return record;
-    }
     let canonical_path = identity.canonical_path.clone();
     record.identity = Some(identity);
 
@@ -619,17 +548,6 @@ pub fn execute_solver(
             return record;
         }
     };
-    let executable_integrity = match digest_file(&executable_file) {
-        Ok(digest) if digest == record.identity.as_ref().expect("identity").sha256 => None,
-        Ok(_) => {
-            record.diagnostic = Some("solver executable changed during execution".to_owned());
-            Some(SolverOutcome::ExecutableChanged)
-        }
-        Err(error) => {
-            record.diagnostic = Some(error.to_string());
-            Some(SolverOutcome::IdentityError)
-        }
-    };
     let stdout_exceeded = raw.stdout.exceeded;
     let stderr_exceeded = raw.stderr.exceeded;
     record.stdout = raw.stdout.bytes;
@@ -640,8 +558,6 @@ pub fn execute_solver(
 
     record.outcome = if !raw.cleanup_ok {
         SolverOutcome::CleanupFailed
-    } else if let Some(outcome) = executable_integrity {
-        outcome
     } else if raw.cancelled {
         SolverOutcome::Cancelled
     } else if raw.timed_out {
@@ -741,9 +657,6 @@ fn inspect_executable(
             "solver executable exceeds the configured identity-input bound",
         ));
     }
-    let sha256 = digest_file(&executable_file)
-        .map_err(|error| PreflightFailure::new(SolverOutcome::IdentityError, error.to_string()))?;
-
     let version_argv = config
         .engine
         .version_arguments()
@@ -807,19 +720,10 @@ fn inspect_executable(
             "solver version output is empty or contains NUL",
         ));
     }
-    let post_version_digest = digest_file(&executable_file)
-        .map_err(|error| PreflightFailure::new(SolverOutcome::IdentityError, error.to_string()))?;
-    if post_version_digest != sha256 {
-        return Err(PreflightFailure::new(
-            SolverOutcome::ExecutableChanged,
-            "solver executable changed during version probing",
-        ));
-    }
     Ok((
         ExecutableIdentity {
             canonical_path,
             byte_length: metadata.len(),
-            sha256,
             version,
         },
         executable_file,
@@ -838,21 +742,6 @@ impl PreflightFailure {
             message: message.into(),
         }
     }
-}
-
-fn digest_file(file: &File) -> io::Result<SolverDigest> {
-    let mut file = file.try_clone()?;
-    file.seek(SeekFrom::Start(0))?;
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut hasher = Sha256::new();
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(SolverDigest(hasher.finalize().into()))
 }
 
 #[derive(Default)]
@@ -1374,48 +1263,6 @@ fn valid_s_expression(bytes: &[u8]) -> bool {
     saw_list && depth == 0 && !string && !quoted
 }
 
-fn configuration_digest(config: &SolverConfig, argv: &[String]) -> SolverDigest {
-    let mut fields = Vec::new();
-    push_field(&mut fields, config.engine.as_str().as_bytes());
-    push_field(&mut fields, config.executable.to_string_lossy().as_bytes());
-    push_field(&mut fields, config.pin.version.as_bytes());
-    push_field(&mut fields, config.pin.executable_sha256.as_bytes());
-    for argument in argv {
-        push_field(&mut fields, argument.as_bytes());
-    }
-    for value in [
-        config.limits.wall_time_ms,
-        config.limits.cleanup_time_ms,
-        config.limits.graceful_cleanup_ms,
-        config.limits.monitor_interval_ms,
-        config.limits.stdin_bytes as u64,
-        config.limits.stdout_bytes as u64,
-        config.limits.stderr_bytes as u64,
-        config.limits.model_bytes as u64,
-        config.limits.version_bytes as u64,
-        config.limits.executable_bytes,
-        config.limits.path_bytes as u64,
-    ] {
-        push_field(&mut fields, &value.to_be_bytes());
-    }
-    hash_fields(
-        "configuration",
-        &[SOLVER_PROCESS_PROFILE.as_bytes(), &fields],
-    )
-}
-
-fn hash_fields(domain: &str, fields: &[&[u8]]) -> SolverDigest {
-    let mut hasher = Sha256::new();
-    hasher.update(b"quire-analyze\0");
-    hasher.update(domain.as_bytes());
-    hasher.update([0]);
-    for field in fields {
-        hasher.update((field.len() as u64).to_be_bytes());
-        hasher.update(field);
-    }
-    SolverDigest(hasher.finalize().into())
-}
-
 fn push_field(output: &mut Vec<u8>, field: &[u8]) {
     output.extend_from_slice(&(field.len() as u64).to_be_bytes());
     output.extend_from_slice(field);
@@ -1559,9 +1406,6 @@ mod tests {
             SolverOutcome::MissingExecutable,
             SolverOutcome::SpawnError,
             SolverOutcome::IdentityError,
-            SolverOutcome::ExecutableDigestMismatch,
-            SolverOutcome::ExecutableChanged,
-            SolverOutcome::VersionMismatch,
             SolverOutcome::SolverError,
             SolverOutcome::MalformedOutput,
             SolverOutcome::ContradictoryOutput,
@@ -1585,22 +1429,11 @@ mod tests {
             outcomes.len()
         );
 
-        let digest = SolverDigest::from_bytes([0x5a; 32]);
-        let pin = SolverPin::new("solver 1", digest);
-        let config = SolverConfig::new(
-            SolverEngine::Z3,
-            "/tmp/solver",
-            pin.clone(),
-            AdapterLimits::default(),
-        )
-        .expect("syntactically valid config");
+        let config = SolverConfig::new(SolverEngine::Z3, "/tmp/solver", AdapterLimits::default())
+            .expect("syntactically valid config");
         assert_eq!(config.engine(), SolverEngine::Z3);
         assert_eq!(config.executable(), Path::new("/tmp/solver"));
-        assert_eq!(config.pin(), &pin);
         assert_eq!(config.limits(), AdapterLimits::default());
-        assert_eq!(pin.version(), "solver 1");
-        assert_eq!(pin.executable_sha256(), digest);
-        assert_eq!(digest.as_bytes(), &[0x5a; 32]);
 
         for limits in [
             AdapterLimits {
@@ -1619,19 +1452,9 @@ mod tests {
             assert!(!error.message().is_empty());
             assert!(error.to_string().contains(error.path()));
         }
-        for version in [String::new(), "x".repeat(MAX_SOLVER_VERSION_BYTES + 1)] {
-            let error = SolverConfig::new(
-                SolverEngine::Z3,
-                "/tmp/solver",
-                SolverPin::new(version, digest),
-                AdapterLimits::default(),
-            )
-            .expect_err("invalid version pin");
-            assert_eq!(error.path(), "pin.version");
-        }
         let non_utf8 = PathBuf::from(OsString::from_vec(b"/tmp/solver-\xff".to_vec()));
         assert_eq!(
-            SolverConfig::new(SolverEngine::Z3, non_utf8, pin, AdapterLimits::default(),)
+            SolverConfig::new(SolverEngine::Z3, non_utf8, AdapterLimits::default(),)
                 .expect_err("non-UTF-8 path")
                 .path(),
             "executable"

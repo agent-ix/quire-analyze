@@ -69,9 +69,9 @@ Every analysis ends in one `AnalysisStatus`. Only `satisfied` and `refuted` are 
 | `unknown` | The solver answered `unknown`. |
 | `timeout` | The wall-clock limit was reached, or the run was cancelled. |
 | `unsupported` | The platform cannot run the solver adapter. |
-| `tool-error` | Anything else: missing, changed or wrongly versioned executable, malformed or contradictory output, an exceeded input or output limit, a nonzero exit, a query that does not match the solver record. |
+| `tool-error` | Anything else: a missing executable, a failed version probe, malformed or contradictory output, an exceeded input or output limit, a nonzero exit, or a query that does not match the solver record. |
 
-The adapter pins the solver by version string and executable SHA-256, runs it
+The adapter uses the configured solver path and records its observed version. It runs
 with fixed arguments and bounded input, output, model and time limits
 (`AdapterLimits`), and records its raw stdout, stderr and exit. A model is
 verified by parsing it, checking it assigns exactly the declared symbols, and
@@ -104,7 +104,7 @@ assert_eq!(model.purpose(), ModelPurpose::Shared);
 ```
 
 To run a real solver, build a `SolverConfig` from the engine, the executable
-path, a `SolverPin` (version and SHA-256 of the binary) and `AdapterLimits`,
+path and `AdapterLimits`,
 then call `execute_solver(&query, &config, &CancellationToken::default())`.
 The same file shows it in `nonconclusive_adapter_states_remain_nonconclusive`:
 
@@ -112,7 +112,6 @@ The same file shows it in `nonconclusive_adapter_states_remain_nonconclusive`:
 let config = SolverConfig::new(
     SolverEngine::Z3,
     &executable,
-    SolverPin::new(VERSION, digest(&executable)),
     AdapterLimits::default(),
 )
 .expect("config");
@@ -135,14 +134,15 @@ records, and compares them.
 | --- | --- |
 | `agreement` | Both conclusive, same status, and any witness model verified. |
 | `disagreement` | Both conclusive, opposite statuses. |
-| `unavailable` | A solver is missing, unsupported on this platform, or fails its version or digest pin. |
+| `unavailable` | A solver is missing or unsupported on this platform. |
 | `inconclusive` | Anything else, such as `unknown`, a timeout, or an unverified model. |
 
 `render_differential_report` writes the run as a canonical-JSON
 `quire.differential-report/v2` document (schema in
-[`schemas/`](schemas/differential-report-v2.schema.json)) with a digest over the
-whole report, and `validate_report_document` re-derives every digest and the
-conclusion from the retained raw evidence. A hand-edited report is refused.
+[`schemas/`](schemas/differential-report-v2.schema.json)). `validate_report_document`
+checks its closed shape, canonical bytes, request-to-query binding, and conclusions
+against retained solver output. `validate_differential_report` also compares it
+with the authoritative query and run, rejecting changed evidence.
 `publish_report_new` writes it atomically and does not overwrite an existing file.
 
 ## Command line

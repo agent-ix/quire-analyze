@@ -7,7 +7,6 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use sha2::{Digest as _, Sha256};
 
 use crate::{
     classify_analysis, execute_solver, AnalysisConclusion, AnalysisStatus, CancellationToken,
@@ -180,10 +179,7 @@ pub fn compare_solver_records(
     let unavailable = [z3.outcome(), cvc5.outcome()].into_iter().any(|outcome| {
         matches!(
             outcome,
-            SolverOutcome::MissingExecutable
-                | SolverOutcome::UnsupportedPlatform
-                | SolverOutcome::VersionMismatch
-                | SolverOutcome::ExecutableDigestMismatch
+            SolverOutcome::MissingExecutable | SolverOutcome::UnsupportedPlatform
         )
     });
     let verified_if_required = |conclusion: &AnalysisConclusion| {
@@ -224,7 +220,7 @@ pub fn render_differential_report(
     let analysis_kind = query
         .analysis_kind()
         .ok_or_else(|| "differential reports require an analysis query".to_owned())?;
-    let mut payload = json!({
+    let payload = json!({
         "analysisKind": analysis_kind.as_str(),
         "analysisModelProfile": run.z3.analysis_model_profile(),
         "assertions": query.assertions().iter().map(|assertion| json!({
@@ -253,15 +249,9 @@ pub fn render_differential_report(
         },
         "queryDigest": query.query_digest().to_string(),
         "queryHex": hex(query.query().as_bytes()),
-        "querySha256": sha256(query.query().as_bytes()),
         "requestDigest": query.analysis_request_digest().to_string(),
         "schema": DIFFERENTIAL_REPORT_SCHEMA,
     });
-    let digest = digest_json(&payload);
-    payload
-        .as_object_mut()
-        .expect("report object")
-        .insert("reportDigest".to_owned(), Value::String(digest));
     Ok(serde_json::to_vec(&payload).expect("serializable report"))
 }
 
@@ -302,7 +292,7 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
     if bytes.len() > MAX_REPORT_BYTES {
         return Err("report exceeds the v2 byte bound".to_owned());
     }
-    let mut value: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    let value: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     let schema: Value = serde_json::from_str(include_str!(
         "../schemas/differential-report-v2.schema.json"
     ))
@@ -335,8 +325,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
                 "producer",
                 "queryDigest",
                 "queryHex",
-                "querySha256",
-                "reportDigest",
                 "requestDigest",
                 "schema",
             ],
@@ -367,19 +355,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             return Err("PGM-01 envelope is not the required unavailable state".to_owned());
         }
     }
-    let expected_digest = value
-        .as_object_mut()
-        .expect("object checked")
-        .remove("reportDigest")
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .ok_or_else(|| "report digest is absent".to_owned())?;
-    if digest_json(&value) != expected_digest {
-        return Err("report digest does not match canonical payload bytes".to_owned());
-    }
-    value
-        .as_object_mut()
-        .expect("object checked")
-        .insert("reportDigest".to_owned(), Value::String(expected_digest));
     if serde_json::to_vec(&value).map_err(|error| error.to_string())? != bytes {
         return Err("report JSON is not in canonical compact form".to_owned());
     }
@@ -391,9 +366,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             .and_then(Value::as_str)
             .ok_or_else(|| "query bytes are absent".to_owned())?,
     )?;
-    if object.get("querySha256").and_then(Value::as_str) != Some(&sha256(&query_bytes)) {
-        return Err("query byte digest does not match retained query bytes".to_owned());
-    }
     let engines = object
         .get("engines")
         .and_then(Value::as_array)
@@ -406,27 +378,21 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             &[
                 "argv",
                 "cleanupMs",
-                "configurationDigest",
                 "configuredExecutable",
                 "diagnostic",
                 "elapsedMs",
                 "engine",
-                "expectedExecutableSha256",
-                "expectedVersion",
                 "explanation",
                 "identity",
                 "limits",
                 "modelHex",
-                "modelSha256",
                 "outcome",
                 "processExit",
                 "profile",
                 "queryDigest",
                 "status",
                 "stderrHex",
-                "stderrSha256",
                 "stdoutHex",
-                "stdoutSha256",
             ],
             "engine record",
         )?;
@@ -454,7 +420,7 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
         if let Some(identity) = engine.get("identity").filter(|value| !value.is_null()) {
             require_exact_keys(
                 require_object(identity, "engine identity")?,
-                &["bytes", "path", "sha256", "version"],
+                &["bytes", "path", "version"],
                 "engine identity",
             )?;
         }
@@ -465,20 +431,11 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
                 .and_then(Value::as_str)
                 .ok_or_else(|| format!("engine {field} bytes are absent"))?;
             let bytes = decode_hex(encoded)?;
-            let digest = engine
-                .get(format!("{field}Sha256"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("engine {field} digest is absent"))?;
-            if sha256(&bytes) != digest {
-                return Err(format!("engine {field} digest mismatch"));
-            }
             streams.insert(field, bytes);
         }
 
         // Re-derive the conclusion from the raw response the report retains.
         //
-        // Checking `stdoutHex` against `stdoutSha256` only proves the record is
-        // self-consistent: an author who edits both fields together passes it.
         // The retained bytes are the evidence for the claim, so for the three
         // outcomes where stdout *is* that evidence the claim is re-parsed from
         // it. Without this, a report whose stdout says `unsat` can declare `sat`
@@ -511,10 +468,8 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
 
     // Re-derive the query identity from the two inputs the report carries.
     //
-    // `querySha256` covers the retained query bytes and `reportDigest` covers
-    // the whole payload, but neither ties `queryDigest` to what it is supposed
-    // to be a digest *of*. Both of its inputs are fields of this document, so
-    // the binding is checkable and is checked.
+    // Both inputs to `queryDigest` are fields of this document, so its
+    // request-to-query binding is checkable and is checked.
     let request_digest = object
         .get("requestDigest")
         .and_then(Value::as_str)
@@ -783,13 +738,12 @@ fn engine_value(conclusion: &AnalysisConclusion) -> Value {
     json!({
         "argv": record.argv(),
         "cleanupMs": record.cleanup_ms(),
-        "configurationDigest": record.configuration_digest().to_string(),
         "configuredExecutable": record.configured_executable().to_str().expect("validated UTF-8 path"),
         "diagnostic": record.diagnostic(),
         "elapsedMs": record.elapsed_ms(),
         "engine": record.engine().as_str(),
         "explanation": match conclusion.explanation() { ExplanationState::NotApplicable => "not-applicable", ExplanationState::Incomplete => "incomplete", ExplanationState::Verified => "verified" },
-        "identity": record.identity().map(|identity| json!({"bytes": identity.byte_length, "path": identity.canonical_path, "sha256": identity.sha256.to_string(), "version": identity.version})),
+        "identity": record.identity().map(|identity| json!({"bytes": identity.byte_length, "path": identity.canonical_path, "version": identity.version})),
         "limits": {
             "cleanupTimeMs": limits.cleanup_time_ms,
             "executableBytes": limits.executable_bytes,
@@ -804,23 +758,14 @@ fn engine_value(conclusion: &AnalysisConclusion) -> Value {
             "wallTimeMs": limits.wall_time_ms,
         },
         "modelHex": hex(record.model()),
-        "modelSha256": sha256(record.model()),
         "outcome": record.outcome().as_str(),
         "processExit": record.exit().map(|exit| json!({"code": exit.code, "signal": exit.signal})),
         "profile": record.profile(),
         "queryDigest": record.query_digest(),
         "status": conclusion.status().as_str(),
         "stderrHex": hex(record.stderr()),
-        "stderrSha256": sha256(record.stderr()),
         "stdoutHex": hex(record.stdout()),
-        "stdoutSha256": sha256(record.stdout()),
-        "expectedExecutableSha256": record.expected_executable_sha256().to_string(),
-        "expectedVersion": record.expected_version(),
     })
-}
-
-fn digest_json(value: &Value) -> String {
-    sha256(&serde_json::to_vec(value).expect("serializable JSON"))
 }
 
 fn disposition_from_values(z3: &Value, cvc5: &Value) -> Result<DifferentialDisposition, String> {
@@ -913,10 +858,6 @@ fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
             u8::from_str_radix(pair, 16).map_err(|_| "raw evidence hex is invalid".to_owned())
         })
         .collect()
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn hex(bytes: &[u8]) -> String {
