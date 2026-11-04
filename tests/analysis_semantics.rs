@@ -1094,7 +1094,15 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
     );
     assert_eq!(value["engines"][0]["stdoutHex"], "756e7361740a");
     assert_eq!(value["engines"][0]["identity"]["version"], VERSION);
+    assert_eq!(
+        value["engines"][0]["identity"]["path"],
+        value["engines"][0]["configuredExecutable"]
+    );
     assert!(value["engines"][0]["identity"].get("sha256").is_none());
+    assert!(value["engines"][0]["identity"].get("bytes").is_none());
+    assert!(value["engines"][0]["limits"]
+        .get("executableBytes")
+        .is_none());
     assert!(value["engines"][0].get("expectedVersion").is_none());
     assert!(value["engines"][0]
         .get("expectedExecutableSha256")
@@ -1104,6 +1112,54 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
     assert!(value.get("contractIrRevision").is_none());
     validate_report_document(&report).expect("standalone v2");
     validate_differential_report(&report, &query, &run).expect("bound v2");
+
+    for field in ["querySha256", "reportDigest"] {
+        let mut obsolete = value.clone();
+        obsolete[field] = "0".repeat(64).into();
+        assert!(
+            validate_report_document(&canonical_report(obsolete)).is_err(),
+            "obsolete {field} passed standalone"
+        );
+    }
+    for field in [
+        "expectedVersion",
+        "expectedExecutableSha256",
+        "configurationDigest",
+        "stdoutSha256",
+        "stderrSha256",
+        "modelSha256",
+    ] {
+        let mut obsolete = value.clone();
+        obsolete["engines"][0][field] = "0".repeat(64).into();
+        assert!(
+            validate_report_document(&canonical_report(obsolete)).is_err(),
+            "obsolete engine.{field} passed standalone"
+        );
+    }
+    for (container, field) in [
+        ("identity", "bytes"),
+        ("identity", "sha256"),
+        ("limits", "executableBytes"),
+    ] {
+        let mut obsolete = value.clone();
+        obsolete["engines"][0][container][field] = 1.into();
+        assert!(
+            validate_report_document(&canonical_report(obsolete)).is_err(),
+            "obsolete engine.{container}.{field} passed standalone"
+        );
+    }
+    for outcome in [
+        "executable-digest-mismatch",
+        "executable-changed",
+        "version-mismatch",
+    ] {
+        let mut obsolete = value.clone();
+        obsolete["engines"][0]["outcome"] = outcome.into();
+        assert!(
+            validate_report_document(&canonical_report(obsolete)).is_err(),
+            "obsolete outcome {outcome} passed standalone"
+        );
+    }
 
     for field in [
         "bindingSetDigest",
