@@ -31,7 +31,7 @@ operations:
     entry_point: src/solver.rs execute_solver
     current: implemented library execution with caller-supplied query and solver configuration
     output: SolverRecord
-    semantics: bounded argv-based process execution with exact engine/configuration identity
+    semantics: bounded argv-based execution of the configured engine and executable path; retain the observed solver version without a version or executable digest pin
   - name: conclude
     entry_point: src/analysis.rs classify_analysis
     current: classifies the logical solver outcome; failed SAT replay retains that status and records Incomplete explanation without a verified model
@@ -51,7 +51,8 @@ operations:
 outcome:
   conclusive: [satisfied, refuted]
   non_conclusive_library_status: [unknown, unsupported, timeout, tool-error]
-  detail: SolverRecord retains original outcomes; cancellation maps to timeout, unsupported-platform to unsupported, other failures to tool-error
+  raw_solver_examples: [unknown, timed-out, cancelled, missing-executable, unsupported-platform, solver-error, malformed-output]
+  detail: SolverRecord retains raw outcomes; timed-out and cancelled normalize to timeout, unsupported-platform to unsupported, and missing-executable and other process failures to tool-error
   rejected_requests: constructor and lowering errors return Result errors before an AnalysisConclusion exists
   rule: complete recognized sat/unsat under exact encoding determines logical status; SAT replay determines whether model evidence is verified or incomplete
   differential_agreement: FR-005 requires both matching conclusive statuses and every required SAT model replay-verified
@@ -63,7 +64,7 @@ exit_classes:
   4: publication or exit-code conversion error
 resource_limits:
   lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
-  adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, executable_bytes, path_bytes]
+  adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, path_bytes]
 lowering_v1:
   request_kind: boolean_conjunction
   logic: QF_UF
@@ -91,8 +92,8 @@ encoding profile.
 FR-004 keeps that logical status when optional model evidence fails validation, without representing
 the evidence as verified. `compare_solver_records` requires verified SAT evidence for same-status
 differential `Agreement` under FR-005.
-Missing identities invalidate the record. The library API never derives an executable path from
-untrusted query content. The listed library entry points are separate calls; no CLI command
+Missing canonical proof-input identities invalidate the report. The library API never derives an
+executable path from untrusted query content. The listed library entry points are separate calls; no CLI command
 currently composes prepare through compare.
 Hybrid reachability and canonical synthesis are separate providers in `src/hybrid_synthesis.rs`,
 returning method outcomes through `crates/method-contract`; they are outside this Boolean SMT
@@ -101,10 +102,13 @@ classification contract. The PGM-01 shared envelope remains unavailable pending
 
 Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The runtime
 report uses `quire.differential-report/v2`, a closed contract without `contractIrRevision`. It
-retains producer application name/version and canonical clause, request, query, raw-stream, and
-report content digests. The standalone validator accepts v2 only; the bound validator also
-reconstructs identities from the authoritative query and differential run. No v1 fallback is
-provided.
+retains producer application name/version and canonical clause, binding, request and query
+identities plus raw solver-stream bytes. The standalone validator accepts v2 only; the bound
+validator also reconstructs identities from the authoritative query and differential run. No v1
+fallback is provided.
+The labels `tool-unavailable`, `invalid-input`, and `internal-error` are not members of
+`AnalysisStatus`. A missing solver records the raw `missing-executable` outcome and normalizes to
+`tool-error`; invalid requests return constructor or lowering `Result` errors before a conclusion.
 Neither acceptance of this interface nor automated output grants engine qualification or human
 release approval. The acceptance scope and decision dispositions are recorded in AD-001. AD-001 and this
 interface are accepted by the independent IR-1294 architecture review within that scope; accepted
