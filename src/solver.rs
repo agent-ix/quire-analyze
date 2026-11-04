@@ -38,7 +38,6 @@ pub const MAX_SOLVER_STDOUT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SOLVER_STDERR_BYTES: usize = 1024 * 1024;
 pub const MAX_SOLVER_MODEL_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_SOLVER_VERSION_BYTES: usize = 64 * 1024;
-pub const MAX_SOLVER_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_SOLVER_PATH_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -81,7 +80,6 @@ pub struct AdapterLimits {
     pub stderr_bytes: usize,
     pub model_bytes: usize,
     pub version_bytes: usize,
-    pub executable_bytes: u64,
     pub path_bytes: usize,
 }
 
@@ -97,7 +95,6 @@ impl Default for AdapterLimits {
             stderr_bytes: MAX_SOLVER_STDERR_BYTES,
             model_bytes: MAX_SOLVER_MODEL_BYTES,
             version_bytes: MAX_SOLVER_VERSION_BYTES,
-            executable_bytes: MAX_SOLVER_EXECUTABLE_BYTES,
             path_bytes: MAX_SOLVER_PATH_BYTES,
         }
     }
@@ -129,11 +126,6 @@ impl AdapterLimits {
             "version_bytes",
             self.version_bytes,
             MAX_SOLVER_VERSION_BYTES,
-        )?;
-        validate_limit(
-            "executable_bytes",
-            self.executable_bytes,
-            MAX_SOLVER_EXECUTABLE_BYTES,
         )?;
         validate_limit("path_bytes", self.path_bytes, MAX_SOLVER_PATH_BYTES)?;
         if self.graceful_cleanup_ms > self.cleanup_time_ms {
@@ -335,7 +327,6 @@ impl SolverOutcome {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutableIdentity {
     pub canonical_path: PathBuf,
-    pub byte_length: u64,
     pub version: String,
 }
 
@@ -451,7 +442,6 @@ impl SolverRecord {
             self.limits.stderr_bytes as u64,
             self.limits.model_bytes as u64,
             self.limits.version_bytes as u64,
-            self.limits.executable_bytes,
             self.limits.path_bytes as u64,
         ] {
             push_field(&mut bytes, &value.to_be_bytes());
@@ -651,12 +641,6 @@ fn inspect_executable(
             "solver executable is not a regular file",
         ));
     }
-    if metadata.len() > config.limits.executable_bytes {
-        return Err(PreflightFailure::new(
-            SolverOutcome::IdentityError,
-            "solver executable exceeds the configured identity-input bound",
-        ));
-    }
     let version_argv = config
         .engine
         .version_arguments()
@@ -723,7 +707,6 @@ fn inspect_executable(
     Ok((
         ExecutableIdentity {
             canonical_path,
-            byte_length: metadata.len(),
             version,
         },
         executable_file,

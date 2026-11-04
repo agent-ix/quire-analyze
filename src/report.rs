@@ -420,7 +420,7 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
         if let Some(identity) = engine.get("identity").filter(|value| !value.is_null()) {
             require_exact_keys(
                 require_object(identity, "engine identity")?,
-                &["bytes", "path", "version"],
+                &["path", "version"],
                 "engine identity",
             )?;
         }
@@ -743,10 +743,9 @@ fn engine_value(conclusion: &AnalysisConclusion) -> Value {
         "elapsedMs": record.elapsed_ms(),
         "engine": record.engine().as_str(),
         "explanation": match conclusion.explanation() { ExplanationState::NotApplicable => "not-applicable", ExplanationState::Incomplete => "incomplete", ExplanationState::Verified => "verified" },
-        "identity": record.identity().map(|identity| json!({"bytes": identity.byte_length, "path": identity.canonical_path, "version": identity.version})),
+        "identity": record.identity().map(|identity| json!({"path": identity.canonical_path, "version": identity.version})),
         "limits": {
             "cleanupTimeMs": limits.cleanup_time_ms,
-            "executableBytes": limits.executable_bytes,
             "gracefulCleanupMs": limits.graceful_cleanup_ms,
             "modelBytes": limits.model_bytes,
             "monitorIntervalMs": limits.monitor_interval_ms,

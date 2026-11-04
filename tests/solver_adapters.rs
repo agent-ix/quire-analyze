@@ -14,10 +14,10 @@ use std::{
 
 use quire_analyze::{
     execute_solver, lower_boolean_statements, AdapterLimits, CancellationToken, SolverConfig,
-    SolverEngine, SolverOutcome, MAX_SOLVER_CLEANUP_TIME_MS, MAX_SOLVER_EXECUTABLE_BYTES,
-    MAX_SOLVER_GRACEFUL_CLEANUP_MS, MAX_SOLVER_MODEL_BYTES, MAX_SOLVER_MONITOR_INTERVAL_MS,
-    MAX_SOLVER_PATH_BYTES, MAX_SOLVER_STDERR_BYTES, MAX_SOLVER_STDIN_BYTES,
-    MAX_SOLVER_STDOUT_BYTES, MAX_SOLVER_VERSION_BYTES, MAX_SOLVER_WALL_TIME_MS,
+    SolverEngine, SolverOutcome, MAX_SOLVER_CLEANUP_TIME_MS, MAX_SOLVER_GRACEFUL_CLEANUP_MS,
+    MAX_SOLVER_MODEL_BYTES, MAX_SOLVER_MONITOR_INTERVAL_MS, MAX_SOLVER_PATH_BYTES,
+    MAX_SOLVER_STDERR_BYTES, MAX_SOLVER_STDIN_BYTES, MAX_SOLVER_STDOUT_BYTES,
+    MAX_SOLVER_VERSION_BYTES, MAX_SOLVER_WALL_TIME_MS,
 };
 use quire_contract_model::{
     AnchorName, Clause, ClauseId, ClauseKind, ContractPackage, DeclarationEnvironment,
@@ -370,7 +370,6 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
     assert_eq!(defaults.stderr_bytes, MAX_SOLVER_STDERR_BYTES);
     assert_eq!(defaults.model_bytes, MAX_SOLVER_MODEL_BYTES);
     assert_eq!(defaults.version_bytes, MAX_SOLVER_VERSION_BYTES);
-    assert_eq!(defaults.executable_bytes, MAX_SOLVER_EXECUTABLE_BYTES);
     assert_eq!(defaults.path_bytes, MAX_SOLVER_PATH_BYTES);
 
     let directory = TempDirectory::new("limits");
@@ -410,10 +409,6 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
         },
         AdapterLimits {
             version_bytes: MAX_SOLVER_VERSION_BYTES + 1,
-            ..defaults
-        },
-        AdapterLimits {
-            executable_bytes: MAX_SOLVER_EXECUTABLE_BYTES + 1,
             ..defaults
         },
         AdapterLimits {
@@ -518,41 +513,10 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
         SolverOutcome::ModelLimit
     );
 
-    let file_size = fs::metadata(&executable).expect("metadata").len();
-    let exact_executable = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        pin.clone(),
-        AdapterLimits {
-            executable_bytes: file_size,
-            ..defaults
-        },
-    )
-    .expect("exact executable bound");
-    assert_eq!(
-        execute_solver(&query, &exact_executable, &CancellationToken::default()).outcome(),
-        SolverOutcome::Sat
-    );
-    let identity_limited = SolverConfig::new(
-        SolverEngine::Z3,
-        &executable,
-        pin.clone(),
-        AdapterLimits {
-            executable_bytes: file_size - 1,
-            ..defaults
-        },
-    )
-    .expect("syntactically valid identity limit");
-    assert_eq!(
-        execute_solver(&query, &identity_limited, &CancellationToken::default()).outcome(),
-        SolverOutcome::IdentityError
-    );
-
     let path_length = executable.to_str().expect("UTF-8 path").len();
     let exact_path = SolverConfig::new(
         SolverEngine::Z3,
         &executable,
-        pin.clone(),
         AdapterLimits {
             path_bytes: path_length,
             ..defaults
@@ -566,7 +530,6 @@ fn every_adapter_owned_limit_is_finite_and_enforced() {
     assert!(SolverConfig::new(
         SolverEngine::Z3,
         &executable,
-        pin,
         AdapterLimits {
             path_bytes: path_length - 1,
             ..defaults

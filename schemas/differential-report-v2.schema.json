@@ -108,9 +108,8 @@
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["bytes", "path", "version"],
+      "required": ["path", "version"],
       "properties": {
-        "bytes": { "type": "integer", "minimum": 0 },
         "path": { "type": "string", "minLength": 1 },
         "version": { "type": "string", "minLength": 1 }
       }
@@ -118,10 +117,9 @@
     "limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["cleanupTimeMs", "executableBytes", "gracefulCleanupMs", "modelBytes", "monitorIntervalMs", "pathBytes", "stderrBytes", "stdinBytes", "stdoutBytes", "versionBytes", "wallTimeMs"],
+      "required": ["cleanupTimeMs", "gracefulCleanupMs", "modelBytes", "monitorIntervalMs", "pathBytes", "stderrBytes", "stdinBytes", "stdoutBytes", "versionBytes", "wallTimeMs"],
       "properties": {
         "cleanupTimeMs": { "type": "integer", "minimum": 1 },
-        "executableBytes": { "type": "integer", "minimum": 1 },
         "gracefulCleanupMs": { "type": "integer", "minimum": 1 },
         "modelBytes": { "type": "integer", "minimum": 1 },
         "monitorIntervalMs": { "type": "integer", "minimum": 1 },
