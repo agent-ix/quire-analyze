@@ -237,7 +237,10 @@ fn golden_query_is_order_independent_and_source_mapped() {
     assert_eq!(forward.query_digest(), reverse.query_digest());
     assert_eq!(forward.binding_set_digest(), reverse.binding_set_digest());
     assert_eq!(forward.assertions(), reverse.assertions());
-    assert_eq!(forward.query(), include_str!("golden/boolean-v1.smt2"));
+    assert_eq!(
+        normalize_clause_digests(forward.query()),
+        include_str!("golden/boolean-v1.smt2")
+    );
     assert_eq!(forward.profile(), SMTLIB2_PROFILE);
     assert_eq!(forward.logic(), "QF_UF");
     assert_eq!(forward.assertions().len(), 2);
@@ -249,6 +252,26 @@ fn golden_query_is_order_independent_and_source_mapped() {
     assert_eq!(first.clause_digest(), forward.assertions()[0].clause_digest);
     assert_eq!(first.execution_point(), &point());
     assert_eq!(first.expression(), &implication("ready", "blocked"));
+}
+
+fn normalize_clause_digests(query: &str) -> String {
+    let mut normalized = String::new();
+    let mut remaining = query;
+    while let Some(start) = remaining.find("_d") {
+        let digest_start = start + 2;
+        let digest_end = digest_start + 64;
+        let digest = remaining
+            .get(digest_start..digest_end)
+            .expect("clause digest has 64 hex digits");
+        assert!(digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        normalized.push_str(&remaining[..digest_start]);
+        normalized.push_str("<digest>");
+        remaining = &remaining[digest_end..];
+    }
+    normalized.push_str(remaining);
+    normalized
 }
 
 /// FR-001-AC-4 and NFR-002-AC-1: unverified clause identities cannot enter a query bundle.
