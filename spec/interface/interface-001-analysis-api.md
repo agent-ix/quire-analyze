@@ -12,7 +12,7 @@ name: ContractAnalysis
 version: current-library-v1
 status: accepted under IR-1294; callable library stages and publication-only CLI
 input:
-  package: typed statements and clause identities from quire-contract-ir
+  package: typed statements and clause identities from quire-contract-model in the quire-contract-ir repository
   request: closed analysis kind, kind-specific ordered statement groups and explicit bindings; statements carry execution points
   profiles_and_limits: lowering uses fixed Boolean-v1 profiles and ceilings; execution receives caller-supplied SolverConfig
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
@@ -100,7 +100,8 @@ returning method outcomes through `crates/method-contract`; they are outside thi
 classification contract. The PGM-01 shared envelope remains unavailable pending
 `quire-contract-ir#20`, so a local placeholder cannot establish full evidence compliance.
 
-Cargo.toml and Cargo.lock declare and resolve the `quire-contract-ir` dependency. The runtime
+Cargo.toml and Cargo.lock declare and resolve the `quire-contract-model` crate from the
+`quire-contract-ir` repository. The runtime
 report uses `quire.differential-report/v2`, a closed contract without `contractIrRevision`. It
 retains producer application name/version and canonical clause, binding, request and query
 identities plus raw solver-stream bytes. The standalone validator accepts v2 only; the bound
