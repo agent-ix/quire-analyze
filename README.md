@@ -1,6 +1,7 @@
 # Quire Analyze
 
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/k8DVhuYBR2)
+[![Quire](https://img.shields.io/badge/Quire-Specification%20Language-1F6FEB)](https://github.com/agent-ix/quire-spec-language)
 
 Quire Analyze is a Rust library and command-line tool that checks requirement
 contracts with an SMT solver.
@@ -177,8 +178,7 @@ which has no dependency on the rest of Quire.
 Quire Analyze is a backend. It reads the Contract IR that the language layer
 produces and answers questions about it. It depends on
 [quire-contract-ir](https://github.com/agent-ix/quire-contract-ir) for the
-contract model, and its method-outcome crate is shared with quire-verification
-(private), which plans which verification technique to use for each requirement.
+contract model, and its method-outcome crate is shared with quire-verification, which plans which verification technique to use for each requirement.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/ecosystem-dark.svg">
