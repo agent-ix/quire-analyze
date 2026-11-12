@@ -53,8 +53,9 @@ stable exit classification, and shall retain cross-engine discrepancies without 
   status and every required sat model is replay-verified. Different conclusive statuses are
   disagreement; a missing engine is unavailable; every other combination is inconclusive.
 - The v1 library executes caller-prepared queries with caller-supplied solver paths and limits and
-  renders the authoritative report bytes. The v1 CLI validates and publishes those exact bytes; it does not
-  reconstruct authoritative contract packages or solver configurations from JSON. Publication
+  renders the authoritative report bytes. The `publish-report` subcommand validates and publishes those exact bytes; it does not
+  reconstruct authoritative contract packages or solver configurations from JSON. The `run-package`
+  subcommand of [FR-009](./FR-009-package-runner.md) is the CLI surface that decodes a package and solver paths. Publication
   creates a new destination through a same-directory temporary file, sync, and atomic rename; an
   existing destination is a developer-owned file and is refused. Recoverable pre-rename failures
   close and remove their staging file and synchronize that removal. An uncatchable process

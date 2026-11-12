@@ -12,21 +12,31 @@ relationships:
 
 ## Description
 
-Verify `run-package` produces a valid report and a faithful exit status for the QSL fixture packages,
-fails cleanly on bad input, and behaves identically when spawned as a bare child process.
+Verify `run-package` writes a valid report and a faithful exit status for executable-projection
+fixtures, fails cleanly on every refused input, and behaves identically when spawned as a bare child
+process.
 
 ## Test Procedure
 
-Spawn the built binary as a child process (the producer-execute shape: explicit arguments, closed
-stdin, minimal environment) over `artifacts/compiled-protocol-v1`, `artifacts/compiled-protocol-v2`
-and `examples/protocol-handoff/` from `quire-spec-language`, referenced by checkout path and not
-copied. Repeat each run and compare bytes. Snapshot the package tree before and after. Run with a
-missing directory, an empty package, and an existing output path. Use stub solvers that agree,
-disagree, are absent, stall and flood.
+Spawn the built binary as a child process. Use executable-projection fixtures kept under this
+repository's `tests/fixtures/` (one consistent, one contradictory, one with no executable clause, one
+malformed, one oversized) and stub solver scripts that answer `sat`, answer `unsat`, are absent, stall
+or flood. Cases:
+
+1. Consistent fixture with `sat`/`sat` stubs: exit `0`, report validates, agreed status `satisfied`.
+2. Contradictory fixture with `unsat`/`unsat` stubs: exit `1`, agreed status `refuted`.
+3. `sat`/`unsat`, one absent, one stalled and one flooding solver: exit `3`, both engine records retained.
+4. Missing package file, decoder-refused file, oversized file, no-executable-clause fixture: exit `2`, no report.
+5. Unknown, repeated and missing arguments and an option without a value: exit `2`, usage on stderr.
+6. Nonexistent, empty and over-long solver paths: exit `2`, no report.
+7. Existing output, missing parent, unwritable parent: exit `4`; existing bytes unchanged.
+8. Directory-sync failure after rename through the TC-008 publication seam: exit `4`, durability state printed.
+9. Run each passing case twice and compare bytes; snapshot the package directory before and after.
+10. Repeat case 1 with closed stdin, no network and a minimal environment, and compare with a normal run.
+
+Inspect `run-package --help` for the arguments and exit classes.
 
 ## Expected Results
 
-Each fixture yields a report that validates and an exit status equal to the class of its agreed
-status. Bad input exits `2` without a report; an existing destination exits `4` untouched; engine
-faults exit `3` with a typed outcome. Repeated runs are byte-identical and the package tree is
-unchanged.
+Every case produces the stated exit status. Reports validate; refused inputs leave no report; repeated
+runs are byte-identical; the package directory is unchanged; the hermetic run equals the normal run.
