@@ -94,6 +94,12 @@ default.
 | --- | --- | --- | --- |
 | FND-008 | medium | The amended FR-021 bullet lists "a parametric spelling such as `(Option S)`" and any sort "that is not the symbol of the query's symbol map" under `sort_mismatch`, but `read_sort` returns `None` for any non-atom sort and `read_head` maps that to `value_malformed`, and a non-atom define-fun sort fails the whole model as `value_malformed`. The new test `invented_sort_spellings_fail_closed` accepts either reason, so it cannot catch the disagreement. Make the bullet say that a sort term that is not a single symbol is `value_malformed` (or map it to `sort_mismatch`), and assert the one exact reason. | `src/datatype_replay.rs:158-167`, `src/datatype_replay.rs:362-397`, `spec/functional/FR-021-datatype-witness-replay.md:52-54`, `tests/datatype_replay.rs:473-497` |
 
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-009 | low | The round-2 bullet makes "a qualifying or declared sort that is a symbol other than the declared one" `sort_mismatch`. That holds for a qualifying sort and for another declared datatype sort, but a define-fun sort symbol the query does not declare at all (for example `Real` or `Foo`) still falls to the last arm of `record_value` and is `value_malformed`, which is also what FR-011 says ("a real or other sort ... is malformed"). The two requirements now disagree for that case, and no test covers it. Narrow the bullet to "a declared datatype sort other than the symbol's own" (or say an undeclared sort symbol is `value_malformed`), with one test case. |  `src/analysis.rs:975-986`, `spec/functional/FR-021-datatype-witness-replay.md:53`, `spec/functional/FR-011-integer-witness-replay.md` |
+
 ## Dispositions
 
 | FND | Outcome | Reason |
@@ -106,3 +112,6 @@ default.
 | FND-006 | fixed | README now says datatype models are replayed (the stale integer sentence at line 87 was also removed). |
 | FND-007 | still-open | The fix adds a bare `flag` assertion, so the `false` model now fails on that Boolean, not through a record or option literal. The literal assertions still hold for every `flag`, so an evaluator that returned true on them would still pass. Needs an assertion whose truth depends on a literal, for example `field(record(.. active: flag ..), "active")` alone. |
 | FND-008 | still-open | New this round; not yet addressed. |
+| FND-007 | fixed | The test now asserts only the record literal's `active` field read: `flag = false` fails through `field(record(.. active: flag ..), "active")` and `true` verifies (72cf08d). |
+| FND-008 | fixed | The bullet now says a sort that is not a single symbol is `value_malformed`, and `invented_sort_spellings_fail_closed` asserts exactly `value_malformed` for `(as none (Option Int))` and the define-fun sort `(Account)`, and `sort_mismatch` for another declared sort symbol. |
+| FND-009 | still-open | New in disposition pass 2; not yet addressed. |

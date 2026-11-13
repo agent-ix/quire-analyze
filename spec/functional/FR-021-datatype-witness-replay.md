@@ -50,7 +50,7 @@ untrusted external engine.
   abstract element included), a sort that is not a single symbol (a parametric spelling such as `(Option S)`), or nests a constructor application beyond its declared shape (a
   depth-9 text for a depth-8 declared type, for example); `sort_mismatch` for a constructor of
   another datatype, a nullary constructor where a Boolean or integer is expected, a wrong arity or
-  a qualifying or declared sort that is a symbol other than the declared one; `value_out_of_domain` for an integer part
+  a declared datatype sort other than the symbol's own (an undeclared sort symbol is `value_malformed`); `value_out_of_domain` for an integer part
   outside its declared range or an integer beyond 128 bits; and `assertion_false` for a failed
   assertion, including an `Unwrap` evaluated on an absent option.
 - An invalid or incomplete model keeps the logical response and marks the requested counterexample

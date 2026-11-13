@@ -490,6 +490,14 @@ fn invented_sort_spellings_fail_closed() {
         account.reason(&compound),
         ReplayFailureReason::ValueMalformed
     );
+    let undeclared = account.z3(
+        "Foo",
+        &account.record("true", &account.none, &account.admin),
+    );
+    assert_eq!(
+        account.reason(&undeclared),
+        ReplayFailureReason::ValueMalformed
+    );
     let other_symbol = account.z3(
         &account.option_sort,
         &account.record("true", &account.none, &account.admin),
