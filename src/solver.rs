@@ -54,14 +54,14 @@ impl SolverEngine {
         }
     }
 
-    fn query_arguments(self) -> &'static [&'static str] {
+    pub(crate) fn query_arguments(self) -> &'static [&'static str] {
         match self {
             Self::Z3 => &["-in", "-smt2"],
             Self::Cvc5 => &["--lang=smt2", "--no-incremental"],
         }
     }
 
-    fn version_arguments(self) -> &'static [&'static str] {
+    pub(crate) fn version_arguments(self) -> &'static [&'static str] {
         match self {
             Self::Z3 => &["-version"],
             Self::Cvc5 => &["--version"],
@@ -338,21 +338,21 @@ pub struct ProcessExit {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SolverRecord {
-    profile: &'static str,
-    engine: SolverEngine,
-    outcome: SolverOutcome,
-    identity: Option<ExecutableIdentity>,
-    configured_executable: PathBuf,
-    argv: Vec<String>,
-    query_digest: String,
-    limits: AdapterLimits,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    model: Vec<u8>,
-    exit: Option<ProcessExit>,
-    elapsed_ms: u64,
-    cleanup_ms: u64,
-    diagnostic: Option<String>,
+    pub(crate) profile: &'static str,
+    pub(crate) engine: SolverEngine,
+    pub(crate) outcome: SolverOutcome,
+    pub(crate) identity: Option<ExecutableIdentity>,
+    pub(crate) configured_executable: PathBuf,
+    pub(crate) argv: Vec<String>,
+    pub(crate) query_digest: String,
+    pub(crate) limits: AdapterLimits,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+    pub(crate) model: Vec<u8>,
+    pub(crate) exit: Option<ProcessExit>,
+    pub(crate) elapsed_ms: u64,
+    pub(crate) cleanup_ms: u64,
+    pub(crate) diagnostic: Option<String>,
 }
 
 impl SolverRecord {
@@ -558,10 +558,39 @@ pub fn execute_solver(
         SolverOutcome::StdoutLimit
     } else if stderr_exceeded {
         SolverOutcome::StderrLimit
-    } else if raw.exit.as_ref().is_some_and(|status| !status.success())
-        && config.engine == SolverEngine::Z3
-        && raw.exit.as_ref().and_then(ExitStatus::code) == Some(1)
-        && record.stderr.is_empty()
+    } else {
+        let (outcome, model) = classify_exit(
+            config.engine,
+            record.exit,
+            &record.stdout,
+            &record.stderr,
+            config.limits.model_bytes,
+            query.requests_model(),
+        );
+        record.model = model;
+        outcome
+    };
+    record
+}
+
+/// Classify a solver run that ended on its own with no limit, timeout or
+/// cleanup failure, from its exit status and retained streams.
+///
+/// Shared by a direct run and by a `producer-execute` `completed` result, so
+/// the same bytes classify identically on both paths.
+pub(crate) fn classify_exit(
+    engine: SolverEngine,
+    exit: Option<ProcessExit>,
+    stdout: &[u8],
+    stderr: &[u8],
+    model_limit: usize,
+    requests_model: bool,
+) -> (SolverOutcome, Vec<u8>) {
+    let failed_exit = exit.is_some_and(|status| status.code != Some(0));
+    if failed_exit
+        && engine == SolverEngine::Z3
+        && exit.and_then(|status| status.code) == Some(1)
+        && stderr.is_empty()
         // The exception exists for exactly one shape: Z3 answers a non-`sat`
         // status, then fails the `(get-model)` the query asked for, and exits 1.
         // Both extra conditions are load-bearing. Without `requests_model` the
@@ -570,48 +599,38 @@ pub fn execute_solver(
         // accepts a bare `unsat\n` with a failed exit and no error text as
         // conclusive. Either way a process that told us it failed would be read
         // as a decision, which is the one thing this crate must never do.
-        && query.requests_model()
-        && is_model_unavailable_response(&record.stdout)
+        && requests_model
+        && is_model_unavailable_response(stdout)
     {
-        match parse_response(
-            &record.stdout,
-            config.limits.model_bytes,
-            query.requests_model(),
-        ) {
+        return match parse_response(stdout, model_limit, requests_model) {
             Ok((outcome @ (SolverOutcome::Unsat | SolverOutcome::Unknown), model)) => {
-                record.model = model;
-                outcome
+                (outcome, model)
             }
             // Keep the more specific non-conclusive verdict when the parse found
             // one. Collapsing `contradictory-output` or `malformed-output` into
             // `nonzero-exit` is fail-closed but loses which failure it was.
-            Err(outcome) => outcome,
-            Ok(_) => SolverOutcome::NonzeroExit,
-        }
-    } else if raw.exit.as_ref().is_some_and(|status| !status.success()) {
-        if raw.exit.as_ref().and_then(exit_signal).is_some() {
+            Err(outcome) => (outcome, Vec::new()),
+            Ok(_) => (SolverOutcome::NonzeroExit, Vec::new()),
+        };
+    }
+    if failed_exit {
+        let outcome = if exit.and_then(|status| status.signal).is_some() {
             SolverOutcome::Signaled
         } else {
             SolverOutcome::NonzeroExit
-        }
-    } else if raw.exit.is_none() {
-        SolverOutcome::IoError
-    } else if !record.stderr.is_empty() {
-        SolverOutcome::DiagnosticOutput
-    } else {
-        match parse_response(
-            &record.stdout,
-            config.limits.model_bytes,
-            query.requests_model(),
-        ) {
-            Ok((outcome, model)) => {
-                record.model = model;
-                outcome
-            }
-            Err(outcome) => outcome,
-        }
-    };
-    record
+        };
+        return (outcome, Vec::new());
+    }
+    if exit.is_none() {
+        return (SolverOutcome::IoError, Vec::new());
+    }
+    if !stderr.is_empty() {
+        return (SolverOutcome::DiagnosticOutput, Vec::new());
+    }
+    match parse_response(stdout, model_limit, requests_model) {
+        Ok(parsed) => parsed,
+        Err(outcome) => (outcome, Vec::new()),
+    }
 }
 
 fn inspect_executable(

@@ -2,12 +2,14 @@
 
 mod analysis;
 mod hybrid_synthesis;
+mod producer_evidence;
 mod report;
 mod smt;
 mod solver;
 
 pub use analysis::*;
 pub use hybrid_synthesis::*;
+pub use producer_evidence::*;
 pub use report::*;
 pub use smt::*;
 pub use solver::*;
