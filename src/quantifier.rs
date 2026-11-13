@@ -5,8 +5,6 @@
 //! quantifier nodes are [`RangeQuantifier`]s. A leaf names a quantifier's bound variable with
 //! `ExpressionKind::LocalReference`.
 
-use std::fmt::Write as _;
-
 use quire_contract_model::{Expression, IntegerType, QuantifierKind, SymbolName};
 
 /// Bound on the instances that expansion may produce in one request, summed over all clauses.
@@ -81,47 +79,49 @@ pub enum AnalysisFormula {
 }
 
 impl AnalysisFormula {
-    /// A stable text form, used to bind a statement's identity to its formula.
-    pub(crate) fn canonical(&self, out: &mut String) {
-        match self {
-            Self::Term(expression) => {
-                out.push_str("term(");
-                out.push_str(&serde_json::to_string(expression).unwrap_or_default());
-                out.push(')');
+    /// A stable text form of the formula, used to bind a statement's identity to it. A leaf that
+    /// cannot be serialized is an error, never an empty term.
+    pub(crate) fn identity_text(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&self.to_value()?)
+    }
+
+    fn to_value(&self) -> Result<serde_json::Value, serde_json::Error> {
+        use serde_json::json;
+        Ok(match self {
+            Self::Term(expression) => json!({ "term": serde_json::to_value(&**expression)? }),
+            Self::Not(operand) => json!({ "not": operand.to_value()? }),
+            Self::And(left, right) => json!({ "and": [left.to_value()?, right.to_value()?] }),
+            Self::Or(left, right) => json!({ "or": [left.to_value()?, right.to_value()?] }),
+            Self::Implies(left, right) => {
+                json!({ "implies": [left.to_value()?, right.to_value()?] })
             }
-            Self::Not(operand) => {
-                out.push_str("not(");
-                operand.canonical(out);
-                out.push(')');
-            }
-            Self::And(left, right) => binary("and", left, right, out),
-            Self::Or(left, right) => binary("or", left, right, out),
-            Self::Implies(left, right) => binary("implies", left, right, out),
-            Self::Range(quantifier) => {
-                let _ = write!(
-                    out,
-                    "range({},{:?},{},{:?},{:?},{:?},",
-                    quantifier.identity,
-                    quantifier.kind,
-                    quantifier.local.as_str(),
-                    quantifier.local_type,
-                    quantifier.lower,
-                    quantifier.upper
-                );
-                quantifier.body.canonical(out);
-                out.push(')');
-            }
-        }
+            Self::Range(quantifier) => json!({
+                "range": {
+                    "identity": quantifier.identity,
+                    "kind": match quantifier.kind {
+                        QuantifierKind::ForAll => "forall",
+                        QuantifierKind::Exists => "exists",
+                    },
+                    "local": quantifier.local.as_str(),
+                    "local_type": serde_json::to_value(&quantifier.local_type)?,
+                    "lower": quantifier.lower.to_value(),
+                    "upper": quantifier.upper.to_value(),
+                    "body": quantifier.body.to_value()?,
+                }
+            }),
+        })
     }
 }
 
-fn binary(name: &str, left: &AnalysisFormula, right: &AnalysisFormula, out: &mut String) {
-    out.push_str(name);
-    out.push('(');
-    left.canonical(out);
-    out.push(',');
-    right.canonical(out);
-    out.push(')');
+impl RangeBound {
+    fn to_value(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Self::Literal(value) => json!({ "literal": value.to_string() }),
+            Self::Declared(name) => json!({ "declared": name.as_str() }),
+            Self::Unbounded => json!("unbounded"),
+        }
+    }
 }
 
 /// The domain class recorded in a quantifier-map entry.
@@ -187,4 +187,26 @@ pub(crate) fn expansion_cost(width: Option<u128>, enclosing: u128, used: u128) -
     let count = width?.checked_mul(enclosing)?;
     let total = used.checked_add(count)?;
     (total <= MAX_EXPANDED_INSTANCES).then_some(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// NFR-030-AC-3: the checked products and sums never wrap.
+    #[test]
+    fn expansion_cost_is_checked() {
+        assert_eq!(expansion_cost(Some(1024), 1, 0), Some(1024));
+        assert_eq!(expansion_cost(Some(1025), 1, 0), None);
+        assert_eq!(expansion_cost(Some(1), 1, 1024), None);
+        assert_eq!(expansion_cost(Some(0), 1, 1024), Some(0));
+        assert_eq!(expansion_cost(None, 1, 0), None);
+        // A product past 2^128 and a sum past 2^128 both count as exceeding.
+        assert_eq!(expansion_cost(Some(u128::MAX), 2, 0), None);
+        assert_eq!(expansion_cost(Some(u128::MAX / 2 + 1), 2, 0), None);
+        assert_eq!(expansion_cost(Some(1), 1, u128::MAX), None);
+        assert_eq!(literal_width(i128::MIN, i128::MAX), None);
+        assert_eq!(literal_width(i128::MIN, i128::MAX - 1), Some(u128::MAX));
+        assert_eq!(literal_width(3, 2), Some(0));
+    }
 }

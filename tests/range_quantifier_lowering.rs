@@ -187,6 +187,7 @@ fn statement(label: &str, formula: AnalysisFormula) -> StatementInput {
         vec![
             input("x", ValueType::Integer { value: wide() }),
             input("n", ValueType::Integer { value: counter }),
+            input("i", ValueType::Integer { value: wide() }),
             input("flag", ValueType::Boolean),
             input(
                 "role",
@@ -237,6 +238,7 @@ fn statement(label: &str, formula: AnalysisFormula) -> StatementInput {
     )
     .expect("statement")
     .with_formula(formula)
+    .expect("formula")
 }
 
 fn lower(statements: &[StatementInput]) -> QueryBundle {
@@ -691,7 +693,7 @@ fn a_refused_nested_quantifier_refuses_the_whole_request() {
 
 /// FR-032-AC-5 and FR-031-AC-6 (shadowing): lowering twice is byte-identical, statement order
 /// does not matter, and an inner quantifier that reuses the bound name shadows the outer one.
-#[trace("TC-030", "FR-032-AC-5", "FR-031-AC-6")]
+#[trace("TC-030", "FR-032-AC-5")]
 #[test]
 fn lowering_is_deterministic_and_inner_quantifiers_shadow() {
     let forward = lower(&expanded_fixture());
@@ -733,12 +735,285 @@ fn declared_bound_is_a_query_variable_with_a_finite_declared_range() {
 }
 
 /// Capability contract: the range quantifier is an exact construct.
-#[trace("TC-030", "FR-030-AC-1")]
+#[trace("TC-030", "FR-032-AC-1")]
 #[test]
 fn capability_contract_lists_the_range_quantifier() {
     assert!(CAPABILITY_CONTRACT
         .exact_constructs
         .contains(&"range_quantifier"));
+}
+
+/// FR-031-AC-6 (shared expansion): a free variable named like a quantifier's bound variable is
+/// not captured. The input `i` and the bound variable `i` lower to distinct symbols, in the
+/// expanded form (elements 1 and 2) and the bounded form (`bv_0`).
+#[trace("TC-030", "FR-031-AC-6")]
+#[test]
+fn a_free_variable_named_like_a_bound_variable_is_not_captured() {
+    let against_input = |identity: &str, upper: i128| {
+        literal_range(
+            identity,
+            QuantifierKind::ForAll,
+            1,
+            upper,
+            term(compare(ComparisonOperator::LessEqual, local("i"), var("i"))),
+        )
+    };
+    let both = AnalysisFormula::And(
+        Box::new(against_input("Q-small", 2)),
+        Box::new(against_input("Q-large", 2000)),
+    );
+    let query = lower_one("capture", both);
+    assert_eq!(
+        query.query(),
+        include_str!("golden/range-free-variable-v2.smt2")
+    );
+    assert_eq!(query.variables().len(), 1);
+    let input_symbol = &query.variables()[0].symbol;
+    assert!(query.query().contains(&format!("(<= 1 {input_symbol})")));
+    assert!(query.query().contains(&format!("(<= 2 {input_symbol})")));
+    assert!(query.query().contains(&format!("(<= bv_0 {input_symbol})")));
+    assert!(!query.query().contains("(<= bv_0 bv_0)"));
+}
+
+/// NFR-030-AC-1 and FR-030 canonical order: the budget is spent in assertion-map order, then in
+/// depth-first pre-order inside a statement, so a contested budget gives the same encodings
+/// whatever order the caller lists the statements in.
+#[trace("TC-030", "NFR-030-AC-1", "FR-032-AC-8")]
+#[test]
+fn a_contested_budget_is_spent_in_canonical_order() {
+    let build = |reversed: bool| {
+        let mut statements = vec![
+            statement(
+                "a",
+                literal_range("Q-a", QuantifierKind::ForAll, 1, 1000, below_x()),
+            ),
+            statement(
+                "b",
+                literal_range("Q-b", QuantifierKind::ForAll, 1, 25, below_x()),
+            ),
+        ];
+        if reversed {
+            statements.reverse();
+        }
+        lower(&statements)
+    };
+    let forward = build(false);
+    let backward = build(true);
+    assert_eq!(forward.query(), backward.query());
+    let described: Vec<_> = forward
+        .quantifiers()
+        .iter()
+        .map(|entry| (entry.source.as_str(), entry.encoding, entry.instance_count))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            ("Q-a", QuantifierEncoding::Expanded, 1000),
+            ("Q-b", QuantifierEncoding::Bounded, 0)
+        ]
+    );
+
+    // Depth-first pre-order: A (100) then its body B (5 x 100 = 500), then the sibling C (900)
+    // finds 600 spent and is bounded. Breadth-first would expand C and bound B.
+    let nested = lower_one(
+        "preorder",
+        AnalysisFormula::And(
+            Box::new(literal_range(
+                "Q-a",
+                QuantifierKind::ForAll,
+                1,
+                100,
+                quantifier(
+                    "Q-b",
+                    QuantifierKind::ForAll,
+                    "j",
+                    RangeBound::Literal(1),
+                    RangeBound::Literal(5),
+                    below_x(),
+                ),
+            )),
+            Box::new(literal_range(
+                "Q-c",
+                QuantifierKind::ForAll,
+                1,
+                900,
+                below_x(),
+            )),
+        ),
+    );
+    assert_eq!(
+        encodings(&nested),
+        [
+            (QuantifierEncoding::Expanded, 100),
+            (QuantifierEncoding::Expanded, 500),
+            (QuantifierEncoding::Bounded, 0)
+        ]
+    );
+}
+
+/// NFR-030-AC-3: a product that overflows `u128` counts as exceeding the budget. An inner range
+/// of width 2^128 - 1 under an expanded outer range of 2 would need 2^129 - 2 instances.
+#[trace("TC-030", "NFR-030-AC-3")]
+#[test]
+fn a_nested_count_that_overflows_is_bounded_not_wrapped() {
+    let query = lower_one(
+        "product",
+        literal_range(
+            "Q-outer",
+            QuantifierKind::ForAll,
+            1,
+            2,
+            quantifier(
+                "Q-inner",
+                QuantifierKind::ForAll,
+                "j",
+                RangeBound::Literal(i128::MIN),
+                RangeBound::Literal(i128::MAX - 1),
+                term(compare(
+                    ComparisonOperator::LessEqual,
+                    numeric(NumericOperator::Add, local("i"), local("j")),
+                    var("x"),
+                )),
+            ),
+        ),
+    );
+    assert_eq!(
+        encodings(&query),
+        [
+            (QuantifierEncoding::Expanded, 2),
+            (QuantifierEncoding::Bounded, 0)
+        ]
+    );
+}
+
+/// FR-032-AC-7: the formula attached to a statement is validated: an unbound bound-variable
+/// reference, an empty identity and a range outside the bound variable's type are refused.
+#[trace("TC-030", "FR-032-AC-7")]
+#[test]
+fn an_invalid_formula_is_refused_when_attached() {
+    let base = || {
+        let package_id = PackageId::new("agent-ix/range-test").expect("package");
+        let requirement_id = RequirementId::new("REQ-valid").expect("requirement");
+        let revision = RequirementRevision::new(1).expect("revision");
+        let owner = RequirementRef::new(package_id.clone(), requirement_id.clone(), revision);
+        let narrow = IntegerType::new(IntegerDomain::Signed, 0, 100, OverflowPolicy::Reject)
+            .expect("narrow");
+        let environment = DeclarationEnvironment::new(
+            owner,
+            vec![],
+            vec![
+                input("x", ValueType::Integer { value: wide() }),
+                input("n", ValueType::Integer { value: narrow }),
+            ],
+            vec![],
+        )
+        .expect("environment");
+        let checked = environment
+            .check_expression(
+                &node(ExpressionKind::BooleanLiteral { value: true }),
+                &ValueType::Boolean,
+                &point(),
+                true,
+            )
+            .expect("typed");
+        let clause = Clause::new(
+            ClauseId::new("C-valid").expect("clause"),
+            ClauseKind::Assertion,
+            Some(point()),
+            span(),
+            checked,
+        )
+        .expect("clause");
+        let requirement = Requirement::<TypedExpression>::new(
+            &package_id,
+            requirement_id,
+            revision,
+            span(),
+            vec![clause],
+        )
+        .expect("requirement");
+        let package = ContractPackage::new(
+            package_id,
+            SchemaVersion::V1_1,
+            span().source().clone(),
+            vec![requirement],
+        )
+        .expect("package");
+        StatementInput::from_clause(
+            &package,
+            &package.requirements()[0],
+            &package.requirements()[0].clauses()[0],
+            environment,
+        )
+        .expect("statement")
+    };
+    let narrow_type =
+        || IntegerType::new(IntegerDomain::Signed, 0, 255, OverflowPolicy::Reject).expect("type");
+    let range = |identity: &str, lower: RangeBound, upper: RangeBound, body: AnalysisFormula| {
+        AnalysisFormula::Range(Box::new(RangeQuantifier {
+            identity: identity.to_owned(),
+            kind: QuantifierKind::ForAll,
+            local: symbol("i"),
+            local_type: narrow_type(),
+            lower,
+            upper,
+            body,
+        }))
+    };
+    let in_scope = term(compare(ComparisonOperator::LessEqual, local("i"), var("x")));
+    // Valid: a range inside the type, and a declared bound inside the type.
+    for formula in [
+        range(
+            "Q",
+            RangeBound::Literal(0),
+            RangeBound::Literal(255),
+            in_scope.clone(),
+        ),
+        range(
+            "Q",
+            RangeBound::Literal(0),
+            RangeBound::Declared(symbol("n")),
+            in_scope.clone(),
+        ),
+        range(
+            "Q",
+            RangeBound::Literal(500),
+            RangeBound::Literal(400),
+            in_scope.clone(),
+        ),
+    ] {
+        base().with_formula(formula).expect("valid");
+    }
+    // The bound variable is not in scope outside its quantifier.
+    let unbound = term(compare(ComparisonOperator::LessEqual, local("i"), var("x")));
+    // A range outside the type, an empty identity and a declared bound outside the type.
+    let wide_declared = range(
+        "Q",
+        RangeBound::Literal(0),
+        RangeBound::Declared(symbol("x")),
+        in_scope.clone(),
+    );
+    for invalid in [
+        unbound,
+        range(
+            "Q",
+            RangeBound::Literal(0),
+            RangeBound::Literal(256),
+            in_scope.clone(),
+        ),
+        range(
+            "",
+            RangeBound::Literal(0),
+            RangeBound::Literal(3),
+            in_scope.clone(),
+        ),
+        wide_declared,
+    ] {
+        let errors = base().with_formula(invalid).expect_err("refused");
+        assert!(errors
+            .iter()
+            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
+    }
 }
 
 struct TempDirectory(PathBuf);
@@ -902,7 +1177,7 @@ fn expanded_range_models_replay_against_every_instance() {
 
 /// FR-032-AC-1 (controlled responses): a satisfiable bounded query is decided sat, but its
 /// model stays unverified until quantified replay exists.
-#[trace("TC-030", "FR-032-AC-1")]
+#[trace("TC-030", "FR-032-AC-8")]
 #[test]
 fn bounded_quantifier_models_stay_unverified() {
     let query = analysis_query(vec![bounded_fixture()]);
@@ -922,10 +1197,15 @@ fn bounded_quantifier_models_stay_unverified() {
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
     assert!(conclusion.verified_model().is_none());
     assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+    let failure = conclusion.replay_failure().expect("failure");
     assert_eq!(
-        conclusion.replay_failure().expect("failure").reason(),
-        ReplayFailureReason::SortNotReplayable
+        failure.reason(),
+        ReplayFailureReason::QuantifierNotReplayable
     );
+    assert_eq!(failure.reason().as_str(), "quantifier_not_replayable");
+    assert!(failure.subject().expect("assertion").starts_with("a_p"));
+    // A datatype-free quantified query never reports a datatype reason.
+    assert_ne!(failure.reason().as_str(), "sort_not_replayable");
 }
 
 /// FR-032-AC-1: real solvers decide the expanded and bounded fixtures; run only where installed.
@@ -997,13 +1277,12 @@ fn real_z3_cvc5_decide_range_fixtures() {
     }
 }
 
-/// NFR-032-AC-3: a real solver under a wall-time limit too short to finish a quantified query is
-/// reported inconclusive, never satisfied or refuted.
+/// NFR-032-AC-3: each real solver under a wall-time limit too short to finish a quantified query
+/// is reported `timeout` or `unknown`, never satisfied, refuted or a tool error.
 #[trace("TC-030", "NFR-032-AC-3")]
 #[test]
 #[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
 fn real_solver_timeout_on_a_quantified_query_is_inconclusive() {
-    let z3_path = PathBuf::from(std::env::var_os("QUIRE_Z3").expect("QUIRE_Z3 is required"));
     let limits = AdapterLimits {
         wall_time_ms: 1,
         cleanup_time_ms: 1_000,
@@ -1011,12 +1290,18 @@ fn real_solver_timeout_on_a_quantified_query_is_inconclusive() {
         monitor_interval_ms: 1,
         ..AdapterLimits::default()
     };
-    let z3 = SolverConfig::new(SolverEngine::Z3, z3_path, limits).expect("z3");
     let query = analysis_query(vec![bounded_fixture()]);
-    let record = execute_solver(&query, &z3, &CancellationToken::default());
-    let status = classify_analysis(&query, &record).status();
-    assert!(
-        matches!(status, AnalysisStatus::Timeout | AnalysisStatus::ToolError),
-        "{status:?}"
-    );
+    for (engine, variable) in [
+        (SolverEngine::Z3, "QUIRE_Z3"),
+        (SolverEngine::Cvc5, "QUIRE_CVC5"),
+    ] {
+        let path = PathBuf::from(std::env::var_os(variable).expect("solver path is required"));
+        let config = SolverConfig::new(engine, path, limits).expect("config");
+        let record = execute_solver(&query, &config, &CancellationToken::default());
+        let status = classify_analysis(&query, &record).status();
+        assert!(
+            matches!(status, AnalysisStatus::Timeout | AnalysisStatus::Unknown),
+            "{variable}: {status:?}"
+        );
+    }
 }

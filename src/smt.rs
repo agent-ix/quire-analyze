@@ -219,8 +219,15 @@ pub struct StatementInput {
     execution_point: ExecutionPoint,
     environment: DeclarationEnvironment,
     expression: Expression,
-    formula: Option<AnalysisFormula>,
+    formula: Option<AttachedFormula>,
     source: SourceSpan,
+}
+
+/// An analysis-model formula with the text that binds the statement's identity to it.
+#[derive(Clone, Debug)]
+struct AttachedFormula {
+    formula: AnalysisFormula,
+    identity: String,
 }
 
 impl StatementInput {
@@ -313,12 +320,41 @@ impl StatementInput {
     }
 
     /// Replaces the lowered body with an analysis-model formula. The contract model has no
-    /// range-domain quantifier form, so a range quantifier reaches lowering only this way; the
-    /// clause still supplies the statement's identity and declarations.
-    #[must_use]
-    pub fn with_formula(mut self, formula: AnalysisFormula) -> Self {
-        self.formula = Some(formula);
-        self
+    /// range-domain quantifier form, so a range quantifier reaches lowering only this way. The
+    /// clause still supplies the statement's identity: the assertion map and the report name that
+    /// clause, and the assertion symbol binds the formula as well, so a different formula over the
+    /// same clause is a different assertion.
+    ///
+    /// The formula is validated here: every quantifier has a non-empty identity, every bound
+    /// variable reference is in scope, and the literal bounds and the declared bounds of integer
+    /// inputs lie within the quantifier's `local_type`. Whether a bound is finite is decided at
+    /// lowering, which refuses with `non-finite-bound`.
+    ///
+    /// # Errors
+    /// Returns every violation as `InvalidStatement`.
+    pub fn with_formula(mut self, formula: AnalysisFormula) -> Result<Self, Vec<LoweringError>> {
+        let mut errors = Vec::new();
+        validate_formula(
+            &formula,
+            &self.environment,
+            &mut Vec::new(),
+            &ExprPath::detached("statement.formula"),
+            &mut errors,
+        );
+        let identity = formula.identity_text().unwrap_or_else(|error| {
+            errors.push(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                "statement.formula",
+                format!("formula cannot be given a stable identity: {error}"),
+            ));
+            String::new()
+        });
+        if !errors.is_empty() {
+            sort_errors(&mut errors);
+            return Err(errors);
+        }
+        self.formula = Some(AttachedFormula { formula, identity });
+        Ok(self)
     }
 }
 
@@ -742,6 +778,8 @@ pub(crate) enum ReplayFault {
     Unassigned,
     /// The expression involves a datatype term, which is not replayed yet (VER-87).
     DatatypeUnreplayed,
+    /// The expression involves a bounded solver quantifier, which is not replayed yet (VER-92).
+    QuantifierUnreplayed,
 }
 
 /// An integer-valued replay term, evaluated with checked 128-bit signed arithmetic.
@@ -758,6 +796,8 @@ pub(crate) enum ReplayTerm {
     },
     /// A term read out of a datatype, which is not replayed yet (VER-87).
     DatatypeUnreplayed,
+    /// The bound variable of a bounded solver quantifier, which is not replayed yet (VER-92).
+    QuantifierUnreplayed,
 }
 
 impl ReplayTerm {
@@ -786,6 +826,7 @@ impl ReplayTerm {
                 .checked_mul(*factor)
                 .ok_or(ReplayFault::Overflow),
             Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
+            Self::QuantifierUnreplayed => Err(ReplayFault::QuantifierUnreplayed),
         }
     }
 }
@@ -831,9 +872,8 @@ impl ReplayExpression {
             Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
-            Self::DatatypeUnreplayed | Self::QuantifierUnreplayed => {
-                Err(ReplayFault::DatatypeUnreplayed)
-            }
+            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
+            Self::QuantifierUnreplayed => Err(ReplayFault::QuantifierUnreplayed),
             Self::Compare {
                 operator,
                 left,
@@ -1295,8 +1335,8 @@ fn lower_expression(
         nodes: 0,
     };
     match &statement.formula {
-        Some(formula) => {
-            let planned = state.plan(formula, 1, &ExprPath::ROOT, 1)?;
+        Some(attached) => {
+            let planned = state.plan(&attached.formula, 1, &ExprPath::ROOT, 1)?;
             state.lower_planned(&planned, 1, &ExprPath::ROOT)
         }
         None => state.lower(&statement.expression, 1, &ExprPath::ROOT),
@@ -1334,13 +1374,28 @@ enum Planned<'f> {
     And(Box<Planned<'f>>, Box<Planned<'f>>),
     Or(Box<Planned<'f>>, Box<Planned<'f>>),
     Implies(Box<Planned<'f>>, Box<Planned<'f>>),
-    Range {
+    /// A literal range expanded to one body instance per element.
+    Expanded {
         quantifier: &'f RangeQuantifier,
-        encoding: QuantifierEncoding,
-        /// The literal bounds of an expanded range.
-        elements: Option<(i128, i128)>,
+        lower: i128,
+        upper: i128,
         body: Box<Planned<'f>>,
     },
+    /// A solver quantifier with a finite interval guard.
+    Bounded {
+        quantifier: &'f RangeQuantifier,
+        lower: FiniteBound<'f>,
+        upper: FiniteBound<'f>,
+        body: Box<Planned<'f>>,
+    },
+}
+
+/// A range bound that has been shown finite.
+#[derive(Clone, Copy)]
+enum FiniteBound<'f> {
+    Literal(i128),
+    /// An integer input; its declared type bounds the value.
+    Declared(&'f SymbolName),
 }
 
 struct LowerState<'a> {
@@ -1360,9 +1415,11 @@ struct LowerState<'a> {
 }
 
 impl LowerState<'_> {
-    /// Gives every quantifier of the formula its encoding, outermost first, spending the shared
-    /// expansion budget and recording the quantifier map. `enclosing` is the product of the
-    /// instance counts of the enclosing expanded quantifiers.
+    /// Gives every quantifier of the formula its encoding and records the quantifier map. The
+    /// order is depth-first pre-order: a quantifier is planned before the quantifiers in its
+    /// body, and siblings left to right. `enclosing` is the product of the instance counts of
+    /// the enclosing expanded quantifiers. Structural nodes are counted here, once; leaf terms
+    /// are counted when they are lowered.
     fn plan<'f>(
         &mut self,
         formula: &'f AnalysisFormula,
@@ -1370,6 +1427,9 @@ impl LowerState<'_> {
         path: &ExprPath<'_>,
         enclosing: u128,
     ) -> Result<Planned<'f>, LoweringError> {
+        if let AnalysisFormula::Term(expression) = formula {
+            return Ok(Planned::Term(expression));
+        }
         count_node(depth, &mut self.nodes)?;
         let child = |state: &mut Self, formula: &'f AnalysisFormula, segment: &str| {
             state.plan(formula, depth + 1, &path.child(segment), enclosing)
@@ -1404,25 +1464,22 @@ impl LowerState<'_> {
         path: &ExprPath<'_>,
         enclosing: u128,
     ) -> Result<Planned<'f>, LoweringError> {
-        self.require_finite(&quantifier.lower, quantifier, path)?;
-        self.require_finite(&quantifier.upper, quantifier, path)?;
-        let literals = match (&quantifier.lower, &quantifier.upper) {
-            (RangeBound::Literal(lower), RangeBound::Literal(upper)) => Some((*lower, *upper)),
+        let lower = self.finite_bound(&quantifier.lower, quantifier, path)?;
+        let upper = self.finite_bound(&quantifier.upper, quantifier, path)?;
+        // A declared bound is only known to the solver, so only literal ranges can expand.
+        let expansion = match (lower, upper) {
+            (FiniteBound::Literal(low), FiniteBound::Literal(high)) => {
+                expansion_cost(literal_width(low, high), enclosing, self.quantifiers.used)
+                    .map(|count| (low, high, count))
+            }
             _ => None,
         };
-        // A declared bound is only known to the solver, so only literal ranges can expand.
-        let cost = literals.and_then(|(lower, upper)| {
-            expansion_cost(
-                literal_width(lower, upper),
-                enclosing,
-                self.quantifiers.used,
-            )
-        });
-        let (encoding, count) = match cost {
-            Some(count) => (QuantifierEncoding::Expanded, count),
+        let (encoding, count) = match expansion {
+            Some((_, _, count)) => (QuantifierEncoding::Expanded, count),
             None => (QuantifierEncoding::Bounded, 0),
         };
-        self.quantifiers.used = self.quantifiers.used.saturating_add(count);
+        // `count` is at most the budget, so neither sum can overflow.
+        self.quantifiers.used += count;
         self.quantifiers.entries.push(QuantifierEntry {
             source: quantifier.identity.clone(),
             kind: quantifier.kind,
@@ -1432,54 +1489,64 @@ impl LowerState<'_> {
             lower: quantifier.lower.clone(),
             upper: quantifier.upper.clone(),
         });
-        let inner = match (encoding, literals) {
-            (QuantifierEncoding::Expanded, Some((lower, upper))) => {
-                enclosing.saturating_mul(literal_width(lower, upper).unwrap_or(1))
+        let body_path = path.child("body");
+        Ok(match expansion {
+            Some((low, high, count)) => {
+                // The body's instance count is this quantifier's, already multiplied.
+                let body = self.plan(&quantifier.body, depth + 1, &body_path, count)?;
+                Planned::Expanded {
+                    quantifier,
+                    lower: low,
+                    upper: high,
+                    body: Box::new(body),
+                }
             }
-            _ => enclosing,
-        };
-        let body = self.plan(&quantifier.body, depth + 1, &path.child("body"), inner)?;
-        Ok(Planned::Range {
-            quantifier,
-            encoding,
-            elements: cost.and(literals),
-            body: Box::new(body),
+            None => {
+                let body = self.plan(&quantifier.body, depth + 1, &body_path, enclosing)?;
+                Planned::Bounded {
+                    quantifier,
+                    lower,
+                    upper,
+                    body: Box::new(body),
+                }
+            }
         })
     }
 
-    /// Refuses a range bound that is not provably finite.
-    fn require_finite(
+    /// Shows a range bound finite, or refuses the quantifier with `non-finite-bound`. A declared
+    /// bound is finite when it names an integer input, whose type bounds its value.
+    fn finite_bound<'f>(
         &self,
-        bound: &RangeBound,
+        bound: &'f RangeBound,
         quantifier: &RangeQuantifier,
         path: &ExprPath<'_>,
-    ) -> Result<(), LoweringError> {
+    ) -> Result<FiniteBound<'f>, LoweringError> {
         let finite = match bound {
-            RangeBound::Literal(_) => true,
-            RangeBound::Unbounded => false,
+            RangeBound::Literal(value) => Some(FiniteBound::Literal(*value)),
+            RangeBound::Unbounded => None,
             RangeBound::Declared(name) => self
                 .statement
                 .environment
                 .values()
                 .iter()
                 .find(|value| value.name() == name)
-                .is_some_and(|declaration| {
+                .filter(|declaration| {
                     declaration.kind() == ValueDeclarationKind::Input
                         && matches!(declaration.value_type(), ValueType::Integer { .. })
-                }),
+                })
+                .map(|_| FiniteBound::Declared(name)),
         };
-        if finite {
-            return Ok(());
-        }
-        let mut error = unsupported(
-            &path.render(),
-            "range bound is not provably finite (non-finite-bound)",
-        );
-        error.refusal = Some(QuantifierRefusal {
-            identity: quantifier.identity.clone(),
-            reason: QuantifierReason::NonFiniteBound,
-        });
-        Err(error)
+        finite.ok_or_else(|| {
+            let mut error = unsupported(
+                &path.render(),
+                "range bound is not provably finite (non-finite-bound)",
+            );
+            error.refusal = Some(QuantifierRefusal {
+                identity: quantifier.identity.clone(),
+                reason: QuantifierReason::NonFiniteBound,
+            });
+            error
+        })
     }
 
     fn lower_planned(
@@ -1488,12 +1555,8 @@ impl LowerState<'_> {
         depth: usize,
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        if let Planned::Term(expression) = planned {
-            return self.lower(expression, depth, path);
-        }
-        count_node(depth, &mut self.nodes)?;
         match planned {
-            Planned::Term(_) => unreachable!("terms return above"),
+            Planned::Term(expression) => self.lower(expression, depth, path),
             Planned::Not(operand) => {
                 let operand = self.lower_planned(operand, depth + 1, &path.child("operand"))?;
                 Ok(LoweredExpression {
@@ -1534,17 +1597,18 @@ impl LowerState<'_> {
                     replay,
                 })
             }
-            Planned::Range {
+            Planned::Expanded {
                 quantifier,
-                encoding,
-                elements,
+                lower,
+                upper,
                 body,
-            } => match (encoding, elements) {
-                (QuantifierEncoding::Expanded, Some((lower, upper))) => {
-                    self.lower_expanded(quantifier, (*lower, *upper), body, depth, path)
-                }
-                _ => self.lower_bounded(quantifier, body, depth, path),
-            },
+            } => self.lower_expanded(quantifier, (*lower, *upper), body, depth, path),
+            Planned::Bounded {
+                quantifier,
+                lower,
+                upper,
+                body,
+            } => self.lower_bounded(quantifier, (*lower, *upper), body, depth, path),
         }
     }
 
@@ -1606,12 +1670,13 @@ impl LowerState<'_> {
     fn lower_bounded(
         &mut self,
         quantifier: &RangeQuantifier,
+        (lower, upper): (FiniteBound<'_>, FiniteBound<'_>),
         body: &Planned<'_>,
         depth: usize,
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        let lower = self.bound_term(&quantifier.lower)?;
-        let upper = self.bound_term(&quantifier.upper)?;
+        let lower = self.bound_term(lower)?;
+        let upper = self.bound_term(upper)?;
         let symbol = format!("bv_{}", self.bound_depth);
         self.scope.push(LocalBinding {
             name: quantifier.local.clone(),
@@ -1640,14 +1705,10 @@ impl LowerState<'_> {
     }
 
     /// The query term of a finite range bound.
-    fn bound_term(&mut self, bound: &RangeBound) -> Result<String, LoweringError> {
+    fn bound_term(&mut self, bound: FiniteBound<'_>) -> Result<String, LoweringError> {
         match bound {
-            RangeBound::Literal(value) => Ok(numeral(*value)),
-            RangeBound::Declared(name) => self.reference(name, StateObservation::Current),
-            RangeBound::Unbounded => Err(unsupported(
-                "expression.quantifier",
-                "range bound is not provably finite (non-finite-bound)",
-            )),
+            FiniteBound::Literal(value) => Ok(numeral(value)),
+            FiniteBound::Declared(name) => self.reference(name, StateObservation::Current),
         }
     }
 
@@ -2421,7 +2482,7 @@ impl LowerState<'_> {
                 let lowered = self.lower(expression, *depth, &ExprPath::detached(path))?;
                 (lowered.smt, ReplayTerm::DatatypeUnreplayed)
             }
-            IntegerTree::Bound(symbol) => (symbol.clone(), ReplayTerm::DatatypeUnreplayed),
+            IntegerTree::Bound(symbol) => (symbol.clone(), ReplayTerm::QuantifierUnreplayed),
             IntegerTree::Negate(operand) => {
                 let (smt, term) = self.emit(operand)?;
                 (format!("(- {smt})"), ReplayTerm::Negate(Box::new(term)))
@@ -2936,6 +2997,111 @@ fn reject_saturating(value_type: &IntegerType, path: &ExprPath<'_>) -> Result<()
     }
 }
 
+/// Checks a formula against the statement's declarations, collecting every violation.
+fn validate_formula<'f>(
+    formula: &'f AnalysisFormula,
+    environment: &DeclarationEnvironment,
+    scope: &mut Vec<&'f SymbolName>,
+    path: &ExprPath<'_>,
+    errors: &mut Vec<LoweringError>,
+) {
+    let invalid = |message: String| {
+        LoweringError::new(LoweringErrorCode::InvalidStatement, path.render(), message)
+    };
+    match formula {
+        AnalysisFormula::Term(expression) => {
+            let mut locals = Vec::new();
+            local_references(expression, &mut locals);
+            for name in locals {
+                if !scope.contains(&name) {
+                    errors.push(invalid(format!(
+                        "bound variable {} is not bound by an enclosing quantifier",
+                        name.as_str()
+                    )));
+                }
+            }
+        }
+        AnalysisFormula::Not(operand) => {
+            validate_formula(operand, environment, scope, &path.child("operand"), errors);
+        }
+        AnalysisFormula::And(left, right)
+        | AnalysisFormula::Or(left, right)
+        | AnalysisFormula::Implies(left, right) => {
+            validate_formula(left, environment, scope, &path.child("left"), errors);
+            validate_formula(right, environment, scope, &path.child("right"), errors);
+        }
+        AnalysisFormula::Range(quantifier) => {
+            if quantifier.identity.is_empty() {
+                errors.push(invalid("quantifier identity is empty".to_owned()));
+            }
+            let (minimum, maximum) = (
+                quantifier.local_type.minimum(),
+                quantifier.local_type.maximum(),
+            );
+            let inside = |value: i128| (minimum..=maximum).contains(&value);
+            if let (RangeBound::Literal(lower), RangeBound::Literal(upper)) =
+                (&quantifier.lower, &quantifier.upper)
+            {
+                // An empty range has no element to bind, so it needs no containment.
+                if lower <= upper && !(inside(*lower) && inside(*upper)) {
+                    errors.push(invalid(format!(
+                        "range {lower}..={upper} lies outside the type of bound variable {}",
+                        quantifier.local.as_str()
+                    )));
+                }
+            }
+            for bound in [&quantifier.lower, &quantifier.upper] {
+                let RangeBound::Declared(name) = bound else {
+                    continue;
+                };
+                let declared = environment
+                    .values()
+                    .iter()
+                    .find(|value| value.name() == name)
+                    .and_then(|value| match value.value_type() {
+                        ValueType::Integer { value } => Some(value),
+                        _ => None,
+                    });
+                if let Some(declared) = declared {
+                    if !(inside(declared.minimum()) && inside(declared.maximum())) {
+                        errors.push(invalid(format!(
+                            "declared bound {} lies outside the type of bound variable {}",
+                            name.as_str(),
+                            quantifier.local.as_str()
+                        )));
+                    }
+                }
+            }
+            scope.push(&quantifier.local);
+            validate_formula(
+                &quantifier.body,
+                environment,
+                scope,
+                &path.child("body"),
+                errors,
+            );
+            scope.pop();
+        }
+    }
+}
+
+/// The bound variable references of the Boolean and integer structure of a leaf.
+fn local_references<'e>(expression: &'e Expression, found: &mut Vec<&'e SymbolName>) {
+    match expression.kind() {
+        ExpressionKind::LocalReference { name } => found.push(name),
+        ExpressionKind::BooleanNot { operand } | ExpressionKind::NumericNegate { operand } => {
+            local_references(operand, found);
+        }
+        ExpressionKind::Boolean { left, right, .. }
+        | ExpressionKind::Compare { left, right, .. }
+        | ExpressionKind::Numeric { left, right, .. } => {
+            local_references(left, found);
+            local_references(right, found);
+        }
+        _ => {}
+    }
+}
+
 fn depth_limit() -> LoweringError {
     LoweringError::new(
         LoweringErrorCode::ResourceLimit,
@@ -3115,11 +3281,10 @@ fn statement_digest(statement: &StatementInput, binding_digest: AnalysisDigest) 
         ],
     );
     match &statement.formula {
-        Some(formula) => {
-            let mut text = String::new();
-            formula.canonical(&mut text);
-            hash_fields("statement-formula", &[base.as_bytes(), text.as_bytes()])
-        }
+        Some(attached) => hash_fields(
+            "statement-formula",
+            &[base.as_bytes(), attached.identity.as_bytes()],
+        ),
         None => base,
     }
 }
@@ -3825,5 +3990,218 @@ mod tests {
         lower_boolean_statements(&[build(20_000)], &[]).expect("99,999 nodes admitted");
         let errors = lower_boolean_statements(&[build(20_001)], &[]).expect_err("over the bound");
         assert_eq!(errors[0].code(), LoweringErrorCode::ResourceLimit);
+    }
+
+    /// An independent evaluator of the analysis-model formula over literal ranges: it enumerates
+    /// each range directly and never reads the lowering.
+    fn oracle(formula: &AnalysisFormula, x: i128, scope: &mut Vec<(SymbolName, i128)>) -> bool {
+        match formula {
+            AnalysisFormula::Term(expression) => oracle_bool(expression, x, scope),
+            AnalysisFormula::Not(operand) => !oracle(operand, x, scope),
+            AnalysisFormula::And(left, right) => oracle(left, x, scope) && oracle(right, x, scope),
+            AnalysisFormula::Or(left, right) => oracle(left, x, scope) || oracle(right, x, scope),
+            AnalysisFormula::Implies(left, right) => {
+                !oracle(left, x, scope) || oracle(right, x, scope)
+            }
+            AnalysisFormula::Range(quantifier) => {
+                let (RangeBound::Literal(lower), RangeBound::Literal(upper)) =
+                    (&quantifier.lower, &quantifier.upper)
+                else {
+                    panic!("the oracle decides literal ranges only");
+                };
+                let mut holds = (*lower..=*upper).map(|element| {
+                    scope.push((quantifier.local.clone(), element));
+                    let result = oracle(&quantifier.body, x, scope);
+                    scope.pop();
+                    result
+                });
+                if quantifier.kind == QuantifierKind::ForAll {
+                    holds.all(|result| result)
+                } else {
+                    holds.any(|result| result)
+                }
+            }
+        }
+    }
+
+    fn oracle_bool(expression: &Expression, x: i128, scope: &[(SymbolName, i128)]) -> bool {
+        match expression.kind() {
+            ExpressionKind::BooleanLiteral { value } => *value,
+            ExpressionKind::BooleanNot { operand } => !oracle_bool(operand, x, scope),
+            ExpressionKind::Compare {
+                operator,
+                left,
+                right,
+            } => {
+                let (left, right) = (oracle_int(left, x, scope), oracle_int(right, x, scope));
+                match operator {
+                    ComparisonOperator::Equal => left == right,
+                    ComparisonOperator::NotEqual => left != right,
+                    ComparisonOperator::Less => left < right,
+                    ComparisonOperator::LessEqual => left <= right,
+                    ComparisonOperator::Greater => left > right,
+                    ComparisonOperator::GreaterEqual => left >= right,
+                }
+            }
+            _ => panic!("the oracle decides comparisons only"),
+        }
+    }
+
+    fn oracle_int(expression: &Expression, x: i128, scope: &[(SymbolName, i128)]) -> i128 {
+        match expression.kind() {
+            ExpressionKind::IntegerLiteral { value, .. } => *value,
+            ExpressionKind::ValueReference { .. } => x,
+            ExpressionKind::LocalReference { name } => {
+                scope
+                    .iter()
+                    .rev()
+                    .find(|(bound, _)| bound == name)
+                    .expect("bound")
+                    .1
+            }
+            ExpressionKind::Numeric {
+                operator,
+                left,
+                right,
+            } => {
+                let (left, right) = (oracle_int(left, x, scope), oracle_int(right, x, scope));
+                match operator {
+                    NumericOperator::Add => left + right,
+                    NumericOperator::Subtract => left - right,
+                    NumericOperator::Multiply => left * right,
+                    _ => panic!("the oracle decides linear terms only"),
+                }
+            }
+            _ => panic!("the oracle decides integer terms only"),
+        }
+    }
+
+    /// FR-032-AC-1: the status of each expanded fixture, enumerated independently from the
+    /// formula, equals the recorded status and equals the status the lowered query's own replay
+    /// derives, for every value of the input. No solver is involved. (FR-033 is the fuller oracle.)
+    #[ix_trace_rs::trace("TC-030", "FR-032-AC-1")]
+    #[test]
+    fn enumeration_oracle_decides_expanded_fixtures_without_a_solver() {
+        let ty = IntegerType::new(IntegerDomain::Signed, -1000, 1000, OverflowPolicy::Reject)
+            .expect("type");
+        let term = |expression: Expression| AnalysisFormula::Term(Box::new(expression));
+        let compare = |operator, left, right| {
+            Expression::new(
+                ExpressionKind::Compare {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span(),
+            )
+        };
+        let local = |name: &str| {
+            Expression::new(
+                ExpressionKind::LocalReference {
+                    name: SymbolName::new(name).expect("symbol"),
+                },
+                span(),
+            )
+        };
+        let range = |identity: &str, kind, name: &str, lower, upper, body| {
+            AnalysisFormula::Range(Box::new(RangeQuantifier {
+                identity: identity.to_owned(),
+                kind,
+                local: SymbolName::new(name).expect("symbol"),
+                local_type: ty.clone(),
+                lower: RangeBound::Literal(lower),
+                upper: RangeBound::Literal(upper),
+                body,
+            }))
+        };
+        let and = |left, right| AnalysisFormula::And(Box::new(left), Box::new(right));
+        let below_x = || {
+            term(compare(
+                ComparisonOperator::LessEqual,
+                local("i"),
+                reference("x"),
+            ))
+        };
+        let twice = || {
+            term(compare(
+                ComparisonOperator::Equal,
+                binary(NumericOperator::Multiply, local("i"), literal(2, &ty)),
+                reference("x"),
+            ))
+        };
+        let is = |value| {
+            term(compare(
+                ComparisonOperator::Equal,
+                reference("x"),
+                literal(value, &ty),
+            ))
+        };
+        let sum = term(compare(
+            ComparisonOperator::Equal,
+            binary(NumericOperator::Add, local("i"), local("j")),
+            reference("x"),
+        ));
+        let all = QuantifierKind::ForAll;
+        let any = QuantifierKind::Exists;
+        let fixtures = vec![
+            ("forall", range("Q", all, "i", 1, 3, below_x()), true),
+            (
+                "forall-refuted",
+                and(
+                    range("Q", all, "i", 1, 3, below_x()),
+                    term(compare(
+                        ComparisonOperator::Less,
+                        reference("x"),
+                        literal(3, &ty),
+                    )),
+                ),
+                false,
+            ),
+            ("exists", range("Q", any, "i", 1, 3, twice()), true),
+            (
+                "exists-refuted",
+                and(range("Q", any, "i", 1, 3, twice()), is(5)),
+                false,
+            ),
+            ("empty-forall", range("Q", all, "i", 5, 4, below_x()), true),
+            ("empty-exists", range("Q", any, "i", 5, 4, below_x()), false),
+            (
+                "nested",
+                range("P", all, "i", 1, 2, range("Q", any, "j", 1, 2, sum)),
+                true,
+            ),
+        ];
+        for (name, formula, expected_satisfiable) in fixtures {
+            let statement = unchecked_statement(
+                vec![],
+                vec![input("x", ValueType::Integer { value: ty.clone() })],
+                Expression::new(ExpressionKind::BooleanLiteral { value: true }, span()),
+            )
+            .with_formula(formula.clone())
+            .expect("formula");
+            let query = lower_boolean_statements(&[statement], &[]).expect("lower");
+            assert_eq!(query.logic(), "QF_LIA", "{name}");
+            // A fixture that never reads `x` declares no variable.
+            let symbol = query
+                .variables()
+                .first()
+                .map(|variable| variable.symbol.clone())
+                .unwrap_or_default();
+            let (mut oracle_status, mut lowered_status) = (false, false);
+            for x in -1000..=1000 {
+                let mut assignment = ReplayAssignment::default();
+                assignment.integers.insert(symbol.clone(), x);
+                let lowered = query.replay_assertions()[0]
+                    .expression
+                    .evaluate(&assignment)
+                    .expect("expanded replay decides");
+                let decided = oracle(&formula, x, &mut Vec::new());
+                assert_eq!(lowered, decided, "{name} at x = {x}");
+                oracle_status |= decided;
+                lowered_status |= lowered;
+            }
+            assert_eq!(oracle_status, expected_satisfiable, "{name}");
+            assert_eq!(lowered_status, expected_satisfiable, "{name}");
+        }
     }
 }

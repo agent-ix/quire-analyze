@@ -429,6 +429,8 @@ pub enum ReplayFailureReason {
     ValueOutOfDomain,
     EvaluationOverflow,
     AssertionFalse,
+    /// An assertion holds a bounded solver quantifier, whose replay is not implemented yet.
+    QuantifierNotReplayable,
 }
 
 impl ReplayFailureReason {
@@ -444,6 +446,7 @@ impl ReplayFailureReason {
             Self::ValueOutOfDomain => "value_out_of_domain",
             Self::EvaluationOverflow => "evaluation_overflow",
             Self::AssertionFalse => "assertion_false",
+            Self::QuantifierNotReplayable => "quantifier_not_replayable",
         }
     }
 }
@@ -770,6 +773,7 @@ fn replay_assertions(
             Ok(false) | Err(ReplayFault::Unassigned) => ReplayFailureReason::AssertionFalse,
             Err(ReplayFault::Overflow) => ReplayFailureReason::EvaluationOverflow,
             Err(ReplayFault::DatatypeUnreplayed) => ReplayFailureReason::SortNotReplayable,
+            Err(ReplayFault::QuantifierUnreplayed) => ReplayFailureReason::QuantifierNotReplayable,
         };
         return Err(ReplayFailure::new(reason, Some(assertion.name.clone())));
     }
