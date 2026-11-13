@@ -42,3 +42,12 @@ TC-017 has no integer test, and two spec lines need tightening.
 | FND-002 | medium | NFR-004-AC-3 (TC-017) has no test: no integer-symbol model above the parsed-model ceiling is exercised; the existing model-bound tests in solver_adapters are Boolean and not tagged NFR-004-AC-3. | `tests/integer_lowering.rs` |
 | FND-003 | low | The AC-7 overflow unit test also discharges the replay half of NFR-004-AC-2 but is not tagged NFR-004-AC-2. | `src/analysis.rs:1316` |
 | FND-004 | low | FR-010-AC-7 still says the satisfiable fixture's model "stays unverified until replay exists ... and the comparison is not an agreement", while the real-solver test tagged FR-010-AC-7 now asserts Verified and Agreement; the clause is stale now that FR-011 replay exists. | `spec/functional/FR-010-linear-integer-arithmetic.md:96` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | eed1092: FR-011 now states that a model text that is not a sequence of define-fun entries in the Z3 or cvc5 shape is value_malformed and names no symbol. Unit and integration tests assert reason value_malformed with subject None. |
+| FND-002 | fixed | eed1092: `an_integer_model_above_the_model_ceiling_is_not_conclusive` (tagged NFR-004-AC-3) asserts ModelLimit, a non-conclusive ToolError and no verified model above a 64-byte ceiling, and sat within 4096. |
+| FND-003 | fixed | eed1092: the overflow test is now tagged NFR-004-AC-2. |
+| FND-004 | fixed | eed1092: FR-010-AC-7 and TC-016 now say the sat fixture's models replay-verify and the comparison agrees with status satisfied, matching FR-011-AC-11 and the real-solver test. |

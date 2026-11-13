@@ -57,3 +57,19 @@ extends `Sort`.
 | FND-003 | low | `QueryBundle::query` is made `pub(crate)` only so a unit test can overwrite it; crate code can now desynchronise the query text from `query_digest`. A `#[cfg(test)]` constructor or setter keeps the field private. | `src/smt.rs:618` |
 | FND-004 | low | Unit-test helper `defect()` returns `ValueOutOfDomain` whenever the parse has no defect, even with `out_of_domain == None`, so the at-limit, 2^127 and `(- 2^127+1)` assertions in `numeral_boundaries` would pass if the parser returned a value. Assert on `parsed.out_of_domain` directly. | `src/analysis.rs:1162-1171` |
 | FND-005 | low | New public items (`MappedIntegerValue` and its accessors, `ReplayFailureReason::as_str`, `VerifiedBooleanModel::integer_values`) carry no doc comment; rust-style asks for docs on every `pub` item (the neighbouring Boolean items share the gap). | `src/analysis.rs:388-412` |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | low | The fix leaves `(_, ModelValue::Malformed) => unreachable!(...)` in `record_value`, the crate's first `unreachable!` in src, on the path that reads untrusted solver output. It is unreachable today, but rust-style prefers removing the arm by construction (for example, match the value into a non-malformed type before the sort checks) to an invariant panic. | `src/analysis.rs:890` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | eed1092: And/Or/Implies use `&&`/`||`, so the right operand runs only when the left does not decide the result. Equal/NotEqual stay eager, which is safe: the checker adds guard facts only for ShortCircuitAnd, ShortCircuitOr and Implication. TotalAnd/TotalOr laziness cannot change a verdict. New tests `boolean_connectives_short_circuit` and `guarded_arithmetic_at_the_extreme_replays_without_overflow` would fail under eager evaluation. |
+| FND-002 | fixed | eed1092: `record_value` reads a malformed value before any symbol-level check. Four new cases (unknown, repeated, Bool-under-Int, Int-under-Bool with 1.5) assert value_malformed. The full order (malformed, repeated, unknown, sort_mismatch, missing, out_of_domain, then overflow or false in map order) is intact. |
+| FND-003 | fixed | eed1092: the field is private again. A `#[cfg(test)] set_query_text` serves the AC-9 test. |
+| FND-004 | fixed | eed1092: `defect()` returns `Option`, gives ValueOutOfDomain only when `out_of_domain` holds a symbol, and `reason_of` expects a defect, so a clean parse fails the out-of-domain assertions. |
+| FND-005 | fixed | eed1092: doc comments added to MappedIntegerValue and its accessors, ReplayFailureReason::as_str and VerifiedBooleanModel::integer_values. |

@@ -887,7 +887,7 @@ fn record_value(
         return note(&mut parsed.sort_mismatch, symbol);
     }
     match (model_sort, value) {
-        (_, ModelValue::Malformed) => unreachable!("malformed values return above"),
+        (_, ModelValue::Malformed) => note(&mut parsed.malformed, symbol),
         (Sort::Bool, ModelValue::Boolean(value)) => {
             parsed.assignment.booleans.insert(symbol.to_owned(), value);
         }
