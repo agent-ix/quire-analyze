@@ -18,7 +18,7 @@ exit status, fails cleanly on every refused input, and behaves identically as a 
 ## Test Procedure
 
 Spawn the built binary as a child process. Provide `quire.contract-package/v1` fixtures, none of them
-committed (FR-009-AC-27): documents built at test time through the `quire-contract-*` APIs (consistent,
+committed (FR-009-AC-27): documents built at test time through the `quire-contract-*` APIs (a `quire.checked-package/v2` document built in test code and read with `CheckedPackageV2::read`, lowered with `CheckedPackageV2::lower` and taken as canonical bytes: consistent,
 contradictory, no analysable clause, non-Boolean claim, untranslatable claim), the malformed and
 oversized documents made by byte-level mutation of a built one, and one produced from QSL: run `quire-spec-language`'s `checked_handoff::write` over the
 `examples/checked-handoff/` units and model (referenced by checkout path, not copied), admit the written
@@ -27,8 +27,7 @@ profile: `CompleteLoweringProfileV2` with authority `quire-analyze`, identity `r
 required source selections, `supported_tags` `CheckedNodeTag::ALL`, `require_bounds` true and
 `work_limit` `u64::MAX`), and use the canonical bytes of the resulting `CompleteContractPackageV2`.
 Because QSL emits no `analysis_claim` today, this package has no analysable clause: the runner must
-exit `2` on it. The exit `0`/`1` cases use the built packages (FR-009 gap 5: they wait on the `quire-contract-ir`
-fixture builder). Use a
+exit `2` on it. The exit `0`/`1` cases use the built packages. Use a
 stub `producer-execute` script that logs each request and returns canned
 `producer-execution-result/v1` lines, and for the final case the real `engineering-assurance` executable
 with real or stub solvers. Cases:
@@ -56,11 +55,17 @@ with real or stub solvers. Cases:
 17. Symlinked component in each solver path, the `producer-execute` path and the `--output` parent: exit `2`.
 18. Package with a Boolean `analysis_claim` the translation cannot lower: exit `2` naming
     `semantic_graph.nodes[N]` (FR-009-AC-19).
-19. Translation, as a unit test of the translation function over built packages: clause and requirement
-    identity and anchor (AC-20), each operator row (AC-21), parameter declarations and shared symbols
-    (AC-22), the refused constructs of AC-23, spans (AC-24), errors naming `claim-N` (AC-25), and
-    determinism over two runs (AC-26).
-20. Inspect the tests directory: no committed contract-package document (AC-27).
+19. Translation, as a unit test of the translation function over built packages, claiming only what a
+    unit test shows: clause and requirement identity and anchor (AC-20), each operator row (AC-21),
+    parameter declarations and shared symbols (AC-22), spans (AC-24), and determinism over two runs
+    (AC-26). For the refusals the unit test shows that the translation returns a refusal naming
+    `semantic_graph.nodes[N]` (AC-23: each construct, the cycle, the depth of 128 against 129, the node
+    count of 10,000 against 10,001 and the 61-node shared-subterm chain, which returns within the time of
+    a normal run) or `claim-N`, the path and the message (AC-25).
+20. The exit status `2` and the absence of a report for the refusals of case 19 (AC-23, AC-24, AC-25), by
+    spawning the binary over the same built packages, including the 61-node shared-subterm chain, which
+    exits `2` without hanging.
+21. Inspect the tests directory: no committed contract-package document (AC-27).
 
 Inspect `run-package --help` for the arguments and exit classes.
 
