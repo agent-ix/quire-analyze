@@ -120,7 +120,7 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
 
 While datatype-sorted replay ([FR-021](./FR-021-datatype-witness-replay.md)) is not implemented, a model
 for a query that declares any datatype-sorted symbol is never verified. The witness is incomplete with
-the reason `sort_not_replayable`, naming the first such symbol in ascending order (the first enum-sorted variable, or, when no variable has a datatype sort, the first declared datatype sort symbol); the status stays as the
+the reason `sort_not_replayable`, naming the first such symbol in ascending order (the first datatype-sorted variable, or, when no variable has a datatype sort, the first declared datatype sort symbol); the status stays as the
 solvers answered and the differential run is inconclusive. This reason is checked before every
 [FR-011](./FR-011-integer-witness-replay.md) reason and ceases to apply to a datatype kind when FR-021 replay
 of that kind lands.
