@@ -17,6 +17,12 @@ pub const ANALYSIS_MODEL_PROFILE: &str = "quire.analysis-model/v1";
 pub const SMTLIB2_PROFILE: &str = "quire.smtlib2/v2";
 /// The logic of every query that declares no datatypes.
 pub const SMTLIB2_LOGIC: &str = "QF_LIA";
+/// The logic of every query that declares at least one datatype.
+pub const SMTLIB2_DATATYPE_LOGIC: &str = "QF_UFDTLIA";
+/// Bound on variants of one enum.
+pub const MAX_ENUM_VARIANTS: usize = 256;
+/// Bound on datatypes declared in one query.
+pub const MAX_QUERY_DATATYPES: usize = 256;
 /// Bound on a generated query before any solver is invoked.
 pub const MAX_QUERY_BYTES: usize = 16 * 1024 * 1024;
 /// Bound on statements in one query.
@@ -450,6 +456,9 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "integer_less_equal",
         "integer_greater",
         "integer_greater_equal",
+        "enum_literal",
+        "enum_equality",
+        "enum_inequality",
     ],
     unsupported_constructs: &[
         "non_linear_arithmetic",
@@ -459,7 +468,6 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "constant_overflow",
         "rational",
         "text",
-        "enum",
         "record",
         "option",
         "collection",
@@ -497,6 +505,35 @@ pub struct VariableMap {
     pub binding_group: Option<String>,
 }
 
+/// The encoded symbols of one enum datatype, derived from the declaration environment.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnumSortMap {
+    /// The SMT-LIB sort symbol.
+    pub sort: String,
+    /// The declaring package.
+    pub package: String,
+    /// The declared enum name.
+    pub name: String,
+    /// The constructors, in ascending variant-name order.
+    pub constructors: Vec<EnumConstructor>,
+}
+
+/// One enum variant and its encoded constructor symbol.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnumConstructor {
+    /// The declared variant name.
+    pub variant: String,
+    /// The SMT-LIB constructor symbol.
+    pub symbol: String,
+}
+
+/// The datatypes and datatype-sorted variables a query uses.
+#[derive(Default)]
+struct DatatypeSet {
+    enums: BTreeMap<String, EnumSortMap>,
+    variable_sorts: BTreeMap<String, String>,
+}
+
 /// A concrete model assignment: Boolean and integer values by query symbol.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ReplayAssignment {
@@ -511,6 +548,8 @@ pub(crate) enum ReplayFault {
     Overflow,
     /// A referenced symbol has no value in the assignment.
     Unassigned,
+    /// The expression involves an enum term, which is not replayed yet (VER-87).
+    EnumUnreplayed,
 }
 
 /// An integer-valued replay term, evaluated with checked 128-bit signed arithmetic.
@@ -563,6 +602,9 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
+    /// A term over an enum sort. Enum witnesses are not replayed yet (VER-87), so it never
+    /// evaluates to a verdict.
+    EnumUnreplayed,
     /// A comparison of two integer terms.
     Compare {
         operator: ComparisonOperator,
@@ -588,6 +630,7 @@ impl ReplayExpression {
             Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
+            Self::EnumUnreplayed => Err(ReplayFault::EnumUnreplayed),
             Self::Compare {
                 operator,
                 left,
@@ -625,6 +668,8 @@ pub struct QueryBundle {
     requests_model: bool,
     assertions: Vec<AssertionMap>,
     variables: Vec<VariableMap>,
+    enum_sorts: Vec<EnumSortMap>,
+    enum_variables: Vec<String>,
     replay_assertions: Vec<ReplayAssertion>,
     integer_ranges: BTreeMap<String, (i128, i128)>,
 }
@@ -674,6 +719,16 @@ impl QueryBundle {
 
     pub fn variables(&self) -> &[VariableMap] {
         &self.variables
+    }
+
+    /// The symbols of enum-sorted variables, in ascending order.
+    pub(crate) fn enum_variables(&self) -> &[String] {
+        &self.enum_variables
+    }
+
+    /// The enum datatypes the query declares, in declaration order.
+    pub fn enum_sorts(&self) -> &[EnumSortMap] {
+        &self.enum_sorts
     }
 
     pub(crate) fn replay_assertions(&self) -> &[ReplayAssertion] {
@@ -740,6 +795,7 @@ fn lower_statement_specs(
     let mut encountered = BTreeSet::new();
     let mut variables: BTreeMap<String, VariableMap> = BTreeMap::new();
     let mut ranges: BTreeMap<String, (i128, i128)> = BTreeMap::new();
+    let mut datatypes = DatatypeSet::default();
     let mut lowered = Vec::with_capacity(statements.len());
     let mut errors = Vec::new();
 
@@ -764,6 +820,7 @@ fn lower_statement_specs(
             &mut encountered,
             &mut variables,
             &mut ranges,
+            &mut datatypes,
         ) {
             Ok(mut expression) => {
                 if specification.polarity == AssertionPolarity::Negated {
@@ -828,16 +885,39 @@ fn lower_statement_specs(
     query.push_str("(set-info :source |");
     query.push_str(SMTLIB2_PROFILE);
     query.push_str("|)\n(set-option :produce-models true)\n(set-logic ");
-    query.push_str(SMTLIB2_LOGIC);
+    let logic = if datatypes.enums.is_empty() {
+        SMTLIB2_LOGIC
+    } else {
+        SMTLIB2_DATATYPE_LOGIC
+    };
+    query.push_str(logic);
     query.push_str(")\n");
+    for sort in datatypes.enums.values() {
+        query.push_str("(declare-datatypes ((");
+        query.push_str(&sort.sort);
+        query.push_str(" 0)) ((");
+        for (index, constructor) in sort.constructors.iter().enumerate() {
+            if index > 0 {
+                query.push(' ');
+            }
+            query.push('(');
+            query.push_str(&constructor.symbol);
+            query.push(')');
+        }
+        query.push_str(")))\n");
+    }
     for symbol in variables.keys() {
         query.push_str("(declare-fun ");
         query.push_str(symbol);
-        query.push_str(if ranges.contains_key(symbol) {
-            " () Int)\n"
+        query.push_str(" () ");
+        if let Some(sort) = datatypes.variable_sorts.get(symbol) {
+            query.push_str(sort);
+        } else if ranges.contains_key(symbol) {
+            query.push_str("Int");
         } else {
-            " () Bool)\n"
-        });
+            query.push_str("Bool");
+        }
+        query.push_str(")\n");
     }
     for (symbol, (minimum, maximum)) in &ranges {
         query.push_str(&format!(
@@ -889,7 +969,7 @@ fn lower_statement_specs(
     );
     Ok(QueryBundle {
         profile: SMTLIB2_PROFILE,
-        logic: CAPABILITY_CONTRACT.logic,
+        logic,
         query,
         analysis_request_digest,
         query_digest,
@@ -898,6 +978,8 @@ fn lower_statement_specs(
         requests_model,
         assertions,
         variables: variables.into_values().collect(),
+        enum_sorts: datatypes.enums.into_values().collect(),
+        enum_variables: datatypes.variable_sorts.into_keys().collect(),
         replay_assertions,
         integer_ranges: ranges,
     })
@@ -959,6 +1041,7 @@ fn lower_expression(
     encountered: &mut BTreeSet<String>,
     variables: &mut BTreeMap<String, VariableMap>,
     ranges: &mut BTreeMap<String, (i128, i128)>,
+    datatypes: &mut DatatypeSet,
 ) -> Result<LoweredExpression, LoweringError> {
     let mut state = LowerState {
         statement,
@@ -966,6 +1049,7 @@ fn lower_expression(
         encountered,
         variables,
         ranges,
+        datatypes,
         nodes: 0,
     };
     state.lower(&statement.expression, 1, &ExprPath::ROOT)
@@ -977,6 +1061,7 @@ struct LowerState<'a> {
     encountered: &'a mut BTreeSet<String>,
     variables: &'a mut BTreeMap<String, VariableMap>,
     ranges: &'a mut BTreeMap<String, (i128, i128)>,
+    datatypes: &'a mut DatatypeSet,
     nodes: usize,
 }
 
@@ -998,6 +1083,28 @@ impl LowerState<'_> {
                 Ok(LoweredExpression {
                     smt: symbol.clone(),
                     replay: ReplayExpression::Variable(symbol),
+                })
+            }
+            ExpressionKind::EnumLiteral {
+                enumeration,
+                variant,
+            } => {
+                let sort = self.enum_sort(enumeration)?;
+                let constructor = sort
+                    .constructors
+                    .iter()
+                    .find(|constructor| constructor.variant == variant.as_str())
+                    .map(|constructor| constructor.symbol.clone())
+                    .ok_or_else(|| {
+                        LoweringError::new(
+                            LoweringErrorCode::InvalidStatement,
+                            "expression.enum_literal",
+                            "validated enum variant no longer resolves",
+                        )
+                    })?;
+                Ok(LoweredExpression {
+                    smt: constructor,
+                    replay: ReplayExpression::EnumUnreplayed,
                 })
             }
             ExpressionKind::BooleanNot { operand } => {
@@ -1050,8 +1157,27 @@ impl LowerState<'_> {
                         "ordering comparison of non-integer terms is unsupported",
                     ));
                 }
+                let left_sort = self.term_sort(left);
+                let right_sort = self.term_sort(right);
                 let left = self.lower(left, depth + 1, &path.child("left"))?;
                 let right = self.lower(right, depth + 1, &path.child("right"))?;
+                if left_sort.is_none() || left_sort != right_sort {
+                    return Err(unsupported(
+                        &path.render(),
+                        "comparison operands must both be Boolean or both of one enum",
+                    ));
+                }
+                if matches!(left_sort, Some(TermSort::Enum(_))) {
+                    let name = if *operator == ComparisonOperator::Equal {
+                        "="
+                    } else {
+                        "distinct"
+                    };
+                    return Ok(LoweredExpression {
+                        smt: format!("({name} {} {})", left.smt, right.smt),
+                        replay: ReplayExpression::EnumUnreplayed,
+                    });
+                }
                 Ok(if *operator == ComparisonOperator::Equal {
                     LoweredExpression {
                         smt: format!("(= {} {})", left.smt, right.smt),
@@ -1084,6 +1210,94 @@ impl LowerState<'_> {
             ExpressionKind::ValueReference { name, .. } => self.integer_type(name).is_some(),
             _ => false,
         }
+    }
+
+    /// The sort of a lowered non-integer term, when it is Boolean or an enum.
+    fn term_sort(&self, expression: &Expression) -> Option<TermSort> {
+        match expression.kind() {
+            ExpressionKind::BooleanLiteral { .. }
+            | ExpressionKind::BooleanNot { .. }
+            | ExpressionKind::Boolean { .. }
+            | ExpressionKind::Compare { .. } => Some(TermSort::Bool),
+            ExpressionKind::EnumLiteral { enumeration, .. } => {
+                Some(TermSort::Enum(enumeration.clone()))
+            }
+            ExpressionKind::ValueReference { name, .. } => self
+                .statement
+                .environment
+                .values()
+                .iter()
+                .find(|value| value.name() == name)
+                .and_then(|declaration| match declaration.value_type() {
+                    ValueType::Boolean => Some(TermSort::Bool),
+                    ValueType::Enum { name } => Some(TermSort::Enum(name.clone())),
+                    _ => None,
+                }),
+            _ => None,
+        }
+    }
+
+    /// Declares the enum datatype of the statement environment on first use and returns its map.
+    fn enum_sort(&mut self, name: &SymbolName) -> Result<EnumSortMap, LoweringError> {
+        let environment = &self.statement.environment;
+        let declaration = environment
+            .types()
+            .iter()
+            .find_map(|candidate| match candidate {
+                TypeDeclaration::Enum { declaration } if declaration.name() == name => {
+                    Some(declaration)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                LoweringError::new(
+                    LoweringErrorCode::InvalidBinding,
+                    "binding.type",
+                    "enum declaration does not resolve",
+                )
+            })?;
+        if declaration.variants().len() > MAX_ENUM_VARIANTS {
+            return Err(LoweringError::new(
+                LoweringErrorCode::ResourceLimit,
+                "type.enum.variants",
+                "enum variant count exceeds the public bound",
+            ));
+        }
+        let mut variants: Vec<&str> = declaration
+            .variants()
+            .iter()
+            .map(|variant| variant.name().as_str())
+            .collect();
+        variants.sort_unstable();
+        let package = environment.owner().package().as_str();
+        let mut identity = vec![package.as_bytes(), name.as_str().as_bytes()];
+        identity.extend(variants.iter().map(|variant| variant.as_bytes()));
+        let digest = hex(hash_fields("enum-sort", &identity).as_bytes());
+        let sort = format!("s_{digest}");
+        if let Some(existing) = self.datatypes.enums.get(&sort) {
+            return Ok(existing.clone());
+        }
+        if self.datatypes.enums.len() >= MAX_QUERY_DATATYPES {
+            return Err(LoweringError::new(
+                LoweringErrorCode::ResourceLimit,
+                "type.datatypes",
+                "datatype count exceeds the public bound",
+            ));
+        }
+        let map = EnumSortMap {
+            sort: sort.clone(),
+            package: package.to_owned(),
+            name: name.as_str().to_owned(),
+            constructors: variants
+                .iter()
+                .map(|variant| EnumConstructor {
+                    variant: (*variant).to_owned(),
+                    symbol: format!("c_{digest}_{}", hex(variant.as_bytes())),
+                })
+                .collect(),
+        };
+        self.datatypes.enums.insert(sort, map.clone());
+        Ok(map)
     }
 
     fn integer_type(&self, name: &SymbolName) -> Option<IntegerType> {
@@ -1194,16 +1408,20 @@ impl LowerState<'_> {
                     "validated declaration no longer resolves",
                 )
             })?;
-        let range = match declaration.value_type() {
-            ValueType::Boolean => None,
-            ValueType::Integer { value } => Some((value.minimum(), value.maximum())),
-            _ => {
-                return Err(unsupported(
+        let mut enum_sort = None;
+        let range =
+            match declaration.value_type() {
+                ValueType::Boolean => None,
+                ValueType::Integer { value } => Some((value.minimum(), value.maximum())),
+                ValueType::Enum { name } => {
+                    enum_sort = Some(self.enum_sort(name)?.sort);
+                    None
+                }
+                _ => return Err(unsupported(
                     "expression.value_reference",
-                    "only Boolean and integer value references are exact in quire.smtlib2/v2",
-                ))
-            }
-        };
+                    "only Boolean, integer and enum value references are exact in quire.smtlib2/v2",
+                )),
+            };
         let kind = declaration_kind(declaration.kind());
         let point = execution_point_key(&statement.execution_point);
         let digest = type_shape_digest(&statement.environment, declaration.value_type())?;
@@ -1253,8 +1471,18 @@ impl LowerState<'_> {
         if let Some(range) = range {
             self.ranges.insert(symbol.clone(), range);
         }
+        if let Some(sort) = enum_sort {
+            self.datatypes.variable_sorts.insert(symbol.clone(), sort);
+        }
         Ok(symbol)
     }
+}
+
+/// The sort of a Boolean or enum term.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TermSort {
+    Bool,
+    Enum(SymbolName),
 }
 
 /// The position of an expression within the statement, rendered only when an error needs it.
@@ -1499,7 +1727,7 @@ fn construct_name(kind: &ExpressionKind) -> &'static str {
         }
         ExpressionKind::RationalLiteral { .. } => "rational literals are unsupported",
         ExpressionKind::TextLiteral { .. } => "text literals are unsupported",
-        ExpressionKind::EnumLiteral { .. } => "enum literals are unsupported",
+        ExpressionKind::EnumLiteral { .. } => "construct is supported",
         ExpressionKind::OptionNone { .. }
         | ExpressionKind::OptionSome { .. }
         | ExpressionKind::IsPresent { .. }
@@ -1754,6 +1982,117 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
+/// The logic a query's feature set requires and the one it declares, read by scanning commands.
+pub(crate) struct QueryLogic {
+    pub(crate) required: &'static str,
+    pub(crate) declared: String,
+}
+
+/// Scans the top-level commands of a query, skipping comments, quoted symbols and string
+/// literals. Returns `None` unless there is exactly one `set-logic` that precedes every
+/// declaration. Datatypes need `QF_UFDTLIA`, otherwise `QF_LIA`.
+pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
+    let mut depth = 0_usize;
+    let mut cursor = 0;
+    let mut expect_head = false;
+    let mut declared: Option<String> = None;
+    let mut datatypes = false;
+    let mut seen_declaration = false;
+    let mut set_logics = 0_usize;
+    let mut logic_argument = false;
+    while cursor < query.len() {
+        match query[cursor] {
+            b';' => {
+                while cursor < query.len() && query[cursor] != b'\n' {
+                    cursor += 1;
+                }
+            }
+            b'|' => {
+                cursor += 1;
+                while cursor < query.len() && query[cursor] != b'|' {
+                    cursor += 1;
+                }
+                if cursor >= query.len() {
+                    return None;
+                }
+                cursor += 1;
+                expect_head = false;
+            }
+            b'"' => {
+                cursor += 1;
+                loop {
+                    match query.get(cursor) {
+                        None => return None,
+                        Some(b'"') if query.get(cursor + 1) == Some(&b'"') => cursor += 2,
+                        Some(b'"') => break,
+                        Some(_) => cursor += 1,
+                    }
+                }
+                cursor += 1;
+                expect_head = false;
+            }
+            b'(' => {
+                depth += 1;
+                expect_head = depth == 1;
+                cursor += 1;
+            }
+            b')' => {
+                depth = depth.checked_sub(1)?;
+                expect_head = false;
+                logic_argument = false;
+                cursor += 1;
+            }
+            byte if byte.is_ascii_whitespace() => cursor += 1,
+            _ => {
+                let start = cursor;
+                while cursor < query.len()
+                    && !query[cursor].is_ascii_whitespace()
+                    && !matches!(query[cursor], b'(' | b')' | b';' | b'|' | b'"')
+                {
+                    cursor += 1;
+                }
+                let atom = &query[start..cursor];
+                if expect_head {
+                    match atom {
+                        b"set-logic" => {
+                            if set_logics > 0 || seen_declaration {
+                                return None;
+                            }
+                            set_logics += 1;
+                            logic_argument = true;
+                        }
+                        b"declare-datatypes"
+                        | b"declare-datatype"
+                        | b"declare-codatatypes"
+                        | b"declare-codatatype" => {
+                            datatypes = true;
+                            seen_declaration = true;
+                        }
+                        b"declare-fun" | b"declare-const" | b"declare-sort" | b"define-fun" => {
+                            seen_declaration = true;
+                        }
+                        _ => {}
+                    }
+                } else if logic_argument && depth == 1 && declared.is_none() {
+                    declared = Some(String::from_utf8_lossy(atom).into_owned());
+                }
+                expect_head = false;
+            }
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    Some(QueryLogic {
+        required: if datatypes {
+            SMTLIB2_DATATYPE_LOGIC
+        } else {
+            SMTLIB2_LOGIC
+        },
+        declared: declared?,
+    })
+}
+
 /// Re-derive a query digest from the two identities a report retains.
 ///
 /// `queryDigest` is `hash_fields("query", [profile, requestDigest, query])`, and
@@ -1870,5 +2209,144 @@ mod tests {
             fold(&exact).expect("in range").tree,
             IntegerTree::Constant(i128::MAX)
         );
+    }
+
+    fn logic_of(query: &str) -> Option<(&'static str, String)> {
+        query_logic(query.as_bytes()).map(|logic| (logic.required, logic.declared))
+    }
+
+    /// FR-020-AC-9: the logic derivation reads commands, so comments, quoted symbols and strings
+    /// cannot change it, singular datatype declarations count, and a repeated or late
+    /// `set-logic` is refused.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-9")]
+    #[test]
+    fn logic_derivation_scans_commands_not_text() {
+        let plain = "(set-logic QF_LIA)\n(declare-fun x () Bool)\n";
+        assert_eq!(logic_of(plain), Some(("QF_LIA", "QF_LIA".to_owned())));
+        for hidden in [
+            "; (declare-datatypes ((S 0)) (((a))))\n",
+            "(declare-fun |(declare-datatypes | () Bool)\n",
+            "(set-info :note \"(declare-datatype S ((a)))\")\n",
+        ] {
+            let query = format!("(set-logic QF_LIA)\n{hidden}");
+            assert_eq!(
+                logic_of(&query),
+                Some(("QF_LIA", "QF_LIA".to_owned())),
+                "{hidden}"
+            );
+        }
+        for command in [
+            "(declare-datatype S ((a)))",
+            "(declare-datatypes ((S 0)) (((a))))",
+        ] {
+            let query = format!("(set-logic QF_UFDTLIA)\n{command}\n");
+            assert_eq!(
+                logic_of(&query),
+                Some(("QF_UFDTLIA", "QF_UFDTLIA".to_owned())),
+                "{command}"
+            );
+        }
+        let comment_logic = "; (set-logic QF_UF)\n(set-logic QF_LIA)\n";
+        assert_eq!(
+            logic_of(comment_logic),
+            Some(("QF_LIA", "QF_LIA".to_owned()))
+        );
+        assert_eq!(logic_of("(set-logic QF_LIA)\n(set-logic QF_UF)\n"), None);
+        assert_eq!(
+            logic_of("(declare-fun x () Bool)\n(set-logic QF_LIA)\n"),
+            None
+        );
+        assert_eq!(logic_of("(declare-fun x () Bool)\n"), None);
+        assert_eq!(logic_of("(set-logic)\n(set-logic QF_LIA)\n"), None);
+        assert_eq!(
+            logic_of("(set-logic QF_LIA)\n(declare-fun |x () Bool)\n"),
+            None
+        );
+    }
+
+    fn unchecked_statement(
+        types: Vec<TypeDeclaration>,
+        values: Vec<quire_contract_model::ValueDeclaration>,
+        expression: Expression,
+    ) -> StatementInput {
+        let package = quire_contract_model::PackageId::new("agent-ix/unit").expect("package");
+        let requirement = quire_contract_model::RequirementId::new("REQ-U").expect("requirement");
+        let revision = quire_contract_model::RequirementRevision::new(1).expect("revision");
+        let owner = RequirementRef::new(package, requirement, revision);
+        StatementInput {
+            clause: ClauseRef::new(
+                owner.clone(),
+                quire_contract_model::ClauseId::new("C-U").expect("clause"),
+            ),
+            clause_digest: hash_fields("clause", &[b"unit"]),
+            execution_point: ExecutionPoint::Pre {
+                operation: quire_contract_model::AnchorName::new("check")
+                    .expect("anchor")
+                    .into(),
+            },
+            environment: DeclarationEnvironment::new(owner, types, values, vec![]).expect("env"),
+            expression,
+            source: span(),
+        }
+    }
+
+    fn enum_declaration() -> TypeDeclaration {
+        let variants = ["A", "B"]
+            .iter()
+            .map(|name| {
+                quire_contract_model::EnumVariantDeclaration::new(
+                    SymbolName::new(*name).expect("symbol"),
+                    span(),
+                )
+            })
+            .collect();
+        TypeDeclaration::Enum {
+            declaration: quire_contract_model::EnumDeclaration::new(
+                SymbolName::new("E").expect("symbol"),
+                span(),
+                variants,
+            )
+            .expect("enum"),
+        }
+    }
+
+    fn enum_literal(name: &str) -> Expression {
+        Expression::new(
+            ExpressionKind::EnumLiteral {
+                enumeration: SymbolName::new("E").expect("symbol"),
+                variant: SymbolName::new(name).expect("symbol"),
+            },
+            span(),
+        )
+    }
+
+    /// FR-020-AC-5: the lowering refuses an enum ordering or mixed-sort comparison itself, over an
+    /// expression that skipped statement-build validation.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-5")]
+    #[test]
+    fn lowering_refuses_unchecked_enum_ordering_and_mixed_sorts() {
+        let compare = |operator, left, right| {
+            Expression::new(
+                ExpressionKind::Compare {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span(),
+            )
+        };
+        let boolean = Expression::new(ExpressionKind::BooleanLiteral { value: true }, span());
+        for expression in [
+            compare(
+                ComparisonOperator::Less,
+                enum_literal("A"),
+                enum_literal("B"),
+            ),
+            compare(ComparisonOperator::Equal, boolean, enum_literal("A")),
+        ] {
+            let statement = unchecked_statement(vec![enum_declaration()], vec![], expression);
+            let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
+            assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
+        }
     }
 }

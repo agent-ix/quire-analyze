@@ -34,8 +34,9 @@ unsupported.
 | Case | Code | Raised by |
 |---|---|---|
 | An `EnumLiteral`, `RecordLiteral`, `FieldAccess` or `Unwrap` whose enumeration, variant, record, field or presence proof does not hold | `InvalidStatement`, path `statement.expression` | `check_expression` at statement build, before lowering |
-| A value declaration or binding whose type name does not resolve in the environment | `InvalidBinding`, path `binding.type` | binding validation |
-| A construct outside the exact list (collection, text, rational, enum ordering) | `UnsupportedConstruct` | expression lowering |
+| An enum ordering comparison, or a comparison whose operands differ in sort | `InvalidStatement`, path `statement.expression` | `check_expression` at statement build, which refuses it as ill-typed, before lowering |
+| A value declaration whose type name does not resolve in the environment | refused by `DeclarationEnvironment::new` as `OrphanedTypeReference`, so no environment and no statement exists | environment build |
+| A construct outside the exact list (collection, text, rational), and, defensively, an enum ordering or mixed-sort comparison that reaches lowering unchecked | `UnsupportedConstruct` | expression lowering |
 | A declared type that nests a collection or text | `UnsupportedType` | type lowering |
 | A bound of NFR-020 exceeded | `ResourceLimit` | type lowering |
 | A record type that contains itself | refused by `DeclarationEnvironment::new` as `RecursiveType`, so no environment and no statement exists | environment build |
@@ -102,17 +103,27 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
   `statement.expression`), and the lowering adds no separate check. The selector's value on `none` is
   unconstrained and unobservable under the proof, and is never given meaning.
 - A `Compare` whose operands are not both Boolean, both of the same enum, both of the same record, or
-  both of the same option sort is refused as `UnsupportedConstruct`. A mixed-sort comparison is never
-  coerced.
+  both of the same option sort is refused at statement build by `check_expression` as `InvalidStatement`
+  (path `statement.expression`). The lowering also refuses such a `Compare` as `UnsupportedConstruct`, as a
+  defensive check over an unchecked expression. A mixed-sort comparison is never coerced.
 
 ### Capability contract
 
-- `CAPABILITY_CONTRACT` shall list `enum_literal`, `enum_equality`, `record`, `record_equality`,
+- `CAPABILITY_CONTRACT` shall list `enum_literal`, `enum_equality`, `enum_inequality`, `record`, `record_equality`,
   `field_access`, `option`, `option_equality`, `option_presence` and `option_access` as exact
   constructs, and shall remove `enum`, `record`, `option`, `field_access` and `option_access` from its
   unsupported list. `collection`, `collection_access` and `text` remain unsupported.
 - The exhaustive `ExpressionKind` match keeps an upstream variant addition a compile-time review
   point. Every construct not listed exact returns `unsupported` with no approximate query.
+
+### Replay until FR-021
+
+While datatype-sorted replay ([FR-021](./FR-021-datatype-witness-replay.md)) is not implemented, a model
+for a query that declares any datatype-sorted symbol is never verified. The witness is incomplete with
+the reason `sort_not_replayable`, naming the first such symbol in ascending order (the first enum-sorted variable, or, when no variable has a datatype sort, the first declared datatype sort symbol); the status stays as the
+solvers answered and the differential run is inconclusive. This reason is checked before every
+[FR-011](./FR-011-integer-witness-replay.md) reason and ceases to apply to a datatype kind when FR-021 replay
+of that kind lands.
 
 ### Refusals
 
@@ -130,11 +141,12 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
 | FR-020-AC-2 | Every enum variant, record field and type name in a query traces to a declaration in the environment, and each unresolved name is refused with the code of the case table before solver execution. | Test |
 | FR-020-AC-3 | A record-field constraint fixture and an option-access fixture (`IsPresent` in the antecedent of an implication, `Unwrap` in the consequent) each lower and are decided correctly by both solvers. | Test (real solvers where installed) |
 | FR-020-AC-4 | An `Unwrap` with no presence proof is refused by `check_expression` as `InvalidStatement` at statement build and nothing is lowered; an `Unwrap` under the proof lowers to the selector. | Test |
-| FR-020-AC-5 | A record or option nesting a collection or text returns `UnsupportedType`, an enum ordering comparison and a mixed-sort comparison return `UnsupportedConstruct`, and a self-containing record fails at `DeclarationEnvironment::new` with `RecursiveType`. None yields a query. | Test |
+| FR-020-AC-5 | A record or option nesting a collection or text returns `UnsupportedType`, an enum ordering comparison and a mixed-sort comparison are refused at statement build as `InvalidStatement` (path `statement.expression`) and, over an unchecked expression, by the lowering as `UnsupportedConstruct`, and a self-containing record fails at `DeclarationEnvironment::new` with `RecursiveType`. None yields a query. | Test |
 | FR-020-AC-6 | The capability contract of `quire.smtlib2/v2` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test |
 | FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test |
 | FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`, except a collection literal consumed as a quantifier domain per [FR-030](./FR-030-bounded-quantifier-domains.md) and [FR-034](./FR-034-quantifier-package-translation.md). | Test |
 | FR-020-AC-9 | The `(set-logic ...)` of a query declaring no datatype is `QF_LIA` and of a query declaring at least one datatype is `QF_UFDTLIA`, in both cases under `quire.smtlib2/v2`, that of a query holding a bounded solver quantifier is `LIA` without and `UFDTLIA` with a datatype, and a report naming `quire.smtlib2/v1`, `QF_UF`, or a logic other than the one the feature set requires is refused by validation. | Test |
+| FR-020-AC-10 | A satisfiable model for a query declaring an enum datatype, including one whose terms are only enum literals, is not verified: the witness is incomplete with reason `sort_not_replayable` naming the first enum variable (or, with none, the first declared sort) in ascending order, including for an empty model, the status is as the solvers answered, and the differential run is inconclusive. | Test |
 
 ## Dependencies
 

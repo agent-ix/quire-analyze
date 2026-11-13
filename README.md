@@ -45,15 +45,18 @@ a negation, so `unsat` means satisfied and `sat` is a counterexample.
 
 ## Supported constructs
 
-Queries are in SMT-LIB 2.6, logic `QF_LIA`, under profile `quire.smtlib2/v2`.
+Queries are in SMT-LIB 2.6 under profile `quire.smtlib2/v2`, logic `QF_LIA`, or `QF_UFDTLIA`
+when the query declares an enum datatype.
 Lowering accepts Boolean literals, value references, `not`, `and`, `or` (both
 short-circuit and total forms), implication, and Boolean equality and inequality,
 plus linear integer arithmetic: integer literals and references, negation,
-addition, subtraction, multiplication by a constant, and the six comparisons.
+addition, subtraction, multiplication by a constant, and the six comparisons, plus
+enum literals, enum value references, and enum equality and inequality (membership is a
+disjunction of equalities).
 Declared integer ranges are asserted as unnamed assertions after the declarations.
 Any other construct is refused when the request is lowered, with a typed error
 naming it: non-linear products, integer division and remainder, saturating
-arithmetic, rationals, text, enums,
+arithmetic, rationals, text, enum ordering,
 records, options, collections, field access, quantifiers,
 pure function calls and local references. (The authoritative list is
 `CAPABILITY_CONTRACT` in [`src/smt.rs`](src/smt.rs).)

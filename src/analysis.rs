@@ -419,6 +419,8 @@ impl MappedIntegerValue {
 /// The closed set of reasons a returned model fails replay, in precedence order.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ReplayFailureReason {
+    /// The query has a symbol of a sort whose models are not replayed yet.
+    SortNotReplayable,
     ValueMalformed,
     SymbolRepeated,
     SymbolUnknown,
@@ -433,6 +435,7 @@ impl ReplayFailureReason {
     /// The reason's stable snake_case code.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::SortNotReplayable => "sort_not_replayable",
             Self::ValueMalformed => "value_malformed",
             Self::SymbolRepeated => "symbol_repeated",
             Self::SymbolUnknown => "symbol_unknown",
@@ -655,6 +658,16 @@ fn verify_model(
     bytes: &[u8],
     purpose: ModelPurpose,
 ) -> Result<VerifiedBooleanModel, ReplayFailure> {
+    // Enum witness replay belongs to VER-87. Any declared datatype sort makes the model
+    // unreplayable, checked before every other reason. The subject is the first enum variable in
+    // ascending order, or the first declared sort symbol when no variable has an enum sort.
+    if let Some(sort) = query.enum_sorts().first() {
+        let subject = query.enum_variables().first().unwrap_or(&sort.sort).clone();
+        return Err(ReplayFailure::new(
+            ReplayFailureReason::SortNotReplayable,
+            Some(subject),
+        ));
+    }
     if bytes.is_empty() {
         return Err(malformed_model());
     }
@@ -664,8 +677,7 @@ fn verify_model(
         .map(|assertion| assertion.name.as_str())
         .collect::<BTreeSet<_>>();
     let ranges = query.integer_ranges();
-    // A symbol with no declared range is read as Bool. Enum-sorted symbols (VER-87 owns their
-    // replay) have no range either, so they must not reach this point as Bool.
+    // A symbol with no declared range is read as Bool.
     let declared = query
         .variables()
         .iter()
@@ -757,6 +769,7 @@ fn replay_assertions(
             }
             Ok(false) | Err(ReplayFault::Unassigned) => ReplayFailureReason::AssertionFalse,
             Err(ReplayFault::Overflow) => ReplayFailureReason::EvaluationOverflow,
+            Err(ReplayFault::EnumUnreplayed) => ReplayFailureReason::SortNotReplayable,
         };
         return Err(ReplayFailure::new(reason, Some(assertion.name.clone())));
     }
