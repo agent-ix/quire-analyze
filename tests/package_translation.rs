@@ -290,16 +290,16 @@ fn assert_refused_at(
 
 #[trace("FR-009-AC-23")]
 #[test]
-fn an_integer_operation_is_refused_at_its_node() {
+fn an_operation_outside_the_supported_subset_is_refused_at_its_node() {
     let mut document = Document::new();
     let range = document.range();
     let a = document.parameter_of(&range);
     let b = document.parameter_of(&range);
-    let sum = document.application("quire.op.integer.add", &[&a, &b], &range);
-    let less = document.application("quire.op.integer.lt", &[&sum, &b], "scalar_type/boolean");
+    let other = document.application("quire.op.integer.min", &[&a, &b], &range);
+    let less = document.application("quire.op.integer.lt", &[&other, &b], "scalar_type/boolean");
     let claim = document.claim(&less);
     let (package, error) = refusal(&document, &[&claim]);
-    assert_refused_at(&package, &error, TranslationErrorKind::CannotLower, &less);
+    assert_refused_at(&package, &error, TranslationErrorKind::CannotLower, &other);
 }
 
 #[trace("FR-009-AC-23")]

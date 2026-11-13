@@ -135,6 +135,42 @@ impl Document {
         label
     }
 
+    /// An `integer_range` type node over `[min, max]`, created once under `label`.
+    pub fn range_between(&mut self, label: &str, min: i64, max: i64) -> String {
+        let label = format!("bounded_domain/{label}");
+        if self.nodes.iter().any(|node| node["node_id"] == id(&label)) {
+            return label;
+        }
+        let bound = |name: &str, value: i64| {
+            json!({"term": "binding", "name": name,
+                "value": literal("scalar_type/integer", "integer", json!(value.to_string()))})
+        };
+        let body = json!({"term": "aggregate", "members": [bound("min", min), bound("max", max)]});
+        self.node(
+            &label,
+            "bounded_domain",
+            "generated",
+            "integer_range",
+            "scalar_type/integer",
+            &["scalar_type/integer"],
+            body,
+        );
+        label
+    }
+
+    /// An integer literal of the type node `ty`.
+    pub fn int_literal(&mut self, ty: &str, value: i64) -> String {
+        let label = self.fresh("value/literal");
+        let body = literal(ty, "integer", json!(value.to_string()));
+        self.node(&label, "value", "expression", "literal", ty, &[ty], body);
+        label
+    }
+
+    /// An integer application of `identity` over `arguments`, typed `ty`.
+    pub fn int_op(&mut self, identity: &str, arguments: &[&str], ty: &str) -> String {
+        self.application(identity, arguments, ty)
+    }
+
     pub fn parameter(&mut self) -> String {
         self.parameter_of("scalar_type/boolean")
     }
@@ -446,6 +482,9 @@ pub fn not_chain(document: &mut Document, depth: usize) -> (String, String) {
 pub struct Sized {
     pub parameter: String,
     chains: Vec<String>,
+    combine: &'static str,
+    wrap: &'static str,
+    ty: String,
 }
 
 impl Sized {
@@ -454,6 +493,21 @@ impl Sized {
         Self {
             chains: vec![parameter.clone()],
             parameter,
+            combine: AND,
+            wrap: NOT,
+            ty: "scalar_type/boolean".to_owned(),
+        }
+    }
+
+    /// Integer sums over a parameter of the range `ty`: `add` doubles, `negate` adds one node.
+    pub fn sums(document: &mut Document, ty: &str) -> Self {
+        let parameter = document.parameter_of(ty);
+        Self {
+            chains: vec![parameter.clone()],
+            parameter,
+            combine: "quire.op.integer.add",
+            wrap: "quire.op.integer.negate",
+            ty: ty.to_owned(),
         }
     }
 
@@ -464,7 +518,7 @@ impl Sized {
         }
         if size.is_multiple_of(2) {
             let inner = self.node(document, size - 1);
-            return document.op(NOT, &[&inner]);
+            return document.application(self.wrap, &[&inner], &self.ty);
         }
         let mut level = 0;
         while (1_usize << (level + 2)) - 1 < size {
@@ -472,12 +526,13 @@ impl Sized {
         }
         while self.chains.len() <= level {
             let last = self.chains[self.chains.len() - 1].clone();
-            self.chains.push(document.op(AND, &[&last, &last]));
+            self.chains
+                .push(document.application(self.combine, &[&last, &last], &self.ty));
         }
         let largest = (1_usize << (level + 1)) - 1;
         let rest = self.node(document, size - 1 - largest);
         let chain = self.chains[level].clone();
-        document.op(AND, &[&chain, &rest])
+        document.application(self.combine, &[&chain, &rest], &self.ty)
     }
 }
 

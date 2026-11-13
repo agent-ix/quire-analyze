@@ -13,14 +13,14 @@ use std::{
 };
 
 use quire_contract_model::{
-    BooleanOperator, CheckedJson, CheckedLiteralValue, CheckedNodeId, CheckedNodeKind,
-    CheckedSemanticNodeV2, CheckedTerm, ClaimForm, Clause, ClauseId, ClauseKind,
+    BooleanOperator, BoundedDomainForm, CheckedJson, CheckedLiteralValue, CheckedNodeId,
+    CheckedNodeKind, CheckedSemanticNodeV2, CheckedTerm, ClaimForm, Clause, ClauseId, ClauseKind,
     ComparisonOperator, ContractPackage, ContractPackageV1, DeclarationEnvironment, Diagnostic,
-    ExecutionPoint, ExecutionPointName, Expression, ExpressionKind, PackageId, Requirement,
-    RequirementId, RequirementRef, RequirementRevision, ScalarTypeForm, SchemaVersion,
-    SourceDocumentId, SourceIdentity, SourceLocation, SourceRevision, SourceSpan, StateObservation,
-    SymbolName, TypedExpression, ValueDeclaration, ValueDeclarationKind, ValueForm, ValueType,
-    MAX_EXPRESSION_NODES,
+    ExecutionPoint, ExecutionPointName, Expression, ExpressionKind, IntegerDomain, IntegerType,
+    NumericOperator, OverflowPolicy, PackageId, Requirement, RequirementId, RequirementRef,
+    RequirementRevision, ScalarTypeForm, SchemaVersion, SourceDocumentId, SourceIdentity,
+    SourceLocation, SourceRevision, SourceSpan, StateObservation, SymbolName, TypedExpression,
+    ValueDeclaration, ValueDeclarationKind, ValueForm, ValueType, MAX_EXPRESSION_NODES,
 };
 
 use crate::{lower_boolean_statements, smt::MAX_EXPRESSION_DEPTH, AnalysisRequest, StatementInput};
@@ -38,6 +38,19 @@ const OP_OR: &str = "quire.op.boolean.or";
 const OP_IMPLIES: &str = "quire.op.boolean.implies";
 const OP_EQ: &str = "quire.op.boolean.eq";
 const OP_NE: &str = "quire.op.boolean.ne";
+const OP_INT_NEGATE: &str = "quire.op.integer.negate";
+const OP_INT_ADD: &str = "quire.op.integer.add";
+const OP_INT_SUB: &str = "quire.op.integer.sub";
+const OP_INT_MUL: &str = "quire.op.integer.mul";
+const OP_INT_EQ: &str = "quire.op.integer.eq";
+const OP_INT_NE: &str = "quire.op.integer.ne";
+const OP_INT_LT: &str = "quire.op.integer.lt";
+const OP_INT_LE: &str = "quire.op.integer.le";
+const OP_INT_GT: &str = "quire.op.integer.gt";
+const OP_INT_GE: &str = "quire.op.integer.ge";
+const OP_INT_DIV: &str = "quire.op.integer.div";
+const OP_INT_REM: &str = "quire.op.integer.rem";
+const OP_INT_MOD: &str = "quire.op.integer.mod";
 
 /// Why a package cannot be translated. Each kind is a distinct, stable cause.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,7 +61,8 @@ pub enum TranslationErrorKind {
     NoAnalysableClause,
     /// An `analysis_claim` body is not a Boolean-typed term.
     NonBooleanClaim,
-    /// A Boolean-typed term the translation cannot lower, or a reference cycle.
+    /// A term the translation cannot lower: an unsupported or non-linear operation, a
+    /// Boolean/integer operand mismatch, or a reference cycle.
     CannotLower,
     /// The translated tree of a clause exceeds the expression node bound.
     ExpressionNodeBound,
@@ -162,7 +176,7 @@ impl AnalysisTranslation {
         &self.package
     }
 
-    /// The declarations of the Boolean parameters the clauses reach.
+    /// The declarations of the Boolean and integer parameters the clauses reach.
     pub fn environment(&self) -> &DeclarationEnvironment {
         &self.environment
     }
@@ -261,7 +275,8 @@ pub fn translate_analysis_claims(
         entered: Vec::new(),
         produced: 0,
         total: 0,
-        parameters: BTreeSet::new(),
+        parameters: BTreeMap::new(),
+        saw_parameter: false,
         span: zero_span(&source)?,
     };
     let mut bodies = Vec::with_capacity(claims.len());
@@ -271,11 +286,11 @@ pub fn translate_analysis_claims(
     }
 
     let mut declarations = Vec::with_capacity(walker.parameters.len());
-    for &parameter in &walker.parameters {
+    for (&parameter, value_type) in &walker.parameters {
         declarations.push(ValueDeclaration::new(
             parameter_symbol(parameter, parameter)?,
             ValueDeclarationKind::Input,
-            ValueType::Boolean,
+            value_type.clone(),
             spans.node(parameter)?,
         ));
     }
@@ -428,8 +443,10 @@ struct Walker<'a> {
     produced: u32,
     /// `Expression` nodes produced for all claims so far, never reset between claims.
     total: u32,
-    /// Distinct `value/parameter` nodes reached by any claim.
-    parameters: BTreeSet<usize>,
+    /// Distinct `value/parameter` nodes reached by any claim, with their declared type.
+    parameters: BTreeMap<usize, ValueType>,
+    /// Whether a parameter was produced since the flag was last cleared.
+    saw_parameter: bool,
     /// The span every `Expression` of the current claim carries.
     span: SourceSpan,
 }
@@ -451,7 +468,7 @@ impl<'a> Walker<'a> {
             ));
         }
         self.in_progress.insert(claim);
-        self.expression(body, claim, 1)
+        self.expression(body, claim, 1, Class::Boolean)
     }
 
     fn lookup(&self, id: &CheckedNodeId) -> Option<usize> {
@@ -480,15 +497,80 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Translates `term`, a term of the body of `node`, at tree depth `depth`.
+    /// The class of the scalar type node `id`, if it is a Boolean or an integer type.
+    fn class_of_type(&self, id: &CheckedNodeId) -> Option<Class> {
+        match self.lookup(id).and_then(|node| self.kind(node))? {
+            CheckedNodeKind::ScalarType(ScalarTypeForm::Boolean) => Some(Class::Boolean),
+            CheckedNodeKind::ScalarType(ScalarTypeForm::Integer)
+            | CheckedNodeKind::BoundedDomain(BoundedDomainForm::IntegerRange) => {
+                Some(Class::Integer)
+            }
+            _ => None,
+        }
+    }
+
+    /// The integer type of the type node `id`: an `integer_range` keeps its bounds, the bare
+    /// integer scalar type takes the 128-bit signed range. The domain is signed and the
+    /// overflow policy rejects, because the package carries neither.
+    fn integer_type(
+        &self,
+        id: &CheckedNodeId,
+        node: usize,
+    ) -> Result<IntegerType, TranslationError> {
+        let (minimum, maximum) = match self.lookup(id).and_then(|node| self.kind(node)) {
+            Some(CheckedNodeKind::ScalarType(ScalarTypeForm::Integer)) => (i128::MIN, i128::MAX),
+            Some(CheckedNodeKind::BoundedDomain(BoundedDomainForm::IntegerRange)) => {
+                self.range_bounds(id, node)?
+            }
+            _ => return Err(cannot_lower(node, "the type is not an integer type")),
+        };
+        IntegerType::new(
+            IntegerDomain::Signed,
+            minimum,
+            maximum,
+            OverflowPolicy::Reject,
+        )
+        .map_err(|diagnostic| cannot_lower(node, diagnostic.message))
+    }
+
+    fn range_bounds(
+        &self,
+        id: &CheckedNodeId,
+        node: usize,
+    ) -> Result<(i128, i128), TranslationError> {
+        let bad = || cannot_lower(node, "the integer_range bounds are not 128-bit integers");
+        let body = self.lookup(id).and_then(|index| self.terms[index]);
+        let Some(CheckedTerm::Aggregate { members }) = body else {
+            return Err(bad());
+        };
+        let bound = |name: &str| -> Option<i128> {
+            members.iter().find_map(|member| {
+                let CheckedTerm::Binding { name: found, value } = member else {
+                    return None;
+                };
+                if found.as_ref() != name {
+                    return None;
+                }
+                match value.literal_read()?.value {
+                    CheckedLiteralValue::Integer(number) => number.to_string().parse().ok(),
+                    _ => None,
+                }
+            })
+        };
+        bound("min").zip(bound("max")).ok_or_else(bad)
+    }
+
+    /// Translates `term`, a term of the body of `node`, at tree depth `depth`, where a term of
+    /// class `want` is required.
     fn expression(
         &mut self,
         term: &'a CheckedTerm,
         node: usize,
         depth: usize,
+        want: Class,
     ) -> Result<Expression, TranslationError> {
         let mark = self.entered.len();
-        let result = self.follow(term, node, depth);
+        let result = self.follow(term, node, depth, want);
         for entered in self.entered.drain(mark..) {
             self.in_progress.remove(&entered);
         }
@@ -502,10 +584,11 @@ impl<'a> Walker<'a> {
         mut term: &'a CheckedTerm,
         mut node: usize,
         depth: usize,
+        want: Class,
     ) -> Result<Expression, TranslationError> {
         loop {
             let CheckedTerm::Reference { target } = term else {
-                return self.produce(term, node, depth);
+                return self.produce(term, node, depth, want);
             };
             let Some(target_node) = self.lookup(target) else {
                 return Err(cannot_lower(node, "the reference target is not a node"));
@@ -523,11 +606,30 @@ impl<'a> Walker<'a> {
                     node = target_node;
                 }
                 Some(CheckedNodeKind::Value(ValueForm::Parameter)) => {
-                    if !self.is_boolean_type(&self.nodes[target_node].semantic_type) {
-                        return Err(cannot_lower(target_node, "the parameter is not Boolean"));
-                    }
+                    let semantic = &self.nodes[target_node].semantic_type;
+                    let value_type = match want {
+                        Class::Boolean if self.is_boolean_type(semantic) => ValueType::Boolean,
+                        Class::Boolean => {
+                            return Err(cannot_lower(target_node, "the parameter is not Boolean"))
+                        }
+                        Class::Integer
+                            if self.lookup(semantic).and_then(|index| self.kind(index))
+                                == Some(CheckedNodeKind::BoundedDomain(
+                                    BoundedDomainForm::IntegerRange,
+                                )) =>
+                        {
+                            ValueType::integer(self.integer_type(semantic, target_node)?)
+                        }
+                        Class::Integer => {
+                            return Err(cannot_lower(
+                                target_node,
+                                "the parameter is not an integer_range",
+                            ))
+                        }
+                    };
                     self.count(node, depth)?;
-                    self.parameters.insert(target_node);
+                    self.parameters.insert(target_node, value_type);
+                    self.saw_parameter = true;
                     return Ok(self.make(ExpressionKind::ValueReference {
                         name: parameter_symbol(target_node, node)?,
                         observation: StateObservation::Current,
@@ -536,7 +638,7 @@ impl<'a> Walker<'a> {
                 _ => {
                     return Err(cannot_lower(
                         target_node,
-                        "the node is neither an expression, a literal nor a Boolean parameter",
+                        "the node is neither an expression, a literal nor a parameter",
                     ))
                 }
             }
@@ -548,32 +650,68 @@ impl<'a> Walker<'a> {
         term: &'a CheckedTerm,
         node: usize,
         depth: usize,
+        want: Class,
     ) -> Result<Expression, TranslationError> {
         match term {
             CheckedTerm::Literal { type_id, .. } => {
-                let value = match term.literal_read().map(|read| read.value) {
-                    Some(CheckedLiteralValue::Boolean(value)) if self.is_boolean_type(type_id) => {
-                        value
+                let kind = match (term.literal_read().map(|read| read.value), want) {
+                    (Some(CheckedLiteralValue::Boolean(value)), Class::Boolean)
+                        if self.is_boolean_type(type_id) =>
+                    {
+                        ExpressionKind::BooleanLiteral { value }
                     }
-                    _ => return Err(cannot_lower(node, "the literal is not a Boolean literal")),
+                    (Some(CheckedLiteralValue::Integer(number)), Class::Integer)
+                        if self.class_of_type(type_id) == Some(Class::Integer) =>
+                    {
+                        let value = number
+                            .to_string()
+                            .parse::<i128>()
+                            .map_err(|_| cannot_lower(node, "the literal exceeds 128 bits"))?;
+                        ExpressionKind::IntegerLiteral {
+                            value,
+                            value_type: self.integer_type(type_id, node)?,
+                        }
+                    }
+                    _ => {
+                        return Err(cannot_lower(
+                            node,
+                            format!("the literal is not a {} literal", want.name()),
+                        ))
+                    }
                 };
                 self.count(node, depth)?;
-                Ok(self.make(ExpressionKind::BooleanLiteral { value }))
+                Ok(self.make(kind))
             }
             CheckedTerm::Application {
                 operation,
                 arguments,
+                result_type,
                 ..
             } => {
                 let Some(identity) = operation.identity() else {
                     return Err(cannot_lower(node, "the operation has no catalog identity"));
                 };
                 let Some(operation) = Operation::from_identity(identity) else {
+                    let message = match identity {
+                        OP_INT_DIV | OP_INT_REM | OP_INT_MOD => {
+                            format!("operation {identity} is not linear integer arithmetic")
+                        }
+                        _ => format!("operation {identity} is outside the supported subset"),
+                    };
+                    return Err(cannot_lower(node, message));
+                };
+                if operation.result() != want
+                    || self.class_of_type(result_type) != Some(operation.result())
+                {
                     return Err(cannot_lower(
                         node,
-                        format!("operation {identity} is outside the Boolean subset"),
+                        format!(
+                            "operation {identity} yields a {} where a {} is required",
+                            operation.result().name(),
+                            want.name()
+                        ),
                     ));
-                };
+                }
                 if arguments.len() != operation.arity() {
                     return Err(cannot_lower(
                         node,
@@ -581,9 +719,25 @@ impl<'a> Walker<'a> {
                     ));
                 }
                 self.count(node, depth)?;
+                let outer = std::mem::replace(&mut self.saw_parameter, false);
                 let mut operands = Vec::with_capacity(arguments.len());
+                let mut parametric = 0_usize;
                 for argument in arguments {
-                    operands.push(self.expression(argument, node, depth + 1)?);
+                    self.saw_parameter = false;
+                    operands.push(self.expression(
+                        argument,
+                        node,
+                        depth + 1,
+                        operation.operand(),
+                    )?);
+                    parametric += usize::from(self.saw_parameter);
+                }
+                self.saw_parameter = outer || parametric > 0;
+                if operation.is_product() && parametric > 1 {
+                    return Err(cannot_lower(
+                        node,
+                        "a product of two terms that contain parameters is not linear",
+                    ));
                 }
                 let kind = operation
                     .build(operands)
@@ -631,43 +785,100 @@ fn cannot_lower(node: usize, message: impl Into<String>) -> TranslationError {
     TranslationError::at_node(TranslationErrorKind::CannotLower, node, message)
 }
 
-/// A supported operation of the Boolean subset, by catalog identity.
+/// The class of a term: what a Boolean or an integer operation takes and yields.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Class {
+    Boolean,
+    Integer,
+}
+
+impl Class {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Boolean => "Boolean",
+            Self::Integer => "integer",
+        }
+    }
+}
+
+/// A supported operation, by catalog identity.
 #[derive(Clone, Copy)]
 enum Operation {
     Not,
+    Negate,
     Binary(Binary),
 }
 
 #[derive(Clone, Copy)]
 enum Binary {
     Boolean(BooleanOperator),
-    Compare(ComparisonOperator),
+    /// A comparison of two terms of the given class.
+    Compare(ComparisonOperator, Class),
+    Numeric(NumericOperator),
 }
 
 impl Operation {
     fn from_identity(identity: &str) -> Option<Self> {
+        use Class::{Boolean, Integer};
         Some(match identity {
             OP_NOT => Self::Not,
             OP_AND => Self::Binary(Binary::Boolean(BooleanOperator::TotalAnd)),
             OP_OR => Self::Binary(Binary::Boolean(BooleanOperator::TotalOr)),
             OP_IMPLIES => Self::Binary(Binary::Boolean(BooleanOperator::Implication)),
-            OP_EQ => Self::Binary(Binary::Compare(ComparisonOperator::Equal)),
-            OP_NE => Self::Binary(Binary::Compare(ComparisonOperator::NotEqual)),
+            OP_EQ => Self::Binary(Binary::Compare(ComparisonOperator::Equal, Boolean)),
+            OP_NE => Self::Binary(Binary::Compare(ComparisonOperator::NotEqual, Boolean)),
+            OP_INT_NEGATE => Self::Negate,
+            OP_INT_ADD => Self::Binary(Binary::Numeric(NumericOperator::Add)),
+            OP_INT_SUB => Self::Binary(Binary::Numeric(NumericOperator::Subtract)),
+            OP_INT_MUL => Self::Binary(Binary::Numeric(NumericOperator::Multiply)),
+            OP_INT_EQ => Self::Binary(Binary::Compare(ComparisonOperator::Equal, Integer)),
+            OP_INT_NE => Self::Binary(Binary::Compare(ComparisonOperator::NotEqual, Integer)),
+            OP_INT_LT => Self::Binary(Binary::Compare(ComparisonOperator::Less, Integer)),
+            OP_INT_LE => Self::Binary(Binary::Compare(ComparisonOperator::LessEqual, Integer)),
+            OP_INT_GT => Self::Binary(Binary::Compare(ComparisonOperator::Greater, Integer)),
+            OP_INT_GE => Self::Binary(Binary::Compare(ComparisonOperator::GreaterEqual, Integer)),
             _ => return None,
         })
     }
 
     const fn arity(self) -> usize {
         match self {
-            Self::Not => 1,
+            Self::Not | Self::Negate => 1,
             Self::Binary(_) => 2,
         }
+    }
+
+    /// The class of the result.
+    const fn result(self) -> Class {
+        match self {
+            Self::Negate | Self::Binary(Binary::Numeric(_)) => Class::Integer,
+            _ => Class::Boolean,
+        }
+    }
+
+    /// The class of every operand.
+    const fn operand(self) -> Class {
+        match self {
+            Self::Not | Self::Binary(Binary::Boolean(_)) => Class::Boolean,
+            Self::Negate | Self::Binary(Binary::Numeric(_)) => Class::Integer,
+            Self::Binary(Binary::Compare(_, class)) => class,
+        }
+    }
+
+    const fn is_product(self) -> bool {
+        matches!(
+            self,
+            Self::Binary(Binary::Numeric(NumericOperator::Multiply))
+        )
     }
 
     /// The expression over the translated operands, `None` for a wrong operand count.
     fn build(self, mut operands: Vec<Expression>) -> Option<ExpressionKind> {
         match self {
             Self::Not => Some(ExpressionKind::BooleanNot {
+                operand: Box::new(operands.pop().filter(|_| operands.is_empty())?),
+            }),
+            Self::Negate => Some(ExpressionKind::NumericNegate {
                 operand: Box::new(operands.pop().filter(|_| operands.is_empty())?),
             }),
             Self::Binary(binary) => {
@@ -679,7 +890,12 @@ impl Operation {
                         left,
                         right,
                     },
-                    Binary::Compare(operator) => ExpressionKind::Compare {
+                    Binary::Compare(operator, _) => ExpressionKind::Compare {
+                        operator,
+                        left,
+                        right,
+                    },
+                    Binary::Numeric(operator) => ExpressionKind::Numeric {
                         operator,
                         left,
                         right,

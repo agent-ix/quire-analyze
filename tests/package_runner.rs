@@ -1025,9 +1025,14 @@ fn untranslatable() -> (Vec<u8>, String) {
     let range = document.range();
     let a = document.parameter_of(&range);
     let b = document.parameter_of(&range);
-    let less = document.application("quire.op.integer.lt", &[&a, &b], "scalar_type/boolean");
+    let quotient = document.application("quire.op.integer.div", &[&a, &b], &range);
+    let less = document.application(
+        "quire.op.integer.lt",
+        &[&quotient, &b],
+        "scalar_type/boolean",
+    );
     let claim = document.claim(&less);
-    (document.bytes(&[&claim]), less)
+    (document.bytes(&[&claim]), quotient)
 }
 
 fn node_index(bytes: &[u8], label: &str) -> usize {
@@ -1349,4 +1354,67 @@ fn real_executor_and_real_solvers_give_a_conclusive_report() {
     );
     let bytes = fs::read(fixture.output()).expect("report");
     validate_report_document(&bytes).expect("valid report");
+}
+
+/// A dose bounded by a maximum, and the model that satisfies it; with `contradiction` the dose is
+/// also asserted to exceed the maximum.
+fn dose_package(contradiction: bool) -> Built {
+    let mut document = Document::new();
+    let range = document.range();
+    let dose = document.parameter_of(&range);
+    let max = document.parameter_of(&range);
+    let within = document.int_op("quire.op.integer.le", &[&dose, &max], "scalar_type/boolean");
+    let first = document.claim(&within);
+    let mut claims = vec![first];
+    if contradiction {
+        let above = document.int_op("quire.op.integer.gt", &[&dose, &max], "scalar_type/boolean");
+        claims.push(document.claim(&above));
+    }
+    let labels = claims.iter().map(String::as_str).collect::<Vec<_>>();
+    let bytes = document.bytes(&labels);
+    let package = match ContractPackageWireV1::read(
+        &bytes,
+        CheckedPackageReadLimits::bounded(),
+        &Default::default(),
+    ) {
+        ContractPackageReadResult::Admitted(package) => *package,
+        other => panic!("fixture refused: {other:?}"),
+    };
+    let translation = translate_analysis_claims(&package).expect("translation");
+    let definitions = translation
+        .environment()
+        .values()
+        .iter()
+        .map(|declaration| format!("(define-fun {} () Int 0)", declaration.name().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Built {
+        model: format!("sat\n(model {definitions})\n"),
+        bytes,
+    }
+}
+
+#[trace("FR-012-AC-1")]
+#[ignore = "needs VER-71 lowering"]
+#[test]
+fn a_dose_bounded_by_a_maximum_runs_end_to_end() {
+    let built = dose_package(false);
+    let fixture = Fixture::new(&built.bytes);
+    fixture.both(&built.model, &built.model);
+    let run = fixture.run();
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    let bytes = fs::read(fixture.output()).expect("report");
+    validate_report_document(&bytes).expect("report validates");
+}
+
+#[trace("FR-012-AC-2")]
+#[ignore = "needs VER-71 lowering"]
+#[test]
+fn contradictory_dose_claims_are_refuted() {
+    let built = dose_package(true);
+    let fixture = Fixture::new(&built.bytes);
+    fixture.both("unsat\n", "unsat\n");
+    let run = fixture.run();
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    assert_eq!(fixture.report()["differential"]["agreedStatus"], "refuted");
 }
