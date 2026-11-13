@@ -45,6 +45,12 @@ FAIL on two medium findings: the index edit corrupts a sentence, and FR-040-AC-1
 | --- | --- | --- | --- |
 | FND-005 | low | The new decision rule is fully determined by unsound findings, bounded fixes and external-tool support, so the fourth stated criterion (the cost of maintaining an unchecked algorithm) can never change the outcome although the AC says the reason is stated against all four. Fix: either let cost decide the remaining case (no unsound findings) or drop it from the criteria list. | spec/functional/FR-041-hybrid-reachability-review.md:28 |
 
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | medium | The new rule is total and its cases do not conflict, but two of its cases pick an impossible path. With no unsound finding and no established tool supporting the model class, keep-and-harden needs a differential test against an established engine on those models, which cannot exist, so the rule selects delegate-and-remove. With an unsound finding that has no bounded fix and no supporting tool, the first clause also selects delegate-and-remove. In both cases FR-041 and FR-042-AC-3 require delegating to an established tool that does not support the model class. Fix: state the outcome when no established tool supports the model class (for example, keep-and-harden with the differential test replaced by the TC-040 enumeration check, or remove the module and refuse hybrid requests without delegating). | spec/functional/FR-041-hybrid-reachability-review.md:28 |
+
 ## Dispositions
 
 Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
@@ -55,3 +61,9 @@ Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
 | FND-002 | fixed | - |
 | FND-003 | fixed | - |
 | FND-004 | fixed | - |
+
+Round 2, checked against fix commit cec5bd3 on ver-93-hybrid-spec.
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-005 | fixed | - |

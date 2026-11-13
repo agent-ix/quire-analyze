@@ -65,3 +65,10 @@ Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
 | FND-005 | fixed | - |
 | FND-006 | fixed | - |
 | FND-007 | fixed | - |
+
+Round 2, checked against fix commit cec5bd3 on ver-93-hybrid-spec.
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-008 | fixed | - |
+| FND-009 | fixed | - |
