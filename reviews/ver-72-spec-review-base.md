@@ -75,3 +75,21 @@ NFR-003-AC-1 are falsifiable and well targeted.
 | FND-009 | fixed | verified in 720b33c |
 | FND-010 | fixed | verified in 720b33c |
 | FND-011 | still-open | FR-009-AC-6 now says 'over the reader's byte limit', but the reader's limits are caller-supplied (CheckedPackageReadLimits) and FR-009 does not choose them, so the boundary is still unnamed. Naming CheckedPackageReadLimits::bounded() (1 MiB) would close it; see integrity FND-005. |
+
+## New findings (disposition pass 3)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-017 | medium | FR-009 says only that a non-completed producer-execute state is recorded 'as non-conclusive'. The report's engine outcome is the closed v2 set (sat, unsat, unknown, timed-out, cancelled, missing-executable, spawn-error, ..., unsupported-platform, io-error; schemas/differential-report-v2.schema.json), and CON-1 forbids changing it. No mapping is given from refused, failed (exit_code/signal/stdout_too_large/stderr_too_large), malformed_response, containment_failure, cancelled, unavailable, or a skipped query after a bad version run, to those values. The mapping changes the report's disposition: compare_solver_records treats only missing-executable and unsupported-platform as unavailable. The library also has no public SolverRecord constructor, since only execute_solver builds one. Gap 3 calls the library path 'outside this requirement', but run-package cannot render without a record built from process evidence. Fix: add the state-to-outcome table and state in Gap 3 that a SolverRecord-from-evidence constructor is required. | spec/functional/FR-009-package-runner.md Behavior / Gaps 3 |
+| FND-018 | low | FR-019 opens the capability root and the producer executable without following symbolic links in any path component. A --output parent or solver path that passes through a symlink (for example an alternatives link for a solver) is refused by producer-execute and surfaces as a non-conclusive exit 3 with no input diagnostic. Fix: canonicalize both paths before building the request, or refuse a symlinked path with exit 2. | spec/functional/FR-009-package-runner.md Behavior |
+
+## Dispositions (round 3)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-011 | fixed | verified in 665567a against code |
+| FND-012 | fixed | verified in 665567a against code |
+| FND-013 | fixed | verified in 665567a against code |
+| FND-014 | fixed | verified in 665567a against code |
+| FND-015 | fixed | verified in 665567a against code |
+| FND-016 | fixed | verified in 665567a against code |

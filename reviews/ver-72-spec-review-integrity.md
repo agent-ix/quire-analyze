@@ -57,3 +57,17 @@ non-conclusive, `4` publication) match `publish-report` in `src/main.rs`, and th
 | FND | outcome | reason |
 | --- | --- | --- |
 | FND-004 | fixed | verified in 720b33c |
+
+## New findings (disposition pass 3)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-007 | medium | Analysable clauses are claim nodes with form analysis_claim, but on quire-spec-language main no non-test source refers to ClaimForm::AnalysisClaim or the string analysis_claim; the only use is the admission corpus test qsl-package/src/emit/tests/admission_corpus.rs:774. No committed fixture contains one. A package lowered from the examples/checked-handoff units therefore has no analysable clause and exits 2. That makes the QSL-derived fixture of TC-015 unable to produce the exit 0 or 1 of AC-14 and case 15, and Gap 1 does not say so. Fix: state in Gap 1 that QSL emits no analysis_claim today, expect exit 2 for the QSL-lowered fixture, and run AC-14 on a tests/fixtures contract package. | spec/functional/FR-009-package-runner.md AC-14 / Gaps 1 |
+| FND-008 | low | The TC-015 lowering step names no requested node keys and no CompleteLoweringProfileV2, both required by CheckedPackageV2::lower. FR-009 also gives no exit class for a Boolean analysis_claim whose term the (still missing, Gap 2) translation cannot lower. Fix: name the lowering inputs, and state that an untranslatable term exits 2. | spec/test/TC-015-package-runner.md Test Procedure |
+
+## Dispositions (round 3)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-005 | fixed | verified in 665567a against code |
+| FND-006 | fixed | verified in 665567a against code |

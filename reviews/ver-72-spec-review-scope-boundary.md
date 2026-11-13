@@ -45,3 +45,9 @@ stated as the runner's own interface, with no new term.
 ## Correction (disposition pass 2)
 
 Correction to FND-003 (review pass): `producer-execute` is an existing command, specified by engineering-assurance FR-029 and FR-019 (src/producer_execution.rs, src/producer_execute_host.rs). The finding was right that the PR's self-defined term had no grounded content, but its proposed fix (delete the term and leave pass/fail to the caller) was wrong. The correct fix is the one 720b33c makes: cite the engineering-assurance contract by reference. The round-1 'fixed' outcome stands; no new row is added.
+
+## Dispositions (round 3)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-004 | fixed | verified in 665567a against code |
