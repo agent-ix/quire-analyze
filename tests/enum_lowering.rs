@@ -2,10 +2,11 @@
 
 #![cfg(target_os = "linux")]
 
+mod fake_script;
+
 use ix_trace_rs::trace;
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -321,10 +322,7 @@ fn response_record(
     let body = format!(
         "#!/bin/sh\nif [ \"$1\" = \"-version\" ] || [ \"$1\" = \"--version\" ]; then printf 'fake 1.0\\n'; exit 0; fi\n/bin/cat >/dev/null; printf '%s' '{response}'\n"
     );
-    fs::write(&path, body).expect("write solver");
-    let mut permissions = fs::metadata(&path).expect("metadata").permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).expect("executable");
+    fake_script::install(&path, &body);
     let config = SolverConfig::new(engine, &path, AdapterLimits::default()).expect("config");
     execute_solver(query, &config, &CancellationToken::default())
 }

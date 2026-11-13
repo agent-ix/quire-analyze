@@ -6,8 +6,9 @@ use std::{
 use quire_contract_model::{
     BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
     DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType,
-    NumericOperator, OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation,
-    SymbolName, TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
+    NumericOperator, OverflowPolicy, RecordDeclaration, RecordLiteralField, Requirement,
+    RequirementRef, SourceSpan, StateObservation, SymbolName, TypeDeclaration, TypedExpression,
+    ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -23,6 +24,10 @@ pub const SMTLIB2_DATATYPE_LOGIC: &str = "QF_UFDTLIA";
 pub const MAX_ENUM_VARIANTS: usize = 256;
 /// Bound on datatypes declared in one query.
 pub const MAX_QUERY_DATATYPES: usize = 256;
+/// Bound on fields of one record.
+pub const MAX_RECORD_FIELDS: usize = 64;
+/// Bound on the nesting depth of datatypes.
+pub const MAX_DATATYPE_DEPTH: usize = 8;
 /// Bound on a generated query before any solver is invoked.
 pub const MAX_QUERY_BYTES: usize = 16 * 1024 * 1024;
 /// Bound on statements in one query.
@@ -459,6 +464,13 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "enum_literal",
         "enum_equality",
         "enum_inequality",
+        "record",
+        "record_equality",
+        "field_access",
+        "option",
+        "option_equality",
+        "option_presence",
+        "option_access",
     ],
     unsupported_constructs: &[
         "non_linear_arithmetic",
@@ -468,11 +480,7 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "constant_overflow",
         "rational",
         "text",
-        "record",
-        "option",
         "collection",
-        "field_access",
-        "option_access",
         "collection_access",
         "pure_function_call",
         "rational_arithmetic",
@@ -527,11 +535,168 @@ pub struct EnumConstructor {
     pub symbol: String,
 }
 
+/// The encoded symbols of one record datatype, derived from the declaration environment.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordSortMap {
+    /// The SMT-LIB sort symbol.
+    pub sort: String,
+    /// The declaring package.
+    pub package: String,
+    /// The declared record name.
+    pub name: String,
+    /// The SMT-LIB constructor symbol.
+    pub constructor: String,
+    /// The fields, in ascending field-name order.
+    pub fields: Vec<RecordFieldMap>,
+}
+
+/// One record field and its encoded selector symbol.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordFieldMap {
+    /// The declared field name.
+    pub field: String,
+    /// The SMT-LIB selector symbol.
+    pub selector: String,
+    /// The SMT-LIB sort of the field: `Bool`, `Int` or a datatype sort symbol.
+    pub sort: String,
+}
+
+/// The encoded symbols of one option datatype. One datatype serves every option over the same
+/// payload sort.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OptionSortMap {
+    /// The SMT-LIB sort symbol.
+    pub sort: String,
+    /// The SMT-LIB sort of the payload: `Bool`, `Int` or a datatype sort symbol.
+    pub payload_sort: String,
+    /// The SMT-LIB symbol of the `none` constructor.
+    pub none: String,
+    /// The SMT-LIB symbol of the `some` constructor.
+    pub some: String,
+    /// The SMT-LIB symbol of the `some` selector.
+    pub selector: String,
+}
+
 /// The datatypes and datatype-sorted variables a query uses.
 #[derive(Default)]
 struct DatatypeSet {
     enums: BTreeMap<String, EnumSortMap>,
+    records: BTreeMap<String, RecordSortMap>,
+    options: BTreeMap<String, OptionSortMap>,
     variable_sorts: BTreeMap<String, String>,
+    /// The range predicates of typed shapes with integer parts, by predicate symbol.
+    range_predicates: BTreeMap<String, RangePredicate>,
+    /// The predicate of each typed shape already examined, by shape identity; `None` when the
+    /// shape has no integer part.
+    range_checked: BTreeMap<String, Option<String>>,
+    /// The range predicate asserted for each datatype-sorted variable, by variable symbol.
+    variable_predicates: BTreeMap<String, String>,
+}
+
+/// A non-recursive predicate that holds when every integer part of a value is in its range.
+struct RangePredicate {
+    sort: String,
+    body: String,
+    /// The predicates the body calls.
+    dependencies: Vec<String>,
+}
+
+impl DatatypeSet {
+    fn len(&self) -> usize {
+        self.enums.len() + self.records.len() + self.options.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Every declared datatype sort symbol, ascending.
+    fn sort_symbols(&self) -> Vec<String> {
+        let mut symbols: Vec<String> = self
+            .enums
+            .keys()
+            .chain(self.records.keys())
+            .chain(self.options.keys())
+            .cloned()
+            .collect();
+        symbols.sort_unstable();
+        symbols
+    }
+
+    /// The range predicate definitions in dependency order, ties broken by the predicate symbol.
+    fn range_definitions(&self) -> Vec<String> {
+        let mut pending: Vec<(&String, &RangePredicate)> = self.range_predicates.iter().collect();
+        let mut ordered = Vec::with_capacity(pending.len());
+        while let Some(position) = pending.iter().position(|(_, predicate)| {
+            predicate
+                .dependencies
+                .iter()
+                .all(|dependency| !pending.iter().any(|(symbol, _)| *symbol == dependency))
+        }) {
+            let (symbol, predicate) = pending.remove(position);
+            ordered.push(format!(
+                "(define-fun {symbol} ((x {})) Bool {})\n",
+                predicate.sort, predicate.body
+            ));
+        }
+        ordered
+    }
+
+    /// The declarations in dependency order, ties broken by the encoded sort symbol.
+    fn declarations(&self) -> Vec<String> {
+        let mut pending: BTreeMap<String, (Vec<&str>, String)> = BTreeMap::new();
+        for sort in self.enums.values() {
+            let mut text = format!("(declare-datatypes (({} 0)) ((", sort.sort);
+            for (index, constructor) in sort.constructors.iter().enumerate() {
+                if index > 0 {
+                    text.push(' ');
+                }
+                text.push('(');
+                text.push_str(&constructor.symbol);
+                text.push(')');
+            }
+            text.push_str(")))\n");
+            pending.insert(sort.sort.clone(), (Vec::new(), text));
+        }
+        for sort in self.records.values() {
+            let mut text = format!(
+                "(declare-datatypes (({} 0)) ((({}",
+                sort.sort, sort.constructor
+            );
+            for field in &sort.fields {
+                text.push_str(&format!(" ({} {})", field.selector, field.sort));
+            }
+            text.push_str("))))\n");
+            let dependencies = sort
+                .fields
+                .iter()
+                .map(|field| field.sort.as_str())
+                .collect();
+            pending.insert(sort.sort.clone(), (dependencies, text));
+        }
+        for sort in self.options.values() {
+            let text = format!(
+                "(declare-datatypes (({} 0)) ((({}) ({} ({} {})))))\n",
+                sort.sort, sort.none, sort.some, sort.selector, sort.payload_sort
+            );
+            pending.insert(sort.sort.clone(), (vec![sort.payload_sort.as_str()], text));
+        }
+        let mut ordered = Vec::with_capacity(pending.len());
+        while let Some(symbol) = pending
+            .iter()
+            .find(|(_, (dependencies, _))| {
+                dependencies
+                    .iter()
+                    .all(|dependency| !pending.contains_key(*dependency))
+            })
+            .map(|(symbol, _)| symbol.clone())
+        {
+            if let Some((_, text)) = pending.remove(&symbol) {
+                ordered.push(text);
+            }
+        }
+        ordered
+    }
 }
 
 /// A concrete model assignment: Boolean and integer values by query symbol.
@@ -548,8 +713,8 @@ pub(crate) enum ReplayFault {
     Overflow,
     /// A referenced symbol has no value in the assignment.
     Unassigned,
-    /// The expression involves an enum term, which is not replayed yet (VER-87).
-    EnumUnreplayed,
+    /// The expression involves a datatype term, which is not replayed yet (VER-87).
+    DatatypeUnreplayed,
 }
 
 /// An integer-valued replay term, evaluated with checked 128-bit signed arithmetic.
@@ -560,7 +725,12 @@ pub(crate) enum ReplayTerm {
     Negate(Box<Self>),
     Add(Box<Self>, Box<Self>),
     Subtract(Box<Self>, Box<Self>),
-    Scale { factor: i128, term: Box<Self> },
+    Scale {
+        factor: i128,
+        term: Box<Self>,
+    },
+    /// A term read out of a datatype, which is not replayed yet (VER-87).
+    DatatypeUnreplayed,
 }
 
 impl ReplayTerm {
@@ -588,6 +758,7 @@ impl ReplayTerm {
                 .evaluate(values)?
                 .checked_mul(*factor)
                 .ok_or(ReplayFault::Overflow),
+            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
         }
     }
 }
@@ -602,9 +773,9 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
-    /// A term over an enum sort. Enum witnesses are not replayed yet (VER-87), so it never
+    /// A term over a datatype sort. Datatype witnesses are not replayed yet (VER-87), so it never
     /// evaluates to a verdict.
-    EnumUnreplayed,
+    DatatypeUnreplayed,
     /// A comparison of two integer terms.
     Compare {
         operator: ComparisonOperator,
@@ -630,7 +801,7 @@ impl ReplayExpression {
             Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
-            Self::EnumUnreplayed => Err(ReplayFault::EnumUnreplayed),
+            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
             Self::Compare {
                 operator,
                 left,
@@ -669,7 +840,10 @@ pub struct QueryBundle {
     assertions: Vec<AssertionMap>,
     variables: Vec<VariableMap>,
     enum_sorts: Vec<EnumSortMap>,
-    enum_variables: Vec<String>,
+    record_sorts: Vec<RecordSortMap>,
+    option_sorts: Vec<OptionSortMap>,
+    datatype_sorts: Vec<String>,
+    datatype_variables: Vec<String>,
     replay_assertions: Vec<ReplayAssertion>,
     integer_ranges: BTreeMap<String, (i128, i128)>,
 }
@@ -721,14 +895,29 @@ impl QueryBundle {
         &self.variables
     }
 
-    /// The symbols of enum-sorted variables, in ascending order.
-    pub(crate) fn enum_variables(&self) -> &[String] {
-        &self.enum_variables
+    /// The symbols of datatype-sorted variables, in ascending order.
+    pub(crate) fn datatype_variables(&self) -> &[String] {
+        &self.datatype_variables
     }
 
-    /// The enum datatypes the query declares, in declaration order.
+    /// Every datatype sort symbol the query declares, in ascending order.
+    pub(crate) fn datatype_sorts(&self) -> &[String] {
+        &self.datatype_sorts
+    }
+
+    /// The enum datatypes the query declares, in ascending sort-symbol order.
     pub fn enum_sorts(&self) -> &[EnumSortMap] {
         &self.enum_sorts
+    }
+
+    /// The record datatypes the query declares, in ascending sort-symbol order.
+    pub fn record_sorts(&self) -> &[RecordSortMap] {
+        &self.record_sorts
+    }
+
+    /// The option datatypes the query declares, in ascending sort-symbol order.
+    pub fn option_sorts(&self) -> &[OptionSortMap] {
+        &self.option_sorts
     }
 
     pub(crate) fn replay_assertions(&self) -> &[ReplayAssertion] {
@@ -885,26 +1074,19 @@ fn lower_statement_specs(
     query.push_str("(set-info :source |");
     query.push_str(SMTLIB2_PROFILE);
     query.push_str("|)\n(set-option :produce-models true)\n(set-logic ");
-    let logic = if datatypes.enums.is_empty() {
+    let logic = if datatypes.is_empty() {
         SMTLIB2_LOGIC
     } else {
         SMTLIB2_DATATYPE_LOGIC
     };
     query.push_str(logic);
     query.push_str(")\n");
-    for sort in datatypes.enums.values() {
-        query.push_str("(declare-datatypes ((");
-        query.push_str(&sort.sort);
-        query.push_str(" 0)) ((");
-        for (index, constructor) in sort.constructors.iter().enumerate() {
-            if index > 0 {
-                query.push(' ');
-            }
-            query.push('(');
-            query.push_str(&constructor.symbol);
-            query.push(')');
-        }
-        query.push_str(")))\n");
+    for declaration in datatypes
+        .declarations()
+        .into_iter()
+        .chain(datatypes.range_definitions())
+    {
+        query.push_str(&declaration);
     }
     for symbol in variables.keys() {
         query.push_str("(declare-fun ");
@@ -925,6 +1107,9 @@ fn lower_statement_specs(
             numeral(*minimum),
             numeral(*maximum)
         ));
+    }
+    for (symbol, predicate) in &datatypes.variable_predicates {
+        query.push_str(&format!("(assert ({predicate} {symbol}))\n"));
     }
     let mut assertions = Vec::with_capacity(lowered.len());
     let mut replay_assertions = Vec::with_capacity(lowered.len());
@@ -978,8 +1163,11 @@ fn lower_statement_specs(
         requests_model,
         assertions,
         variables: variables.into_values().collect(),
+        datatype_sorts: datatypes.sort_symbols(),
         enum_sorts: datatypes.enums.into_values().collect(),
-        enum_variables: datatypes.variable_sorts.into_keys().collect(),
+        record_sorts: datatypes.records.into_values().collect(),
+        option_sorts: datatypes.options.into_values().collect(),
+        datatype_variables: datatypes.variable_sorts.into_keys().collect(),
         replay_assertions,
         integer_ranges: ranges,
     })
@@ -1050,6 +1238,7 @@ fn lower_expression(
         variables,
         ranges,
         datatypes,
+        built_records: BTreeMap::new(),
         nodes: 0,
     };
     state.lower(&statement.expression, 1, &ExprPath::ROOT)
@@ -1062,6 +1251,8 @@ struct LowerState<'a> {
     variables: &'a mut BTreeMap<String, VariableMap>,
     ranges: &'a mut BTreeMap<String, (i128, i128)>,
     datatypes: &'a mut DatatypeSet,
+    /// The record sorts already built for this statement's environment, by record name.
+    built_records: BTreeMap<SymbolName, BuiltSort>,
     nodes: usize,
 }
 
@@ -1104,8 +1295,21 @@ impl LowerState<'_> {
                     })?;
                 Ok(LoweredExpression {
                     smt: constructor,
-                    replay: ReplayExpression::EnumUnreplayed,
+                    replay: ReplayExpression::DatatypeUnreplayed,
                 })
+            }
+            ExpressionKind::RecordLiteral { record, fields } => {
+                self.lower_record_literal(record, fields, depth, path)
+            }
+            ExpressionKind::FieldAccess { base, field } => {
+                self.lower_field_access(base, field, depth, path)
+            }
+            ExpressionKind::OptionNone { value_type } => self.lower_option_none(value_type),
+            ExpressionKind::OptionSome { value_type, value } => {
+                self.lower_option_some(value_type, value, depth, path)
+            }
+            ExpressionKind::IsPresent { option } | ExpressionKind::Unwrap { option } => {
+                self.lower_option_read(expression, option, depth, path)
             }
             ExpressionKind::BooleanNot { operand } => {
                 let operand = self.lower(operand, depth + 1, &path.child("operand"))?;
@@ -1144,97 +1348,240 @@ impl LowerState<'_> {
                 operator,
                 left,
                 right,
-            } => {
-                if self.is_integer_term(left) {
-                    return self.lower_integer_comparison(*operator, left, right, depth, path);
-                }
-                if !matches!(
-                    operator,
-                    ComparisonOperator::Equal | ComparisonOperator::NotEqual
-                ) {
-                    return Err(unsupported(
-                        &path.render(),
-                        "ordering comparison of non-integer terms is unsupported",
-                    ));
-                }
-                let left_sort = self.term_sort(left);
-                let right_sort = self.term_sort(right);
-                let left = self.lower(left, depth + 1, &path.child("left"))?;
-                let right = self.lower(right, depth + 1, &path.child("right"))?;
-                if left_sort.is_none() || left_sort != right_sort {
-                    return Err(unsupported(
-                        &path.render(),
-                        "comparison operands must both be Boolean or both of one enum",
-                    ));
-                }
-                if matches!(left_sort, Some(TermSort::Enum(_))) {
-                    let name = if *operator == ComparisonOperator::Equal {
-                        "="
-                    } else {
-                        "distinct"
-                    };
-                    return Ok(LoweredExpression {
-                        smt: format!("({name} {} {})", left.smt, right.smt),
-                        replay: ReplayExpression::EnumUnreplayed,
-                    });
-                }
-                Ok(if *operator == ComparisonOperator::Equal {
-                    LoweredExpression {
-                        smt: format!("(= {} {})", left.smt, right.smt),
-                        replay: ReplayExpression::Equal(
-                            Box::new(left.replay),
-                            Box::new(right.replay),
-                        ),
-                    }
-                } else {
-                    LoweredExpression {
-                        smt: format!("(not (= {} {}))", left.smt, right.smt),
-                        replay: ReplayExpression::NotEqual(
-                            Box::new(left.replay),
-                            Box::new(right.replay),
-                        ),
-                    }
-                })
-            }
+            } => self.lower_comparison(operator, left, right, depth, path),
             other => Err(unsupported(&path.render(), construct_name(other))),
         }
+    }
+
+    fn lower_record_literal(
+        &mut self,
+        record: &SymbolName,
+        fields: &[RecordLiteralField],
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let built = self.record_sort(record, 1, "")?;
+        let map = self.datatypes.records[&built.sort].clone();
+        if fields.len() != map.fields.len() {
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                "expression.record_literal",
+                "validated record literal no longer matches its declaration",
+            ));
+        }
+        let mut smt = format!("({}", map.constructor);
+        for field in &map.fields {
+            let value = fields
+                .iter()
+                .find(|candidate| candidate.name().as_str() == field.field)
+                .ok_or_else(|| {
+                    LoweringError::new(
+                        LoweringErrorCode::InvalidStatement,
+                        "expression.record_literal",
+                        "validated record field no longer resolves",
+                    )
+                })?;
+            let value = self.lower_term(value.value(), depth + 1, &path.child("field"))?;
+            smt.push(' ');
+            smt.push_str(&value.smt);
+        }
+        smt.push(')');
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_field_access(
+        &mut self,
+        base: &Expression,
+        field: &SymbolName,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let Some(ValueType::Record { name }) = term_type(&self.statement.environment, base) else {
+            return Err(unsupported(
+                &path.render(),
+                "field access requires a record-typed base",
+            ));
+        };
+        let base = self.lower(base, depth + 1, &path.child("base"))?;
+        let built = self.record_sort(&name, 1, "")?;
+        let selector = self.datatypes.records[&built.sort]
+            .fields
+            .iter()
+            .find(|candidate| candidate.field == field.as_str())
+            .map(|candidate| candidate.selector.clone())
+            .ok_or_else(|| {
+                LoweringError::new(
+                    LoweringErrorCode::InvalidStatement,
+                    "expression.field_access",
+                    "validated record field no longer resolves",
+                )
+            })?;
+        Ok(LoweredExpression {
+            smt: format!("({selector} {})", base.smt),
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_none(
+        &mut self,
+        value_type: &ValueType,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let map = self.option_map(value_type, "expression.option_none")?;
+        Ok(LoweredExpression {
+            smt: map.none,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_some(
+        &mut self,
+        value_type: &ValueType,
+        value: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let map = self.option_map(value_type, "expression.option_some")?;
+        let value = self.lower_term(value, depth + 1, &path.child("value"))?;
+        Ok(LoweredExpression {
+            smt: format!("({} {})", map.some, value.smt),
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_read(
+        &mut self,
+        expression: &Expression,
+        option: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let Some(option_type @ ValueType::Option { .. }) =
+            term_type(&self.statement.environment, option)
+        else {
+            return Err(unsupported(
+                &path.render(),
+                "option access requires an option-typed operand",
+            ));
+        };
+        let operand = self.lower(option, depth + 1, &path.child("option"))?;
+        let map = self.option_map(&option_type, "expression.option")?;
+        let smt = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
+            format!("((_ is {}) {})", map.some, operand.smt)
+        } else {
+            format!("({} {})", map.selector, operand.smt)
+        };
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_comparison(
+        &mut self,
+        operator: &ComparisonOperator,
+        left: &Expression,
+        right: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        if self.is_integer_term(left) {
+            return self.lower_integer_comparison(*operator, left, right, depth, path);
+        }
+        if !matches!(
+            operator,
+            ComparisonOperator::Equal | ComparisonOperator::NotEqual
+        ) {
+            return Err(unsupported(
+                &path.render(),
+                "ordering comparison of non-integer terms is unsupported",
+            ));
+        }
+        let environment = &self.statement.environment;
+        let left_type = term_type(environment, left);
+        let right_type = term_type(environment, right);
+        let left = self.lower(left, depth + 1, &path.child("left"))?;
+        let right = self.lower(right, depth + 1, &path.child("right"))?;
+        let left_sort = self.comparable_sort(left_type.as_ref())?;
+        let right_sort = self.comparable_sort(right_type.as_ref())?;
+        let Some(sort) = left_sort.filter(|sort| right_sort.as_ref() == Some(sort)) else {
+            return Err(unsupported(
+                &path.render(),
+                "comparison operands must both be Boolean or both of one datatype sort",
+            ));
+        };
+        if sort != "Bool" {
+            let name = if *operator == ComparisonOperator::Equal {
+                "="
+            } else {
+                "distinct"
+            };
+            return Ok(LoweredExpression {
+                smt: format!("({name} {} {})", left.smt, right.smt),
+                replay: ReplayExpression::DatatypeUnreplayed,
+            });
+        }
+        Ok(if *operator == ComparisonOperator::Equal {
+            LoweredExpression {
+                smt: format!("(= {} {})", left.smt, right.smt),
+                replay: ReplayExpression::Equal(Box::new(left.replay), Box::new(right.replay)),
+            }
+        } else {
+            LoweredExpression {
+                smt: format!("(not (= {} {}))", left.smt, right.smt),
+                replay: ReplayExpression::NotEqual(Box::new(left.replay), Box::new(right.replay)),
+            }
+        })
     }
 
     /// Whether the term is integer-typed. Validation makes both comparison operands agree, so
     /// the left operand decides.
     fn is_integer_term(&self, expression: &Expression) -> bool {
-        match expression.kind() {
-            ExpressionKind::IntegerLiteral { .. } => true,
-            ExpressionKind::Numeric { left, .. } => self.is_integer_term(left),
-            ExpressionKind::NumericNegate { operand } => self.is_integer_term(operand),
-            ExpressionKind::ValueReference { name, .. } => self.integer_type(name).is_some(),
-            _ => false,
-        }
+        matches!(
+            term_type(&self.statement.environment, expression),
+            Some(ValueType::Integer { .. })
+        )
     }
 
-    /// The sort of a lowered non-integer term, when it is Boolean or an enum.
-    fn term_sort(&self, expression: &Expression) -> Option<TermSort> {
-        match expression.kind() {
-            ExpressionKind::BooleanLiteral { .. }
-            | ExpressionKind::BooleanNot { .. }
-            | ExpressionKind::Boolean { .. }
-            | ExpressionKind::Compare { .. } => Some(TermSort::Bool),
-            ExpressionKind::EnumLiteral { enumeration, .. } => {
-                Some(TermSort::Enum(enumeration.clone()))
-            }
-            ExpressionKind::ValueReference { name, .. } => self
-                .statement
-                .environment
-                .values()
-                .iter()
-                .find(|value| value.name() == name)
-                .and_then(|declaration| match declaration.value_type() {
-                    ValueType::Boolean => Some(TermSort::Bool),
-                    ValueType::Enum { name } => Some(TermSort::Enum(name.clone())),
-                    _ => None,
-                }),
-            _ => None,
+    /// Lowers a term of any exact sort: an integer term through linear folding, anything else
+    /// through the expression lowering.
+    fn lower_term(
+        &mut self,
+        expression: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        if !self.is_integer_term(expression) {
+            return self.lower(expression, depth, path);
         }
+        let environment = &self.statement.environment;
+        let types = |name: &SymbolName| integer_declaration_type(environment, name);
+        let terms = |term: &Expression| datatype_integer_type(environment, term);
+        let folded = fold_integer(expression, path, &types, &terms, depth, &mut self.nodes)?;
+        let (smt, _) = self.emit(&folded.tree)?;
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    /// The SMT-LIB sort of a comparable term type: `Bool`, or the symbol of an enum, record or
+    /// option datatype. Any other type is not comparable.
+    fn comparable_sort(
+        &mut self,
+        value_type: Option<&ValueType>,
+    ) -> Result<Option<String>, LoweringError> {
+        Ok(match value_type {
+            Some(ValueType::Boolean) => Some("Bool".to_owned()),
+            Some(
+                datatype @ (ValueType::Enum { .. }
+                | ValueType::Record { .. }
+                | ValueType::Option { .. }),
+            ) => Some(self.sort_of(datatype, 1, "")?.sort),
+            _ => None,
+        })
     }
 
     /// Declares the enum datatype of the statement environment on first use and returns its map.
@@ -1277,13 +1624,7 @@ impl LowerState<'_> {
         if let Some(existing) = self.datatypes.enums.get(&sort) {
             return Ok(existing.clone());
         }
-        if self.datatypes.enums.len() >= MAX_QUERY_DATATYPES {
-            return Err(LoweringError::new(
-                LoweringErrorCode::ResourceLimit,
-                "type.datatypes",
-                "datatype count exceeds the public bound",
-            ));
-        }
+        self.reserve_datatype()?;
         let map = EnumSortMap {
             sort: sort.clone(),
             package: package.to_owned(),
@@ -1300,8 +1641,300 @@ impl LowerState<'_> {
         Ok(map)
     }
 
-    fn integer_type(&self, name: &SymbolName) -> Option<IntegerType> {
-        integer_declaration_type(&self.statement.environment, name)
+    /// Refuses a datatype that would exceed the per-query bound.
+    fn reserve_datatype(&self) -> Result<(), LoweringError> {
+        if self.datatypes.len() >= MAX_QUERY_DATATYPES {
+            return Err(LoweringError::new(
+                LoweringErrorCode::ResourceLimit,
+                "type.datatypes",
+                "datatype count exceeds the public bound",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Builds the sort of a value type, declaring every datatype it needs. `level` is the nesting
+    /// depth of the type within the outermost datatype and `path` names it for a refusal.
+    fn sort_of(
+        &mut self,
+        value_type: &ValueType,
+        level: usize,
+        path: &str,
+    ) -> Result<BuiltSort, LoweringError> {
+        match value_type {
+            ValueType::Boolean => Ok(BuiltSort {
+                sort: "Bool".to_owned(),
+                height: 0,
+                identity: "bool".to_owned(),
+            }),
+            ValueType::Integer { value } => Ok(BuiltSort {
+                sort: "Int".to_owned(),
+                height: 0,
+                identity: format!(
+                    "int:{}:{}:{}:{}",
+                    match value.domain() {
+                        IntegerDomain::Signed => "signed",
+                        IntegerDomain::Unsigned => "unsigned",
+                    },
+                    value.minimum(),
+                    value.maximum(),
+                    match value.overflow() {
+                        OverflowPolicy::Reject => "reject",
+                        OverflowPolicy::Saturate => "saturate",
+                    }
+                ),
+            }),
+            ValueType::Text | ValueType::Rational { .. } | ValueType::Collection { .. } => {
+                Err(LoweringError::new(
+                    LoweringErrorCode::UnsupportedType,
+                    path,
+                    "a record or option nests a collection, text or rational value, which has no exact datatype field",
+                ))
+            }
+            ValueType::Enum { name } => {
+                let map = self.enum_sort(name)?;
+                Ok(BuiltSort {
+                    identity: format!("enum:{}", map.sort),
+                    sort: map.sort,
+                    height: 1,
+                })
+            }
+            ValueType::Record { name } => self.record_sort(name, level, path),
+            ValueType::Option { value } => self.option_sort(value, level, path),
+        }
+    }
+
+    /// Declares the record datatype of the statement environment on first use.
+    fn record_sort(
+        &mut self,
+        name: &SymbolName,
+        level: usize,
+        path: &str,
+    ) -> Result<BuiltSort, LoweringError> {
+        if let Some(built) = self.built_records.get(name) {
+            return Ok(built.clone());
+        }
+        if level > MAX_DATATYPE_DEPTH {
+            return Err(depth_limit());
+        }
+        let path = if path.is_empty() {
+            format!("type.{}", name.as_str())
+        } else {
+            path.to_owned()
+        };
+        let statement = self.statement;
+        let environment = &statement.environment;
+        let declaration = record_declaration(environment, name).ok_or_else(|| {
+            LoweringError::new(
+                LoweringErrorCode::InvalidBinding,
+                "binding.type",
+                "record declaration does not resolve",
+            )
+        })?;
+        if declaration.fields().len() > MAX_RECORD_FIELDS {
+            return Err(LoweringError::new(
+                LoweringErrorCode::ResourceLimit,
+                "type.record.fields",
+                "record field count exceeds the public bound",
+            ));
+        }
+        let mut declared: Vec<_> = declaration.fields().iter().collect();
+        declared.sort_by(|left, right| left.name().cmp(right.name()));
+        let mut fields = Vec::with_capacity(declared.len());
+        let mut identity = Vec::new();
+        let mut height = 0;
+        for field in declared {
+            let field_path = format!("{path}.{}", field.name().as_str());
+            let built = self.sort_of(field.value_type(), level + 1, &field_path)?;
+            height = height.max(built.height);
+            push_field(&mut identity, field.name().as_str().as_bytes());
+            push_field(&mut identity, built.identity.as_bytes());
+            fields.push((field.name().as_str(), built.sort));
+        }
+        let height = height + 1;
+        if height > MAX_DATATYPE_DEPTH {
+            return Err(depth_limit());
+        }
+        let package = environment.owner().package().as_str();
+        let digest = hex(hash_fields(
+            "record-sort",
+            &[package.as_bytes(), name.as_str().as_bytes(), &identity],
+        )
+        .as_bytes());
+        let sort = format!("r_{digest}");
+        let built = BuiltSort {
+            identity: format!("record:{sort}"),
+            sort: sort.clone(),
+            height,
+        };
+        if !self.datatypes.records.contains_key(&sort) {
+            self.reserve_datatype()?;
+            let map = RecordSortMap {
+                sort: sort.clone(),
+                package: package.to_owned(),
+                name: name.as_str().to_owned(),
+                constructor: format!("k_{digest}"),
+                fields: fields
+                    .into_iter()
+                    .map(|(field, sort)| RecordFieldMap {
+                        selector: format!("f_{digest}_{}", hex(field.as_bytes())),
+                        field: field.to_owned(),
+                        sort,
+                    })
+                    .collect(),
+            };
+            self.datatypes.records.insert(sort, map);
+        }
+        self.built_records.insert(name.clone(), built.clone());
+        Ok(built)
+    }
+
+    /// Declares the option datatype over a payload type on first use.
+    fn option_sort(
+        &mut self,
+        payload: &ValueType,
+        level: usize,
+        path: &str,
+    ) -> Result<BuiltSort, LoweringError> {
+        if level > MAX_DATATYPE_DEPTH {
+            return Err(depth_limit());
+        }
+        let path = if path.is_empty() { "type.option" } else { path };
+        let payload = self.sort_of(payload, level + 1, &format!("{path}.some"))?;
+        let height = payload.height + 1;
+        if height > MAX_DATATYPE_DEPTH {
+            return Err(depth_limit());
+        }
+        let digest = hex(hash_fields("option-sort", &[payload.sort.as_bytes()]).as_bytes());
+        let sort = format!("o_{digest}");
+        if !self.datatypes.options.contains_key(&sort) {
+            self.reserve_datatype()?;
+            self.datatypes.options.insert(
+                sort.clone(),
+                OptionSortMap {
+                    sort: sort.clone(),
+                    payload_sort: payload.sort,
+                    none: format!("n_{digest}"),
+                    some: format!("m_{digest}"),
+                    selector: format!("u_{digest}"),
+                },
+            );
+        }
+        Ok(BuiltSort {
+            sort,
+            height,
+            identity: format!("option:{}", payload.identity),
+        })
+    }
+
+    /// The option datatype of an option type; a non-option type no longer matches its validation.
+    fn option_map(
+        &mut self,
+        value_type: &ValueType,
+        path: &str,
+    ) -> Result<OptionSortMap, LoweringError> {
+        if !matches!(value_type, ValueType::Option { .. }) {
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                path,
+                "validated option type no longer names an option",
+            ));
+        }
+        let built = self.sort_of(value_type, 1, "")?;
+        Ok(self.datatypes.options[&built.sort].clone())
+    }
+
+    /// The range predicate of a record or option type, defined on first use, or `None` when the
+    /// type has no integer part. One predicate serves every variable of the same typed shape, so
+    /// the query grows with the number of shapes and variables, not with the integer leaves.
+    fn range_predicate(&mut self, value_type: &ValueType) -> Result<Option<String>, LoweringError> {
+        if !matches!(
+            value_type,
+            ValueType::Record { .. } | ValueType::Option { .. }
+        ) {
+            return Ok(None);
+        }
+        let built = self.sort_of(value_type, 1, "")?;
+        if let Some(checked) = self.datatypes.range_checked.get(&built.identity) {
+            return Ok(checked.clone());
+        }
+        let symbol = format!(
+            "p_{}",
+            hex(hash_fields("range-predicate", &[built.identity.as_bytes()]).as_bytes())
+        );
+        // (selected term, type) pairs the predicate constrains.
+        let mut parts: Vec<(String, ValueType)> = Vec::new();
+        let guard = match value_type {
+            ValueType::Record { name } => {
+                let map = self.datatypes.records[&built.sort].clone();
+                let statement = self.statement;
+                if let Some(declaration) = record_declaration(&statement.environment, name) {
+                    for field in &map.fields {
+                        if let Some(declared) = declaration
+                            .fields()
+                            .iter()
+                            .find(|candidate| candidate.name().as_str() == field.field)
+                        {
+                            parts.push((
+                                format!("({} x)", field.selector),
+                                declared.value_type().clone(),
+                            ));
+                        }
+                    }
+                }
+                None
+            }
+            ValueType::Option { value } => {
+                let map = self.datatypes.options[&built.sort].clone();
+                parts.push((format!("({} x)", map.selector), (**value).clone()));
+                Some(format!("((_ is {}) x)", map.some))
+            }
+            _ => None,
+        };
+        let mut conjuncts = Vec::new();
+        let mut dependencies = Vec::new();
+        for (term, part_type) in parts {
+            match &part_type {
+                ValueType::Integer { value } => conjuncts.push(format!(
+                    "(and (<= {} {term}) (<= {term} {}))",
+                    numeral(value.minimum()),
+                    numeral(value.maximum())
+                )),
+                _ => {
+                    if let Some(called) = self.range_predicate(&part_type)? {
+                        conjuncts.push(format!("({called} {term})"));
+                        dependencies.push(called);
+                    }
+                }
+            }
+        }
+        let predicate = match (conjuncts.len(), guard) {
+            (0, _) => None,
+            (_, guard) => {
+                let body = if conjuncts.len() == 1 {
+                    conjuncts.remove(0)
+                } else {
+                    format!("(and {})", conjuncts.join(" "))
+                };
+                let body = match guard {
+                    Some(guard) => format!("(=> {guard} {body})"),
+                    None => body,
+                };
+                self.datatypes.range_predicates.insert(
+                    symbol.clone(),
+                    RangePredicate {
+                        sort: built.sort.clone(),
+                        body,
+                        dependencies,
+                    },
+                );
+                Some(symbol)
+            }
+        };
+        self.datatypes
+            .range_checked
+            .insert(built.identity, predicate.clone());
+        Ok(predicate)
     }
 
     fn lower_integer_comparison(
@@ -1314,10 +1947,12 @@ impl LowerState<'_> {
     ) -> Result<LoweredExpression, LoweringError> {
         let environment = &self.statement.environment;
         let types = |name: &SymbolName| integer_declaration_type(environment, name);
+        let terms = |term: &Expression| datatype_integer_type(environment, term);
         let left = fold_integer(
             left,
             &path.child("left"),
             &types,
+            &terms,
             depth + 1,
             &mut self.nodes,
         )?;
@@ -1325,6 +1960,7 @@ impl LowerState<'_> {
             right,
             &path.child("right"),
             &types,
+            &terms,
             depth + 1,
             &mut self.nodes,
         )?;
@@ -1354,6 +1990,16 @@ impl LowerState<'_> {
             IntegerTree::Reference { name, observation } => {
                 let symbol = self.reference(name, *observation)?;
                 (symbol.clone(), ReplayTerm::Variable(symbol))
+            }
+            IntegerTree::Datatype {
+                expression,
+                depth,
+                path,
+            } => {
+                // `fold_integer` already counted this node, so lowering it must not count it again.
+                self.nodes = self.nodes.saturating_sub(1);
+                let lowered = self.lower(expression, *depth, &ExprPath::detached(path))?;
+                (lowered.smt, ReplayTerm::DatatypeUnreplayed)
             }
             IntegerTree::Negate(operand) => {
                 let (smt, term) = self.emit(operand)?;
@@ -1408,20 +2054,27 @@ impl LowerState<'_> {
                     "validated declaration no longer resolves",
                 )
             })?;
-        let mut enum_sort = None;
-        let range =
-            match declaration.value_type() {
-                ValueType::Boolean => None,
-                ValueType::Integer { value } => Some((value.minimum(), value.maximum())),
-                ValueType::Enum { name } => {
-                    enum_sort = Some(self.enum_sort(name)?.sort);
-                    None
-                }
-                _ => return Err(unsupported(
-                    "expression.value_reference",
-                    "only Boolean, integer and enum value references are exact in quire.smtlib2/v2",
-                )),
-            };
+        let mut datatype_sort = None;
+        let mut datatype_value = None;
+        let range = match declaration.value_type() {
+            ValueType::Boolean => None,
+            ValueType::Integer { value } => Some((value.minimum(), value.maximum())),
+            datatype @ (ValueType::Enum { .. }
+            | ValueType::Record { .. }
+            | ValueType::Option { .. }) => {
+                let path = match datatype {
+                    ValueType::Option { .. } => format!("value.{}", name.as_str()),
+                    _ => String::new(),
+                };
+                datatype_sort = Some(self.sort_of(datatype, 1, &path)?.sort);
+                datatype_value = Some(datatype);
+                None
+            }
+            _ => return Err(unsupported(
+                "expression.value_reference",
+                "only Boolean, integer, enum, record and option value references are exact in quire.smtlib2/v2",
+            )),
+        };
         let kind = declaration_kind(declaration.kind());
         let point = execution_point_key(&statement.execution_point);
         let digest = type_shape_digest(&statement.environment, declaration.value_type())?;
@@ -1471,24 +2124,110 @@ impl LowerState<'_> {
         if let Some(range) = range {
             self.ranges.insert(symbol.clone(), range);
         }
-        if let Some(sort) = enum_sort {
+        if let Some(sort) = datatype_sort {
             self.datatypes.variable_sorts.insert(symbol.clone(), sort);
+        }
+        if let Some(value_type) = datatype_value {
+            if let Some(predicate) = self.range_predicate(value_type)? {
+                self.datatypes
+                    .variable_predicates
+                    .insert(symbol.clone(), predicate);
+            }
         }
         Ok(symbol)
     }
 }
 
-/// The sort of a Boolean or enum term.
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum TermSort {
-    Bool,
-    Enum(SymbolName),
+/// A built datatype sort or scalar sort and what its identity depends on.
+#[derive(Clone, Debug)]
+struct BuiltSort {
+    /// The SMT-LIB sort: `Bool`, `Int` or a datatype sort symbol.
+    sort: String,
+    /// The datatype nesting depth: 0 for a scalar sort, 1 for an enum.
+    height: usize,
+    /// The complete semantic identity, which keeps integer ranges apart that share the `Int` sort.
+    identity: String,
+}
+
+/// The type of a lowered term, when the environment determines it.
+fn term_type(environment: &DeclarationEnvironment, expression: &Expression) -> Option<ValueType> {
+    match expression.kind() {
+        ExpressionKind::BooleanLiteral { .. }
+        | ExpressionKind::BooleanNot { .. }
+        | ExpressionKind::Boolean { .. }
+        | ExpressionKind::Compare { .. }
+        | ExpressionKind::IsPresent { .. } => Some(ValueType::Boolean),
+        ExpressionKind::IntegerLiteral { value_type, .. } => {
+            Some(ValueType::integer(value_type.clone()))
+        }
+        ExpressionKind::EnumLiteral { enumeration, .. } => Some(ValueType::Enum {
+            name: enumeration.clone(),
+        }),
+        ExpressionKind::RecordLiteral { record, .. } => Some(ValueType::Record {
+            name: record.clone(),
+        }),
+        ExpressionKind::OptionNone { value_type }
+        | ExpressionKind::OptionSome { value_type, .. } => Some(value_type.clone()),
+        ExpressionKind::ValueReference { name, .. } => environment
+            .values()
+            .iter()
+            .find(|value| value.name() == name)
+            .map(|declaration| declaration.value_type().clone()),
+        ExpressionKind::FieldAccess { base, field } => {
+            let ValueType::Record { name } = term_type(environment, base)? else {
+                return None;
+            };
+            record_declaration(environment, &name)?
+                .fields()
+                .iter()
+                .find(|candidate| candidate.name() == field)
+                .map(|candidate| candidate.value_type().clone())
+        }
+        ExpressionKind::Unwrap { option } => match term_type(environment, option)? {
+            ValueType::Option { value } => Some(*value),
+            _ => None,
+        },
+        ExpressionKind::Numeric { left, .. } => term_type(environment, left),
+        ExpressionKind::NumericNegate { operand } => term_type(environment, operand),
+        _ => None,
+    }
+}
+
+/// The integer type of a field access or unwrap term, when it reads an integer out of a datatype.
+fn datatype_integer_type(
+    environment: &DeclarationEnvironment,
+    expression: &Expression,
+) -> Option<IntegerType> {
+    match expression.kind() {
+        ExpressionKind::FieldAccess { .. } | ExpressionKind::Unwrap { .. } => {
+            match term_type(environment, expression)? {
+                ValueType::Integer { value } => Some(value),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn record_declaration<'a>(
+    environment: &'a DeclarationEnvironment,
+    name: &SymbolName,
+) -> Option<&'a RecordDeclaration> {
+    environment
+        .types()
+        .iter()
+        .find_map(|candidate| match candidate {
+            TypeDeclaration::Record { declaration } if declaration.name() == name => {
+                Some(declaration)
+            }
+            _ => None,
+        })
 }
 
 /// The position of an expression within the statement, rendered only when an error needs it.
 struct ExprPath<'a> {
     parent: Option<&'a ExprPath<'a>>,
-    segment: &'static str,
+    segment: &'a str,
 }
 
 impl<'a> ExprPath<'a> {
@@ -1497,7 +2236,15 @@ impl<'a> ExprPath<'a> {
         segment: "expression",
     };
 
-    fn child(&'a self, segment: &'static str) -> ExprPath<'a> {
+    /// A path that renders as `rendered`, for a position recorded earlier.
+    fn detached(rendered: &'a str) -> ExprPath<'a> {
+        ExprPath {
+            parent: None,
+            segment: rendered,
+        }
+    }
+
+    fn child(&'a self, segment: &'a str) -> ExprPath<'a> {
         ExprPath {
             parent: Some(self),
             segment,
@@ -1570,6 +2317,12 @@ enum IntegerTree {
         factor: i128,
         term: Box<IntegerTree>,
     },
+    /// An integer read out of a datatype, lowered when the tree is emitted.
+    Datatype {
+        expression: Box<Expression>,
+        depth: usize,
+        path: String,
+    },
 }
 
 struct FoldedInteger {
@@ -1593,6 +2346,7 @@ fn fold_integer(
     expression: &Expression,
     path: &ExprPath<'_>,
     types: &dyn Fn(&SymbolName) -> Option<IntegerType>,
+    terms: &dyn Fn(&Expression) -> Option<IntegerType>,
     depth: usize,
     nodes: &mut usize,
 ) -> Result<FoldedInteger, LoweringError> {
@@ -1625,7 +2379,14 @@ fn fold_integer(
             })
         }
         ExpressionKind::NumericNegate { operand } => {
-            let operand = fold_integer(operand, &path.child("operand"), types, depth + 1, nodes)?;
+            let operand = fold_integer(
+                operand,
+                &path.child("operand"),
+                types,
+                terms,
+                depth + 1,
+                nodes,
+            )?;
             reject_saturating(&operand.value_type, path)?;
             let tree = match operand.tree {
                 IntegerTree::Constant(value) => {
@@ -1660,8 +2421,8 @@ fn fold_integer(
                 }
                 NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
             }
-            let left = fold_integer(left, &path.child("left"), types, depth + 1, nodes)?;
-            let right = fold_integer(right, &path.child("right"), types, depth + 1, nodes)?;
+            let left = fold_integer(left, &path.child("left"), types, terms, depth + 1, nodes)?;
+            let right = fold_integer(right, &path.child("right"), types, terms, depth + 1, nodes)?;
             reject_saturating(&left.value_type, path)?;
             let tree = match (operator, left.tree, right.tree) {
                 (NumericOperator::Add, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
@@ -1697,6 +2458,22 @@ fn fold_integer(
                 value_type: left.value_type,
             })
         }
+        ExpressionKind::FieldAccess { .. } | ExpressionKind::Unwrap { .. } => {
+            let value_type = terms(expression).ok_or_else(|| {
+                unsupported(
+                    &path.render(),
+                    "only integer datatype reads are exact in an integer term",
+                )
+            })?;
+            Ok(FoldedInteger {
+                tree: IntegerTree::Datatype {
+                    expression: Box::new(expression.clone()),
+                    depth,
+                    path: path.render(),
+                },
+                value_type,
+            })
+        }
         _ => Err(unsupported(
             &path.render(),
             "construct is outside linear integer arithmetic",
@@ -1716,6 +2493,14 @@ fn reject_saturating(value_type: &IntegerType, path: &ExprPath<'_>) -> Result<()
     }
 }
 
+fn depth_limit() -> LoweringError {
+    LoweringError::new(
+        LoweringErrorCode::ResourceLimit,
+        "type.depth",
+        "datatype nesting depth exceeds the public bound",
+    )
+}
+
 fn unsupported(path: &str, message: &str) -> LoweringError {
     LoweringError::new(LoweringErrorCode::UnsupportedConstruct, path, message)
 }
@@ -1727,14 +2512,13 @@ fn construct_name(kind: &ExpressionKind) -> &'static str {
         }
         ExpressionKind::RationalLiteral { .. } => "rational literals are unsupported",
         ExpressionKind::TextLiteral { .. } => "text literals are unsupported",
-        ExpressionKind::EnumLiteral { .. } => "construct is supported",
-        ExpressionKind::OptionNone { .. }
+        ExpressionKind::EnumLiteral { .. }
+        | ExpressionKind::OptionNone { .. }
         | ExpressionKind::OptionSome { .. }
         | ExpressionKind::IsPresent { .. }
-        | ExpressionKind::Unwrap { .. } => "option expressions are unsupported",
-        ExpressionKind::RecordLiteral { .. } | ExpressionKind::FieldAccess { .. } => {
-            "record expressions are unsupported"
-        }
+        | ExpressionKind::Unwrap { .. }
+        | ExpressionKind::RecordLiteral { .. }
+        | ExpressionKind::FieldAccess { .. } => "construct is supported",
         ExpressionKind::CollectionLiteral { .. }
         | ExpressionKind::Length { .. }
         | ExpressionKind::Index { .. } => "collection expressions are unsupported",
@@ -2155,7 +2939,7 @@ mod tests {
     }
 
     fn fold(expression: &Expression) -> Result<FoldedInteger, LoweringError> {
-        fold_integer(expression, &ExprPath::ROOT, &|_| None, 1, &mut 0)
+        fold_integer(expression, &ExprPath::ROOT, &|_| None, &|_| None, 1, &mut 0)
     }
 
     /// FR-010-AC-11: a constant fold outside the 128-bit signed range is refused, not wrapped.
@@ -2348,5 +3132,194 @@ mod tests {
             let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
             assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
         }
+    }
+
+    fn record_declaration_with(name: &str, fields: &[(&str, ValueType)]) -> TypeDeclaration {
+        let fields = fields
+            .iter()
+            .map(|(field, value_type)| {
+                quire_contract_model::RecordFieldDeclaration::new(
+                    SymbolName::new(*field).expect("symbol"),
+                    value_type.clone(),
+                    span(),
+                )
+            })
+            .collect();
+        TypeDeclaration::Record {
+            declaration: RecordDeclaration::new(
+                SymbolName::new(name).expect("symbol"),
+                span(),
+                fields,
+            )
+            .expect("record"),
+        }
+    }
+
+    fn reference(name: &str) -> Expression {
+        Expression::new(
+            ExpressionKind::ValueReference {
+                name: SymbolName::new(name).expect("symbol"),
+                observation: StateObservation::Current,
+            },
+            span(),
+        )
+    }
+
+    fn input(name: &str, value_type: ValueType) -> quire_contract_model::ValueDeclaration {
+        quire_contract_model::ValueDeclaration::new(
+            SymbolName::new(name).expect("symbol"),
+            quire_contract_model::ValueDeclarationKind::Input,
+            value_type,
+            span(),
+        )
+    }
+
+    /// FR-020-AC-4: the lowering adds no presence check of its own, so an `Unwrap` that skipped the
+    /// upstream check lowers to the selector.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-4")]
+    #[test]
+    fn lowering_adds_no_presence_check_over_an_unchecked_unwrap() {
+        let option = ValueType::option(ValueType::Boolean);
+        let unwrap = Expression::new(
+            ExpressionKind::Unwrap {
+                option: Box::new(reference("flag")),
+            },
+            span(),
+        );
+        let statement = unchecked_statement(vec![], vec![input("flag", option)], unwrap);
+        let query = lower_boolean_statements(&[statement], &[]).expect("lowers");
+        let selector = &query.option_sorts()[0].selector;
+        assert!(query.query().contains(&format!("({selector} v_s_")));
+    }
+
+    /// FR-020-AC-5: the lowering refuses a record or option ordering comparison and a mixed-sort
+    /// comparison itself, over an expression that skipped statement-build validation.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-5")]
+    #[test]
+    fn lowering_refuses_unchecked_record_and_option_comparisons() {
+        let compare = |operator, left, right| {
+            Expression::new(
+                ExpressionKind::Compare {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span(),
+            )
+        };
+        let types = || {
+            vec![
+                record_declaration_with("A", &[("on", ValueType::Boolean)]),
+                record_declaration_with("B", &[("on", ValueType::Boolean)]),
+            ]
+        };
+        let values = || {
+            vec![
+                input(
+                    "a",
+                    ValueType::Record {
+                        name: SymbolName::new("A").expect("symbol"),
+                    },
+                ),
+                input(
+                    "b",
+                    ValueType::Record {
+                        name: SymbolName::new("B").expect("symbol"),
+                    },
+                ),
+                input("o", ValueType::option(ValueType::Boolean)),
+                input("flag", ValueType::Boolean),
+            ]
+        };
+        for expression in [
+            compare(ComparisonOperator::Less, reference("a"), reference("a")),
+            compare(ComparisonOperator::Less, reference("o"), reference("o")),
+            compare(ComparisonOperator::Equal, reference("a"), reference("b")),
+            compare(ComparisonOperator::Equal, reference("a"), reference("o")),
+            compare(ComparisonOperator::Equal, reference("flag"), reference("o")),
+        ] {
+            let statement = unchecked_statement(types(), values(), expression);
+            let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
+            assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
+        }
+    }
+
+    /// NFR-001: an integer read out of a datatype counts once against the expression node bound.
+    /// Each comparison below is four nodes (compare, field access, its base, the literal), so 20,000
+    /// joined by 19,999 conjunctions is 99,999 nodes and 20,001 is 100,004.
+    #[ix_trace_rs::trace("TC-010", "NFR-001-AC-3")]
+    #[test]
+    fn integer_datatype_reads_count_once_against_the_node_bound() {
+        fn join(items: &mut Vec<Expression>) -> Expression {
+            while items.len() > 1 {
+                let mut next = Vec::with_capacity(items.len() / 2 + 1);
+                let mut drained = std::mem::take(items).into_iter();
+                while let Some(left) = drained.next() {
+                    next.push(match drained.next() {
+                        Some(right) => Expression::new(
+                            ExpressionKind::Boolean {
+                                operator: BooleanOperator::TotalAnd,
+                                left: Box::new(left),
+                                right: Box::new(right),
+                            },
+                            span(),
+                        ),
+                        None => left,
+                    });
+                }
+                *items = next;
+            }
+            items.remove(0)
+        }
+        let integer = IntegerType::new(
+            quire_contract_model::IntegerDomain::Signed,
+            0,
+            100,
+            OverflowPolicy::Reject,
+        )
+        .expect("integer type");
+        let build = |count: usize| {
+            let mut items: Vec<Expression> = (0..count)
+                .map(|_| {
+                    Expression::new(
+                        ExpressionKind::Compare {
+                            operator: ComparisonOperator::LessEqual,
+                            left: Box::new(Expression::new(
+                                ExpressionKind::FieldAccess {
+                                    base: Box::new(reference("r")),
+                                    field: SymbolName::new("n").expect("symbol"),
+                                },
+                                span(),
+                            )),
+                            right: Box::new(Expression::new(
+                                ExpressionKind::IntegerLiteral {
+                                    value: 5,
+                                    value_type: integer.clone(),
+                                },
+                                span(),
+                            )),
+                        },
+                        span(),
+                    )
+                })
+                .collect();
+            let expression = join(&mut items);
+            unchecked_statement(
+                vec![record_declaration_with(
+                    "R",
+                    &[("n", ValueType::integer(integer.clone()))],
+                )],
+                vec![input(
+                    "r",
+                    ValueType::Record {
+                        name: SymbolName::new("R").expect("symbol"),
+                    },
+                )],
+                expression,
+            )
+        };
+        lower_boolean_statements(&[build(20_000)], &[]).expect("99,999 nodes admitted");
+        let errors = lower_boolean_statements(&[build(20_001)], &[]).expect_err("over the bound");
+        assert_eq!(errors[0].code(), LoweringErrorCode::ResourceLimit);
     }
 }

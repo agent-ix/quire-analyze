@@ -2,10 +2,11 @@
 
 #![cfg(target_os = "linux")]
 
+mod fake_script;
+
 use ix_trace_rs::trace;
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
@@ -540,8 +541,7 @@ fn completed_result_classifies_as_a_direct_run() {
             "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then printf 'Z3 version 4.13.0\\n'; exit 0; fi\n\
              printf '%s' '{stdout}'; printf '%s' '{stderr}' >&2; exit {code}\n"
         );
-        fs::write(&path, body).expect("write fake solver");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("chmod");
+        fake_script::install(&path, &body);
         let direct = execute_solver(
             &query,
             &config(SolverEngine::Z3, path.to_str().expect("utf8")),

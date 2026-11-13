@@ -46,18 +46,29 @@ a negation, so `unsat` means satisfied and `sat` is a counterexample.
 ## Supported constructs
 
 Queries are in SMT-LIB 2.6 under profile `quire.smtlib2/v2`, logic `QF_LIA`, or `QF_UFDTLIA`
-when the query declares an enum datatype.
+when the query declares an enum, record or option datatype.
 Lowering accepts Boolean literals, value references, `not`, `and`, `or` (both
 short-circuit and total forms), implication, and Boolean equality and inequality,
 plus linear integer arithmetic: integer literals and references, negation,
 addition, subtraction, multiplication by a constant, and the six comparisons, plus
 enum literals, enum value references, and enum equality and inequality (membership is a
-disjunction of equalities).
+disjunction of equalities), plus records and options: record literals, field access,
+option `none`, `some`, presence and `Unwrap` (only under a presence proof), and equality and
+inequality of both. Models of datatype-sorted queries are not replayed yet and stay unverified.
+For every datatype-sorted variable the query asserts the declared range of each integer part
+through one non-recursive range predicate (define-fun) per typed shape, a datatype sort together
+with the integer ranges of its parts (two options over integer payloads of different ranges share
+a sort but not a predicate). A record predicate is the conjunction of its integer field ranges and
+of the predicates of its record and option fields; an option predicate is `(=> ((_ is some) x)
+<payload range or payload predicate>)`. The definitions follow the datatype declarations in
+dependency order, ties broken by the predicate symbol. Each variable gets one unnamed assertion of
+its predicate, outside the assertion map and report assertions[], following the FR-010 integer
+range block, ordered by ascending variable symbol.
 Declared integer ranges are asserted as unnamed assertions after the declarations.
 Any other construct is refused when the request is lowered, with a typed error
 naming it: non-linear products, integer division and remainder, saturating
-arithmetic, rationals, text, enum ordering,
-records, options, collections, field access, quantifiers,
+arithmetic, rationals, text, enum ordering, records or options that nest text or
+collections, collections, quantifiers,
 pure function calls and local references. (The authoritative list is
 `CAPABILITY_CONTRACT` in [`src/smt.rs`](src/smt.rs).)
 

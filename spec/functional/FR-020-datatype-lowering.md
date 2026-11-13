@@ -57,6 +57,15 @@ unsupported.
   maps and paths. The encoded symbols are recorded in the query's symbol map, which
   [FR-021](./FR-021-datatype-witness-replay.md) uses to read models. A user-chosen name equal to an
   SMT-LIB reserved word or to a name used by another encoded symbol cannot collide.
+- For every datatype-sorted variable the query asserts the declared range of each integer part
+  through one non-recursive range predicate (define-fun) per typed shape, a datatype sort together
+  with the integer ranges of its parts (two options over integer payloads of different ranges
+  share a sort but not a predicate). A record predicate is the conjunction of its integer field
+  ranges and of the predicates of its record and option fields; an option predicate is `(=> ((_ is
+  some) x) <payload range or payload predicate>)`. The definitions follow the datatype
+  declarations in dependency order, ties broken by the predicate symbol. Each variable gets one
+  unnamed assertion of its predicate, outside the assertion map and report assertions[], following
+  the FR-010 integer range block, ordered by ascending variable symbol.
 - Datatype declarations appear before every use, in dependency order with ties broken by the encoded
   symbol, and variants and fields are emitted in ascending name order. Order of declaration in the
   environment does not change the query bytes.
@@ -90,7 +99,7 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
   literal. The disjunction is built from the exact Boolean `or` and enum equality constructs, and no
   separate membership encoding exists. Membership over a collection value and membership through a quantifier
   stay Unsupported here, and the quantifier forms are owned by the quantification requirements.
-- `RecordLiteral` lowers to the constructor applied to the field values in declared field order, and
+- `RecordLiteral` lowers to the constructor applied to the field values in ascending field-name order (the order of the datatype's constructor), and
   `FieldAccess` lowers to the selector. Record equality and inequality lower to `=` and `distinct`.
 - `OptionNone` lowers to the `none` constructor of the payload sort, `OptionSome` to `some`, and
   `IsPresent` to the `some` tester. Option equality and inequality lower to `=` and `distinct`.
@@ -120,7 +129,7 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
 
 While datatype-sorted replay ([FR-021](./FR-021-datatype-witness-replay.md)) is not implemented, a model
 for a query that declares any datatype-sorted symbol is never verified. The witness is incomplete with
-the reason `sort_not_replayable`, naming the first such symbol in ascending order (the first enum-sorted variable, or, when no variable has a datatype sort, the first declared datatype sort symbol); the status stays as the
+the reason `sort_not_replayable`, naming the first such symbol in ascending order (the first datatype-sorted variable, or, when no variable has a datatype sort, the first declared datatype sort symbol); the status stays as the
 solvers answered and the differential run is inconclusive. This reason is checked before every
 [FR-011](./FR-011-integer-witness-replay.md) reason and ceases to apply to a datatype kind when FR-021 replay
 of that kind lands.
@@ -146,7 +155,7 @@ of that kind lands.
 | FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test |
 | FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`, except a collection literal consumed as a quantifier domain per [FR-030](./FR-030-bounded-quantifier-domains.md) and [FR-034](./FR-034-quantifier-package-translation.md). | Test |
 | FR-020-AC-9 | The `(set-logic ...)` of a query declaring no datatype is `QF_LIA` and of a query declaring at least one datatype is `QF_UFDTLIA`, in both cases under `quire.smtlib2/v2`, that of a query holding a bounded solver quantifier is `LIA` without and `UFDTLIA` with a datatype, and a report naming `quire.smtlib2/v1`, `QF_UF`, or a logic other than the one the feature set requires is refused by validation. | Test |
-| FR-020-AC-10 | A satisfiable model for a query declaring an enum datatype, including one whose terms are only enum literals, is not verified: the witness is incomplete with reason `sort_not_replayable` naming the first enum variable (or, with none, the first declared sort) in ascending order, including for an empty model, the status is as the solvers answered, and the differential run is inconclusive. | Test |
+| FR-020-AC-10 | A satisfiable model for a query declaring any datatype (enum, record or option), including one whose terms are only datatype literals, is not verified: the witness is incomplete with reason `sort_not_replayable` naming the first datatype-sorted variable (or, with none, the first declared sort) in ascending order, including for an empty model, the status is as the solvers answered, and the differential run is inconclusive. | Test |
 
 ## Dependencies
 
