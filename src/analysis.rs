@@ -658,11 +658,11 @@ fn verify_model(
     bytes: &[u8],
     purpose: ModelPurpose,
 ) -> Result<VerifiedBooleanModel, ReplayFailure> {
-    // Enum witness replay belongs to VER-87. Any declared datatype sort makes the model
-    // unreplayable, checked before every other reason. The subject is the first enum variable in
-    // ascending order, or the first declared sort symbol when no variable has an enum sort.
-    if let Some(sort) = query.enum_sorts().first() {
-        let subject = query.enum_variables().first().unwrap_or(&sort.sort).clone();
+    // Datatype witness replay belongs to VER-87. Any declared datatype sort makes the model
+    // unreplayable, checked before every other reason. The subject is the first datatype-sorted
+    // variable in ascending order, or the first declared sort symbol when no variable has one.
+    if let Some(sort) = query.datatype_sorts().first() {
+        let subject = query.datatype_variables().first().unwrap_or(sort).clone();
         return Err(ReplayFailure::new(
             ReplayFailureReason::SortNotReplayable,
             Some(subject),
@@ -769,7 +769,7 @@ fn replay_assertions(
             }
             Ok(false) | Err(ReplayFault::Unassigned) => ReplayFailureReason::AssertionFalse,
             Err(ReplayFault::Overflow) => ReplayFailureReason::EvaluationOverflow,
-            Err(ReplayFault::EnumUnreplayed) => ReplayFailureReason::SortNotReplayable,
+            Err(ReplayFault::DatatypeUnreplayed) => ReplayFailureReason::SortNotReplayable,
         };
         return Err(ReplayFailure::new(reason, Some(assertion.name.clone())));
     }
