@@ -52,3 +52,10 @@ metric, and the TC-020 procedure. Code with no owning requirement: none; the new
 FR-021 published-values bullet. No stubs, no `todo!`, no coverage inflation: each changed test
 asserts a reason or a verified value that a wrong implementation would change, except the
 literal-only record/option test filed as SR-17058 FND-007.
+
+## Dispositions
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | `scalar_positions_reject_constructors_and_oversized_integers` puts 2^128 and its negation in an option payload and 2^128 in a record integer field; each fails `value_out_of_domain` (cf4c9e6). |
+| FND-002 | fixed | `model_parsing_has_an_exact_depth_boundary` builds a depth-8 option chain: the depth-8 value verifies and a depth-9 text is `value_malformed`. |

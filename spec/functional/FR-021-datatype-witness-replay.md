@@ -47,11 +47,10 @@ untrusted external engine.
   the solver's value of the `some` selector on `none`, and never substitutes a default.
 - A datatype failure is one of the eight reasons of [FR-011](./FR-011-integer-witness-replay.md):
   `value_malformed` for text that is not a value, names a constructor no declared datatype has (an
-  abstract element included), or nests a constructor application beyond its declared shape (a
+  abstract element included), a sort that is not a single symbol (a parametric spelling such as `(Option S)`), or nests a constructor application beyond its declared shape (a
   depth-9 text for a depth-8 declared type, for example); `sort_mismatch` for a constructor of
   another datatype, a nullary constructor where a Boolean or integer is expected, a wrong arity or
-  a wrong qualifying or declared sort (a sort that is not the symbol of the query's symbol map, a
-  parametric spelling such as `(Option S)` included); `value_out_of_domain` for an integer part
+  a qualifying or declared sort that is a symbol other than the declared one; `value_out_of_domain` for an integer part
   outside its declared range or an integer beyond 128 bits; and `assertion_false` for a failed
   assertion, including an `Unwrap` evaluated on an absent option.
 - An invalid or incomplete model keeps the logical response and marks the requested counterexample

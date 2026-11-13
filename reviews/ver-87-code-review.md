@@ -87,3 +87,22 @@ The stray-selector rule ("never reads the solver's value of the `some` selector 
 no separate test: the assignment has no channel for a selector value, both solvers were observed
 not to print one, and the unit test asserts `Unwrap` of `none` is `AbsentOption` rather than a
 default.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-008 | medium | The amended FR-021 bullet lists "a parametric spelling such as `(Option S)`" and any sort "that is not the symbol of the query's symbol map" under `sort_mismatch`, but `read_sort` returns `None` for any non-atom sort and `read_head` maps that to `value_malformed`, and a non-atom define-fun sort fails the whole model as `value_malformed`. The new test `invented_sort_spellings_fail_closed` accepts either reason, so it cannot catch the disagreement. Make the bullet say that a sort term that is not a single symbol is `value_malformed` (or map it to `sort_mismatch`), and assert the one exact reason. | `src/datatype_replay.rs:158-167`, `src/datatype_replay.rs:362-397`, `spec/functional/FR-021-datatype-witness-replay.md:52-54`, `tests/datatype_replay.rs:473-497` |
+
+## Dispositions
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | `ModelSort` is now the atom only and `sort_matches` compares it with the shape's encoded sort symbol; the parametric arm is gone and the old positive test is replaced by a failing one (cf4c9e6). |
+| FND-002 | fixed | A bare or `as`-qualified declared nullary constructor at a Bool/Int position is `SortMismatch`, tested in a record field and an option payload. The coder's limit (a constructor application there stays `value_malformed`) agrees with the amended bullet's "nests a constructor application beyond its declared shape" clause and is what makes over-deep text `value_malformed`. |
+| FND-003 | fixed | The unreachable depth guard and its private-call unit test are deleted; FR-021-AC-6 and the bullet now state shape-driven `value_malformed`, matching the 40,000-deep and new depth-boundary tests. |
+| FND-004 | fixed | `verify_model` returns `sort_mismatch` for a value `witness` cannot publish instead of dropping it. No test is acceptable: parse validates the value against the same shape, so no model text reaches the branch. |
+| FND-005 | fixed | `datatype_shapes` doc corrected and the orphaned `datatype_sorts` line removed. |
+| FND-006 | fixed | README now says datatype models are replayed (the stale integer sentence at line 87 was also removed). |
+| FND-007 | still-open | The fix adds a bare `flag` assertion, so the `false` model now fails on that Boolean, not through a record or option literal. The literal assertions still hold for every `flag`, so an evaluator that returned true on them would still pass. Needs an assertion whose truth depends on a literal, for example `field(record(.. active: flag ..), "active")` alone. |
+| FND-008 | still-open | New this round; not yet addressed. |

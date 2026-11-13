@@ -481,18 +481,23 @@ fn invented_sort_spellings_fail_closed() {
         &account.sort,
         &account.record("true", &parametric, &account.admin),
     );
-    assert!(matches!(
-        account.reason(&model),
-        ReplayFailureReason::ValueMalformed | ReplayFailureReason::SortMismatch
-    ));
-    let sort = account.z3(
+    assert_eq!(account.reason(&model), ReplayFailureReason::ValueMalformed);
+    let compound = account.z3(
         "(Account)",
         &account.record("true", &account.none, &account.admin),
     );
-    assert!(matches!(
-        account.reason(&sort),
-        ReplayFailureReason::ValueMalformed | ReplayFailureReason::SortMismatch
-    ));
+    assert_eq!(
+        account.reason(&compound),
+        ReplayFailureReason::ValueMalformed
+    );
+    let other_symbol = account.z3(
+        &account.option_sort,
+        &account.record("true", &account.none, &account.admin),
+    );
+    assert_eq!(
+        account.reason(&other_symbol),
+        ReplayFailureReason::SortMismatch
+    );
 }
 
 /// FR-021-AC-2: a nullary constructor of a declared datatype where a Boolean or an integer is

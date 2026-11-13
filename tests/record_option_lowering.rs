@@ -597,26 +597,21 @@ fn literal_only_record_and_option_queries_are_replayed() {
         account_types(),
         vec![input("flag", ValueType::Boolean)],
         vec![
-            var("flag"),
             boolean(
                 BooleanOperator::TotalOr,
                 var("flag"),
                 present(some(option, number(3))),
             ),
-            compare(
-                ComparisonOperator::Equal,
-                field(
-                    record(
-                        "Account",
-                        vec![
-                            ("role", variant("Role", "Guest")),
-                            ("active", var("flag")),
-                            ("level", number(4)),
-                        ],
-                    ),
-                    "active",
+            field(
+                record(
+                    "Account",
+                    vec![
+                        ("role", variant("Role", "Guest")),
+                        ("active", var("flag")),
+                        ("level", number(4)),
+                    ],
                 ),
-                var("flag"),
+                "active",
             ),
         ],
     );
