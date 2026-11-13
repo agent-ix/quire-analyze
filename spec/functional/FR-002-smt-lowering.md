@@ -27,8 +27,20 @@ construct has a declared exact encoding under the selected profile.
   including a query with no integer construct, declares logic `QF_LIA` when it has no datatype declarations;
   a query that declares datatypes declares the logic its feature set requires, as FR-020 specifies. The Boolean-only profile
   `quire.smtlib2/v1` (logic `QF_UF`) is replaced; it is not selectable and no fallback to it exists.
-- Rational, text, enum, record, option, collection, field/index/option access, calls, non-linear
-  arithmetic, locals, and quantifiers are explicitly unsupported by the live profile. The
+- Enum, record, option and field/option access are admitted by
+  [FR-020](./FR-020-datatype-lowering.md) under the live profile.
+- Bounded quantifiers over enum domains, finite collections and bounded integer ranges are admitted
+  by [FR-030](./FR-030-bounded-quantifier-domains.md) through
+  [FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md) under the same profile; no further
+  profile is introduced. A query that holds a bounded solver quantifier (FR-032) declares the
+  quantified counterpart of the logic its feature set requires; every other query follows the rule
+  above.
+- Collection is unsupported by the live profile in every use except one: a collection literal whose
+  elements are fixed literals may be the domain of a quantifier admitted by FR-030, where it lowers
+  by expansion (FR-031) and introduces no collection sort. Collection membership, size, indexing,
+  equality, passing as a value and any other use remain unsupported.
+- Rational, text, index access, calls, non-linear arithmetic, locals, and every quantifier not
+  admitted by FR-030 are explicitly unsupported by the live profile. The
   exhaustive Rust match makes an upstream expression variant addition a compile-time review point.
 - State observations and execution points remain part of variable identity. Short-circuit and total
   Boolean operators share an encoding only after upstream validation establishes total Boolean
@@ -47,7 +59,7 @@ construct has a declared exact encoding under the selected profile.
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-002-AC-1 | Identical models produce byte-identical queries and assertion maps. | Test (TC-002, TC-010) |
-| FR-002-AC-2 | Every public IR construct has an exact supported encoding or an explicit unsupported classification, with representative fixtures for arithmetic, quantification, and data types. | Test (TC-003, TC-010) |
+| FR-002-AC-2 | Every public IR construct has an exact supported encoding or an explicit unsupported classification, with representative fixtures for arithmetic, bounded quantification, unbounded quantification (unsupported), and data types. | Test (TC-003, TC-010) |
 | FR-002-AC-3 | Query symbols and named assertions map injectively to complete source identities. | Test (TC-004, TC-010) |
 | FR-002-AC-4 | No approximation can yield a query or conclusive result. | Test (TC-003, TC-010) |
 | FR-002-AC-5 | Golden queries expose declared logic, assertions, identities, and source maps for independent review. | Test (TC-004, TC-010) |

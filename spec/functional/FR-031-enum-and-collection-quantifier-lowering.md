@@ -1,0 +1,59 @@
+---
+id: FR-031
+title: "Lower quantifiers over enum domains and finite collections by expansion"
+type: FR
+relationships:
+  - target: ix://agent-ix/quire-analyze/FR-030
+    type: depends_on
+  - target: ix://agent-ix/quire-analyze/FR-002
+    type: depends_on
+  - target: ix://agent-ix/quire-analyze/FR-020
+    type: depends_on
+  - target: ix://agent-ix/quire-analyze/StR-001
+    type: implements
+---
+# FR-031: Lower quantifiers over enum domains and finite collections by expansion
+
+## Description
+
+The analyzer shall lower a universal or existential quantifier over an enum domain or a finite
+collection by expansion into one instance of the body per domain element, joined by conjunction for a
+universal and by disjunction for an existential quantifier.
+
+## Behavior
+
+- Encoding choice: these forms use expansion and never emit a solver quantifier. Decidability
+  argument: the expanded query is quantifier-free, so it is decidable exactly when the logic of the
+  body alone is decidable. The bodies admitted here lie in linear integer arithmetic
+  ([FR-010](./FR-010-linear-integer-arithmetic.md)), datatypes ([FR-020](./FR-020-datatype-lowering.md))
+  and Boolean structure, and non-linear integer bodies are `unsupported` before expansion, so the
+  expanded query stays in a decidable quantifier-free fragment and expansion adds no quantifier
+  instantiation.
+- Each instance substitutes the element for the bound variable. The substitution is capture-avoiding:
+  an element never binds a free variable of the body, and an inner quantifier that reuses the bound
+  variable's name shadows it.
+- Instances appear in domain order (enum declaration order; canonical member order for a
+  collection). Assertion names, symbol names and metadata are stable and independent of host maps
+  and paths.
+- Each instance retains the quantifier's source identity and the element, so a counterexample maps
+  back to the instance that failed.
+- Expansion consumes the instance budget defined in
+  [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md); this requirement states no
+  separate ceiling.
+- The lowered query declares the logic the expanded body requires and never a quantified logic.
+
+## Acceptance Criteria
+
+| ID | Criteria | Verification |
+|---|---|---|
+| FR-031-AC-1 | For a universal and an existential fixture over an enum domain, the lowered query equals its golden query, and the status derived by the enumeration oracle of [FR-033](./FR-033-quantified-assertion-replay.md) equals the fixture's recorded expected status. Where Z3 and cvc5 are installed, both also answer the matching `sat`/`unsat`. | Test (TC-030; real solvers where installed) |
+| FR-031-AC-2 | The same holds for a universal and an existential fixture over a finite collection. | Test (TC-030; real solvers where installed) |
+| FR-031-AC-3 | The query for a quantified fixture contains no `forall` or `exists` token and one body instance per domain element, in domain order. | Test (TC-030) |
+| FR-031-AC-4 | Lowering the same quantified package twice, in separate processes, yields byte-identical SMT-LIB2 output. | Test (TC-030) |
+| FR-031-AC-5 | A counterexample for a failed universal quantifier names the failing element and the quantifier's source identity. | Test (TC-030) |
+| FR-031-AC-6 | A body that mentions a free variable whose name equals the bound variable of a nested inner quantifier lowers so that the free variable is not captured; the golden query shows distinct symbols. | Test (TC-030) |
+
+## Dependencies
+
+[FR-030](./FR-030-bounded-quantifier-domains.md), [FR-002](./FR-002-smt-lowering.md) and
+[FR-020](./FR-020-datatype-lowering.md).
