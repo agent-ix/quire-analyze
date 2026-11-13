@@ -22,6 +22,9 @@ pub const NOT: &str = "quire.op.boolean.not";
 pub const IMPLIES: &str = "quire.op.boolean.implies";
 pub const EQ: &str = "quire.op.boolean.eq";
 pub const NE: &str = "quire.op.boolean.ne";
+pub const ENUM_EQ: &str = "quire.op.enum.eq";
+pub const ENUM_NE: &str = "quire.op.enum.ne";
+pub const STRUCTURAL_EQ: &str = "quire.op.structural.eq";
 
 pub fn id(label: &str) -> Value {
     json!({"package": PACKAGE, "path": [label], "ordinal": 0})
@@ -874,4 +877,68 @@ pub fn product_document() -> (Document, String, String) {
     );
     let claim = document.claim(&compare);
     (document, claim, product)
+}
+
+// Datatype fixtures of FR-022-AC-1.
+
+/// `role = Admin or role = Auditor`, then `second`: `role != Admin`, or `role = Guest`.
+pub fn membership(guest: bool) -> (Document, Vec<String>) {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
+    let r = document.parameter_of(&role);
+    let admin = document.enum_literal(&role, "Admin");
+    let auditor = document.enum_literal(&role, "Auditor");
+    let is_admin = document.op(ENUM_EQ, &[&r, &admin]);
+    let is_auditor = document.op(ENUM_EQ, &[&r, &auditor]);
+    let member = document.op(OR, &[&is_admin, &is_auditor]);
+    let second = if guest {
+        let guest = document.enum_literal(&role, "Guest");
+        document.op(ENUM_EQ, &[&r, &guest])
+    } else {
+        document.op(ENUM_NE, &[&r, &admin])
+    };
+    let first = document.claim(&member);
+    let second = document.claim(&second);
+    (document, vec![first, second])
+}
+
+/// `user.role = Admin`, and with `guest` also `user.role = Guest`.
+pub fn record_field(guest: bool) -> (Document, Vec<String>) {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
+    let user = document.record_type("User", &[("role", &role)]);
+    let u = document.parameter_of(&user);
+    let projected = document.project(&user, "role", &u, &role);
+    let admin = document.enum_literal(&role, "Admin");
+    let is_admin = document.op(ENUM_EQ, &[&projected, &admin]);
+    let mut claims = vec![document.claim(&is_admin)];
+    if guest {
+        let guest = document.enum_literal(&role, "Guest");
+        let is_guest = document.op(ENUM_EQ, &[&projected, &guest]);
+        claims.push(document.claim(&is_guest));
+    }
+    (document, claims)
+}
+
+/// `present(o) => value(o) = Admin`, or with `guarded` false only `value(o) = Admin`.
+pub fn option_value(guarded: bool) -> (Document, Vec<String>, String) {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
+    let maybe = document.option_type("MaybeRole", &role);
+    let o = document.parameter_of(&maybe);
+    let value = document.option_value(&o, &role);
+    let admin = document.enum_literal(&role, "Admin");
+    let is_admin = document.op(ENUM_EQ, &[&value, &admin]);
+    let body = if guarded {
+        let present = document.present(&o);
+        document.op(IMPLIES, &[&present, &is_admin])
+    } else {
+        is_admin
+    };
+    let claim = document.claim(&body);
+    (document, vec![claim], value)
+}
+
+pub fn labels(claims: &[String]) -> Vec<&str> {
+    claims.iter().map(String::as_str).collect()
 }

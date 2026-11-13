@@ -621,13 +621,75 @@ impl<'a> Walker<'a> {
         }
     }
 
+    /// The span of a type node, or the span of the claim in translation when the type node has
+    /// no source region.
+    fn type_span(&self, type_node: usize) -> SourceSpan {
+        self.spans
+            .node(type_node)
+            .unwrap_or_else(|_| self.span.clone())
+    }
+
+    /// The type node a term of an application argument has: the `semantic_type` of a reference
+    /// target, the `result_type` of an application, the `type` of a literal.
+    fn term_type(&self, term: &'a CheckedTerm) -> Option<&'a CheckedNodeId> {
+        let nodes = self.nodes;
+        match term {
+            CheckedTerm::Reference { target } => Some(&nodes[self.lookup(target)?].semantic_type),
+            CheckedTerm::Application { result_type, .. } => Some(result_type),
+            CheckedTerm::Literal { type_id, .. } => Some(type_id),
+            _ => None,
+        }
+    }
+
+    /// Refuses an application whose operand is not of the sort its identity takes.
+    fn check_sorts(
+        &self,
+        identity: &str,
+        arguments: &'a [CheckedTerm],
+        node: usize,
+    ) -> Result<(), TranslationError> {
+        let Some(accepts) = operand_sort(identity) else {
+            return Ok(());
+        };
+        for argument in arguments {
+            let kind = self
+                .term_type(argument)
+                .and_then(|id| self.lookup(id))
+                .and_then(|type_node| self.kind(type_node));
+            if !kind.is_some_and(accepts) {
+                return Err(cannot_lower(
+                    node,
+                    format!("operation {identity} does not apply to the type of its operand"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The field named by the `field` member of the `quire.op.record.project` application at
-    /// `node`. A package read by `ContractPackageWireV1::read` carries no admitted operation
-    /// views, so the member is read from the wire body.
-    fn projected_field(&self, node: usize) -> Result<SymbolName, TranslationError> {
+    /// `node`, which must declare the record type of its operand. A package read by
+    /// `ContractPackageWireV1::read` carries no admitted operation views, so the member is read
+    /// from the wire body.
+    fn projected_field(
+        &self,
+        node: usize,
+        operand: &'a CheckedTerm,
+    ) -> Result<SymbolName, TranslationError> {
         let body = serde_json::to_value(&self.nodes[node].body)
             .map_err(|error| cannot_lower(node, error.to_string()))?;
-        let name = body["operation"]["member"]["name"]
+        let member = &body["operation"]["member"];
+        if member["kind"].as_str() != Some("field") {
+            return Err(cannot_lower(node, "the projection member is not a field"));
+        }
+        let declaration = serde_json::from_value::<CheckedNodeId>(member["declaration"].clone())
+            .map_err(|_| cannot_lower(node, "the projection declares no record"))?;
+        if self.term_type(operand) != Some(&declaration) {
+            return Err(cannot_lower(
+                node,
+                "the projection declares a record other than the type of its operand",
+            ));
+        }
+        let name = member["name"]
             .as_str()
             .ok_or_else(|| cannot_lower(node, "the projection names no field"))?;
         SymbolName::new(name).map_err(|diagnostic| cannot_lower(node, diagnostic.message))
@@ -649,7 +711,7 @@ impl<'a> Walker<'a> {
         let Some((_, members)) = body.enum_details() else {
             return Err(cannot_lower(type_node, "the enum has no declaration body"));
         };
-        let span = self.spans.node(type_node)?;
+        let span = self.type_span(type_node);
         let variants = members
             .iter()
             .map(|member| {
@@ -694,7 +756,7 @@ impl<'a> Walker<'a> {
         let Some(CheckedTerm::Aggregate { members }) = self.terms[type_node] else {
             return Err(cannot_lower(type_node, "the record has no field list"));
         };
-        let span = self.spans.node(type_node)?;
+        let span = self.type_span(type_node);
         let mut fields = Vec::with_capacity(members.len());
         for member in members {
             let CheckedTerm::Binding { name: field, value } = member else {
@@ -920,8 +982,9 @@ impl<'a> Walker<'a> {
                         ),
                     ));
                 }
+                self.check_sorts(identity, arguments, node)?;
                 let field = if matches!(operation_kind, Operation::Project) {
-                    Some(self.projected_field(node)?)
+                    Some(self.projected_field(node, &arguments[0])?)
                 } else {
                     None
                 };
@@ -986,6 +1049,31 @@ impl<'a> Walker<'a> {
     fn make(&self, kind: ExpressionKind) -> Expression {
         Expression::new(kind, self.span.clone())
     }
+}
+
+fn is_enum(kind: CheckedNodeKind) -> bool {
+    kind == CheckedNodeKind::ScalarType(ScalarTypeForm::Enum)
+}
+
+fn is_record(kind: CheckedNodeKind) -> bool {
+    kind == CheckedNodeKind::CompositeType(CompositeTypeForm::Record)
+}
+
+fn is_option(kind: CheckedNodeKind) -> bool {
+    kind == CheckedNodeKind::CompositeType(CompositeTypeForm::Option)
+}
+
+/// The operand sort test of a datatype identity, `None` for any other identity.
+fn operand_sort(identity: &str) -> Option<fn(CheckedNodeKind) -> bool> {
+    Some(match identity {
+        OP_ENUM_EQ | OP_ENUM_NE => is_enum,
+        OP_STRUCTURAL_EQ | OP_STRUCTURAL_NE => {
+            |kind| is_enum(kind) || is_record(kind) || is_option(kind)
+        }
+        OP_RECORD_PROJECT => is_record,
+        OP_OPTION_PRESENT | OP_OPTION_VALUE => is_option,
+        _ => return None,
+    })
 }
 
 fn first_cannot_lower(node: usize, diagnostics: &[Diagnostic]) -> TranslationError {

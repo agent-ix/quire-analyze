@@ -14,14 +14,11 @@ use quire_contract_model::{
     BooleanOperator, ComparisonOperator, ContractPackageV1, Expression, ExpressionKind,
     TypeDeclaration, ValueDeclarationKind, ValueType,
 };
+use serde_json::json;
 
 mod common;
 
 use common::*;
-
-const ENUM_EQ: &str = "quire.op.enum.eq";
-const ENUM_NE: &str = "quire.op.enum.ne";
-const STRUCTURAL_EQ: &str = "quire.op.structural.eq";
 
 fn kind_of(expression: &Expression) -> &ExpressionKind {
     expression.kind()
@@ -46,68 +43,6 @@ fn enum_literal(expression: &Expression) -> (&str, &str) {
         } => (enumeration.as_str(), variant.as_str()),
         other => panic!("not an enum literal: {other:?}"),
     }
-}
-
-/// `role = Admin or role = Auditor`, then `second`: `role != Admin`, or `role = Guest`.
-fn membership(guest: bool) -> (Document, Vec<String>) {
-    let mut document = Document::new();
-    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
-    let r = document.parameter_of(&role);
-    let admin = document.enum_literal(&role, "Admin");
-    let auditor = document.enum_literal(&role, "Auditor");
-    let is_admin = document.op(ENUM_EQ, &[&r, &admin]);
-    let is_auditor = document.op(ENUM_EQ, &[&r, &auditor]);
-    let member = document.op(OR, &[&is_admin, &is_auditor]);
-    let second = if guest {
-        let guest = document.enum_literal(&role, "Guest");
-        document.op(ENUM_EQ, &[&r, &guest])
-    } else {
-        document.op(ENUM_NE, &[&r, &admin])
-    };
-    let first = document.claim(&member);
-    let second = document.claim(&second);
-    (document, vec![first, second])
-}
-
-/// `user.role = Admin`, and with `guest` also `user.role = Guest`.
-fn record_field(guest: bool) -> (Document, Vec<String>) {
-    let mut document = Document::new();
-    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
-    let user = document.record_type("User", &[("role", &role)]);
-    let u = document.parameter_of(&user);
-    let projected = document.project(&user, "role", &u, &role);
-    let admin = document.enum_literal(&role, "Admin");
-    let is_admin = document.op(ENUM_EQ, &[&projected, &admin]);
-    let mut claims = vec![document.claim(&is_admin)];
-    if guest {
-        let guest = document.enum_literal(&role, "Guest");
-        let is_guest = document.op(ENUM_EQ, &[&projected, &guest]);
-        claims.push(document.claim(&is_guest));
-    }
-    (document, claims)
-}
-
-/// `present(o) => value(o) = Admin`, or with `guarded` false only `value(o) = Admin`.
-fn option_value(guarded: bool) -> (Document, Vec<String>, String) {
-    let mut document = Document::new();
-    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
-    let maybe = document.option_type("MaybeRole", &role);
-    let o = document.parameter_of(&maybe);
-    let value = document.option_value(&o, &role);
-    let admin = document.enum_literal(&role, "Admin");
-    let is_admin = document.op(ENUM_EQ, &[&value, &admin]);
-    let body = if guarded {
-        let present = document.present(&o);
-        document.op(IMPLIES, &[&present, &is_admin])
-    } else {
-        is_admin
-    };
-    let claim = document.claim(&body);
-    (document, vec![claim], value)
-}
-
-fn labels(claims: &[String]) -> Vec<&str> {
-    claims.iter().map(String::as_str).collect()
 }
 
 #[trace("FR-022-AC-1", "FR-022-AC-2", "TC-020")]
@@ -281,8 +216,9 @@ fn an_unguarded_option_value_is_refused_by_the_validator_naming_the_claim() {
         "{error}"
     );
     assert_eq!(error.clause(), Some(format!("claim-{claim}").as_str()));
+    assert_eq!(error.path(), "expression", "{error}");
     assert!(
-        !error.path().starts_with("semantic_graph.nodes["),
+        error.message().contains("presence is not established"),
         "{error}"
     );
     assert_ne!(error.node(), Some(index(&package, &value)));
@@ -436,4 +372,181 @@ fn the_official_engines_decide_the_enum_membership_fixtures() {
             "guest {guest}: {run:#?}"
         );
     }
+}
+
+fn mutate(bytes: &[u8], edit: impl FnOnce(&mut serde_json::Value)) -> ContractPackageV1 {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes).expect("package json");
+    edit(&mut value);
+    read_package(&serde_json::to_vec(&value).expect("package bytes"))
+}
+
+/// The `record.project` application of `record_field(false)`, and its package bytes.
+fn projection_bytes() -> (Vec<u8>, String, String) {
+    let (document, claims) = record_field(false);
+    let bytes = document.bytes(&labels(&claims));
+    let project = document
+        .nodes
+        .iter()
+        .find(|node| node["body"]["operation"]["identity"] == "quire.op.record.project")
+        .map(|node| {
+            node["node_id"]["path"][0]
+                .as_str()
+                .expect("label")
+                .to_owned()
+        })
+        .expect("projection");
+    let operand = document
+        .nodes
+        .iter()
+        .find(|node| node["semantic_form"] == "parameter")
+        .map(|node| {
+            node["node_id"]["path"][0]
+                .as_str()
+                .expect("label")
+                .to_owned()
+        })
+        .expect("operand");
+    (bytes, project, operand)
+}
+
+#[trace("FR-022-AC-3", "TC-020")]
+#[test]
+fn a_projection_member_that_is_not_a_field_of_the_operand_record_is_refused_at_the_node() {
+    let (bytes, project, operand) = projection_bytes();
+    let node = index(&read_package(&bytes), &project);
+    let edits: [(&str, serde_json::Value); 2] = [
+        ("kind", json!("type_argument")),
+        ("declaration", id(&operand)),
+    ];
+    for (member, replacement) in edits {
+        let edited = with_node(&bytes, &project, |node| {
+            if member == "declaration" {
+                node["dependencies"] = json!([replacement.clone()]);
+            }
+            node["body"]["operation"]["member"][member] = replacement;
+        });
+        let package = read_package(&edited);
+        let error = translate_analysis_claims(&package).expect_err(member);
+        assert_eq!(error.kind(), TranslationErrorKind::CannotLower, "{error}");
+        assert_eq!(error.node(), Some(node), "{member}: {error}");
+    }
+}
+
+#[trace("FR-022-AC-3", "TC-020")]
+#[test]
+fn an_identity_applied_to_an_operand_of_another_sort_is_refused_at_the_node() {
+    // `structural.eq` over two options, read as `enum.eq`.
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let maybe = document.option_type("MaybeRole", &role);
+    let o = document.parameter_of(&maybe);
+    let same = document.op(STRUCTURAL_EQ, &[&o, &o]);
+    let claim = document.claim(&same);
+    let edited = with_identity(&document.bytes(&[&claim]), &same, ENUM_EQ);
+    let package = read_package(&edited);
+    let error = translate_analysis_claims(&package).expect_err("option under enum.eq");
+    assert_eq!(error.node(), Some(index(&package, &same)), "{error}");
+    assert!(error.message().contains("does not apply"), "{error}");
+
+    // A projection of a record, read as `option.value`.
+    let (bytes, project, _) = projection_bytes();
+    let edited = with_identity(&bytes, &project, "quire.op.option.value");
+    let package = read_package(&edited);
+    let error = translate_analysis_claims(&package).expect_err("record under option.value");
+    assert_eq!(error.node(), Some(index(&package, &project)), "{error}");
+    assert!(error.message().contains("does not apply"), "{error}");
+}
+
+#[trace("FR-022-AC-2", "TC-020")]
+#[test]
+fn a_type_node_without_a_source_region_takes_the_span_of_its_claim() {
+    let (document, claims) = membership(false);
+    let bytes = document.bytes(&labels(&claims));
+    let node = index(&read_package(&bytes), "Role");
+    let package = mutate(&bytes, |value| {
+        value["semantic_graph"]["nodes"][node]["occurrences"] = json!([]);
+        value["source_map"]["nodes"][node]["occurrences"] = json!([]);
+    });
+    let translation = translate_analysis_claims(&package).expect("translates");
+    let claim_span = translation.package().requirements()[0].clauses()[0].source();
+    let TypeDeclaration::Enum { declaration } = &translation.environment().types()[0] else {
+        panic!("not an enum");
+    };
+    assert_eq!(declaration.source(), claim_span);
+}
+
+#[trace("FR-022-AC-2", "TC-020")]
+#[test]
+fn a_record_type_that_contains_itself_is_refused_at_the_type_node() {
+    let (document, claims) = record_field(false);
+    let bytes = document.bytes(&labels(&claims));
+    let user = index(&read_package(&bytes), "composite_type/User");
+    let package = mutate(&bytes, |value| {
+        let node = &mut value["semantic_graph"]["nodes"][user];
+        node["recursion_group"] = json!("loop");
+        node["dependencies"] = json!([id("Role"), id("composite_type/User")]);
+        value["semantic_graph"]["nodes"][user]["body"]["members"]
+            .as_array_mut()
+            .expect("fields")
+            .push(json!({"term": "binding", "name": "next",
+                "value": {"term": "reference", "target": id("composite_type/User")}}));
+    });
+    let error = translate_analysis_claims(&package).expect_err("cycle");
+    assert_eq!(error.kind(), TranslationErrorKind::CannotLower, "{error}");
+    assert_eq!(error.node(), Some(user), "{error}");
+    assert!(error.message().contains("contains itself"), "{error}");
+}
+
+#[trace("FR-022-AC-5", "TC-020")]
+#[test]
+fn a_record_chain_nested_past_the_depth_bound_is_refused_at_a_type_node() {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let mut inner = role.clone();
+    for level in 0..130 {
+        inner = document.record_type(&format!("R{level}"), &[("inner", &inner)]);
+    }
+    let u = document.parameter_of(&inner);
+    let projected = document.project(&inner, "inner", &u, "composite_type/R128");
+    let same = document.op(STRUCTURAL_EQ, &[&projected, &projected]);
+    let claim = document.claim(&same);
+    let (_, error) = refusal(&document, &[&claim]);
+    assert_eq!(error.kind(), TranslationErrorKind::CannotLower, "{error}");
+    assert!(error.message().contains("nests deeper"), "{error}");
+}
+
+/// FR-020 "Replay until FR-021": the model of a satisfiable enum claim is incomplete with the
+/// reason `sort_not_replayable` naming the enum variable.
+#[trace("FR-022-AC-1", "FR-020-AC-10", "TC-020")]
+#[test]
+fn a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable() {
+    use quire_analyze::{classify_analysis, execute_solver, ExplanationState, ReplayFailureReason};
+    use std::os::unix::fs::PermissionsExt;
+
+    let (document, claims) = membership(false);
+    let (_, translation) = translate(&document, &labels(&claims));
+    let query = lower_analysis_request(translation.request()).expect("query");
+    let sort = &query.enum_sorts()[0];
+    let variable = &query.variables()[0].symbol;
+    let model = format!(
+        "sat\n(model (define-fun {variable} () {} {}))\n",
+        sort.sort, sort.constructors[1].symbol
+    );
+    let directory = TempDir::new("solver");
+    let path = directory.path().join("solver");
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"-version\" ] || [ \"$1\" = \"--version\" ]; then printf 'fake 1.0\\n'; exit 0; fi\n/bin/cat >/dev/null; printf '%s' '{model}'\n"
+    );
+    std::fs::write(&path, script).expect("solver");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).expect("mode");
+    let config = SolverConfig::new(SolverEngine::Z3, &path, AdapterLimits::default())
+        .expect("configuration");
+    let record = execute_solver(&query, &config, &CancellationToken::default());
+    let conclusion = classify_analysis(&query, &record);
+    assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
+    assert!(conclusion.verified_model().is_none());
+    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+    let failure = conclusion.replay_failure().expect("replay failure");
+    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
+    assert_eq!(failure.subject(), Some(variable.as_str()));
 }

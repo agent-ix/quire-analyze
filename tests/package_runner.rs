@@ -20,8 +20,8 @@ use std::{
 };
 
 use common::{
-    cycle_document, id, integer_cycle_document, not_chain, product_document, with_identity,
-    Document, Sized, TempDir, AND, NOT,
+    cycle_document, id, integer_cycle_document, labels, not_chain, option_value, product_document,
+    record_field, with_identity, Document, Sized, TempDir, AND, ENUM_EQ, NOT,
 };
 use ix_trace_rs::trace;
 use quire_analyze::{
@@ -1491,8 +1491,6 @@ fn integer_refusals_exit_two_naming_the_node_through_the_runner() {
     }
 }
 
-const ENUM_EQ: &str = "quire.op.enum.eq";
-
 /// `role = Admin or role = Auditor` and `role = Guest`: contradictory over the three roles.
 fn guest_membership() -> Vec<u8> {
     let mut document = Document::new();
@@ -1629,6 +1627,38 @@ fn an_unguarded_option_value_exits_two_naming_the_clause_through_the_runner() {
     assert_eq!(run.code, Some(2), "{}", run.stderr);
     let clause = format!("claim-{}", node_index(&bytes, &claim));
     assert!(run.stderr.contains(&clause), "{clause}: {}", run.stderr);
+    let expected = format!("{clause} at expression: option presence is not established");
+    assert!(run.stderr.contains(&expected), "{expected}: {}", run.stderr);
     assert!(fixture.requests().is_empty());
     fixture.assert_no_report();
+}
+
+/// FR-022-AC-1 fixtures 3 to 5 need the record and option lowering.
+#[trace("FR-022-AC-1", "TC-020")]
+#[test]
+#[ignore = "needs VER-86 record/option lowering"]
+fn record_and_option_fixtures_have_their_fixed_exits_through_the_runner() {
+    let satisfiable = "sat\n(model)\n";
+    let cases: [(Vec<u8>, &str, i32); 3] = [
+        (bytes_of(record_field(false)), satisfiable, 3),
+        (bytes_of(record_field(true)), "unsat\n", 1),
+        (
+            {
+                let (document, claims, _) = option_value(true);
+                document.bytes(&labels(&claims))
+            },
+            satisfiable,
+            3,
+        ),
+    ];
+    for (bytes, answer, code) in cases {
+        let fixture = Fixture::new(&bytes);
+        fixture.both(answer, answer);
+        let run = fixture.run();
+        assert_eq!(run.code, Some(code), "{}", run.stderr);
+    }
+}
+
+fn bytes_of((document, claims): (Document, Vec<String>)) -> Vec<u8> {
+    document.bytes(&labels(&claims))
 }
