@@ -123,6 +123,15 @@ struct Cancellation {
     kind: &'static str,
 }
 
+/// An output description; uninhabited because the budget allows no output artifacts.
+#[derive(Clone, Debug, Serialize)]
+enum NoOutput {}
+
+#[derive(Clone, Debug, Serialize)]
+struct ExitCodes {
+    kind: &'static str,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Budget {
@@ -141,7 +150,7 @@ struct RequestResponse {
     protocol: Contract,
     adapter: Contract,
     #[serde(rename = "exitCodes")]
-    exit_codes: Cancellation,
+    exit_codes: ExitCodes,
 }
 
 /// One `engineering-assurance.producer-execution-request/v1` document.
@@ -161,7 +170,8 @@ pub struct ProducerExecutionRequest {
     environment: BTreeMap<String, String>,
     inputs: Vec<RequestInput>,
     stdin: RequestStdin,
-    outputs: Vec<()>,
+    /// Always empty: the budget allows no output artifacts, so no output is describable.
+    outputs: Vec<NoOutput>,
     containment: Containment,
     cancellation: Cancellation,
     budget: Budget,
@@ -286,7 +296,7 @@ fn build_request(
                 kind: RESPONSE_ADAPTER_KIND,
                 version: "1",
             },
-            exit_codes: Cancellation { kind: "any" },
+            exit_codes: ExitCodes { kind: "any" },
         },
     })
 }
@@ -363,6 +373,7 @@ struct Stream {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ProcessEvidence {
+    #[serde(deserialize_with = "Option::deserialize")]
     terminal_status: Option<TerminalStatus>,
     stdout: Stream,
     stderr: Stream,
@@ -373,6 +384,7 @@ struct ProcessEvidence {
 struct Timing {
     #[allow(dead_code)]
     preflight_nanos: u64,
+    #[serde(deserialize_with = "Option::deserialize")]
     execution_nanos: Option<u64>,
     #[allow(dead_code)]
     total_nanos: u64,
@@ -402,14 +414,14 @@ enum RefusalReason {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum FailureReason {
     ExitCode { value: i64 },
     Signal { value: i64 },
-    StdoutTooLarge,
-    StderrTooLarge,
-    Observation,
-    OutputArtifact,
+    StdoutTooLarge {},
+    StderrTooLarge {},
+    Observation {},
+    OutputArtifact {},
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -419,13 +431,13 @@ struct Observation {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum State {
-    Unavailable,
-    TimedOut,
-    MalformedResponse,
-    ContainmentFailure,
-    Cancelled,
+    Unavailable {},
+    TimedOut {},
+    MalformedResponse {},
+    ContainmentFailure {},
+    Cancelled {},
     Refused {
         #[allow(dead_code)]
         reason: RefusalReason,
@@ -451,6 +463,7 @@ pub struct ProducerExecutionResult {
     timing: Timing,
     #[allow(dead_code)]
     observed_host: Value,
+    #[serde(deserialize_with = "Option::deserialize")]
     process: Option<ProcessEvidence>,
     #[allow(dead_code)]
     artifacts: Vec<ResultArtifact>,
@@ -462,7 +475,12 @@ pub struct ProducerExecutionResult {
 /// The bytes are exactly one JSON document and one line terminator; anything else, an unknown
 /// field, a wrong protocol, or a `completed` state without retained process evidence is an error.
 pub fn parse_result_line(stdout: &[u8]) -> Result<ProducerExecutionResult, EvidenceError> {
-    let line = stdout.strip_suffix(b"\n").unwrap_or(stdout);
+    let Some(line) = stdout.strip_suffix(b"\n") else {
+        return Err(EvidenceError::new(
+            EvidenceErrorKind::ResultLine,
+            "producer-execute stdout must end with a newline-terminated result line",
+        ));
+    };
     if line.is_empty() || line.contains(&b'\n') {
         return Err(EvidenceError::new(
             EvidenceErrorKind::ResultLine,
@@ -501,20 +519,22 @@ impl ProducerExecutionResult {
 fn state_outcome(state: State, host_is_linux: bool) -> Option<SolverOutcome> {
     Some(match state {
         State::Completed { .. } => return None,
-        State::Unavailable => SolverOutcome::MissingExecutable,
-        State::TimedOut => SolverOutcome::TimedOut,
+        State::Unavailable {} => SolverOutcome::MissingExecutable,
+        State::TimedOut {} => SolverOutcome::TimedOut,
         State::Failed { reason } => match reason {
             FailureReason::ExitCode { .. } => SolverOutcome::NonzeroExit,
             FailureReason::Signal { .. } => SolverOutcome::Signaled,
-            FailureReason::StdoutTooLarge => SolverOutcome::StdoutLimit,
-            FailureReason::StderrTooLarge => SolverOutcome::StderrLimit,
-            FailureReason::Observation | FailureReason::OutputArtifact => SolverOutcome::IoError,
+            FailureReason::StdoutTooLarge {} => SolverOutcome::StdoutLimit,
+            FailureReason::StderrTooLarge {} => SolverOutcome::StderrLimit,
+            FailureReason::Observation {} | FailureReason::OutputArtifact {} => {
+                SolverOutcome::IoError
+            }
         },
         State::Refused { .. } => SolverOutcome::SpawnError,
-        State::MalformedResponse => SolverOutcome::MalformedOutput,
-        State::ContainmentFailure if host_is_linux => SolverOutcome::CleanupFailed,
-        State::ContainmentFailure => SolverOutcome::UnsupportedPlatform,
-        State::Cancelled => SolverOutcome::Cancelled,
+        State::MalformedResponse {} => SolverOutcome::MalformedOutput,
+        State::ContainmentFailure {} if host_is_linux => SolverOutcome::CleanupFailed,
+        State::ContainmentFailure {} => SolverOutcome::UnsupportedPlatform,
+        State::Cancelled {} => SolverOutcome::Cancelled,
     })
 }
 
@@ -692,17 +712,140 @@ fn process_exit(status: TerminalStatus) -> ProcessExit {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use quire_contract_model::{
+        AnchorName, Clause, ClauseId, ClauseKind, ContractPackage, DeclarationEnvironment,
+        ExecutionPoint, Expression, ExpressionKind, PackageId, Requirement, RequirementId,
+        RequirementRef, RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity,
+        SourceLocation, SourceRevision, SourceSpan, TypedExpression, ValueType,
+    };
+    use serde_json::json;
 
+    use super::*;
+    use crate::DifferentialDisposition;
+    use crate::{compare_solver_records, lower_boolean_statements, AdapterLimits, SolverEngine};
+
+    fn parsed(state: &Value) -> ProducerExecutionResult {
+        let mut line = serde_json::to_vec(&json!({
+            "protocol": PRODUCER_RESULT_PROTOCOL,
+            "producer": {"name": "z3", "version": "Z3", "executable": "/opt/z3"},
+            "cancellationEvent": null,
+            "timing": {"preflightNanos": 1, "executionNanos": null, "totalNanos": 2},
+            "observedHost": null,
+            "process": null,
+            "artifacts": [],
+            "state": state,
+        }))
+        .expect("serialize");
+        line.push(b'\n');
+        parse_result_line(&line).expect("result document")
+    }
+
+    fn completed_version() -> ProducerExecutionResult {
+        let mut line = serde_json::to_vec(&json!({
+            "protocol": PRODUCER_RESULT_PROTOCOL,
+            "producer": {"name": "z3", "version": "Z3", "executable": "/opt/z3"},
+            "cancellationEvent": null,
+            "timing": {"preflightNanos": 1, "executionNanos": 3, "totalNanos": 4},
+            "observedHost": null,
+            "process": {
+                "terminalStatus": {"kind": "exit_code", "value": 0},
+                "stdout": {"bytes": b"Z3 version 4.13\n", "truncated": false},
+                "stderr": {"bytes": [], "truncated": false},
+            },
+            "artifacts": [],
+            "state": {"kind": "completed", "observation": {"exitCode": 0}},
+        }))
+        .expect("serialize");
+        line.push(b'\n');
+        parse_result_line(&line).expect("result document")
+    }
+
+    fn one_statement_query() -> QueryBundle {
+        let span = {
+            let source = SourceIdentity::new(
+                SourceDocumentId::new("evidence-unit").expect("source id"),
+                SourceRevision::new(1).expect("source revision"),
+            );
+            SourceSpan::new(
+                SourceLocation::new(source.clone(), 1, 1, 0).expect("start"),
+                SourceLocation::new(source, 1, 2, 1).expect("end"),
+            )
+            .expect("span")
+        };
+        let package_id = PackageId::new("agent-ix/evidence-unit").expect("package");
+        let requirement_id = RequirementId::new("REQ-evidence-0").expect("requirement");
+        let revision = RequirementRevision::new(1).expect("revision");
+        let owner = RequirementRef::new(package_id.clone(), requirement_id.clone(), revision);
+        let environment =
+            DeclarationEnvironment::new(owner, vec![], vec![], vec![]).expect("environment");
+        let point = ExecutionPoint::Pre {
+            operation: AnchorName::new("solve").expect("anchor").into(),
+        };
+        let expression =
+            Expression::new(ExpressionKind::BooleanLiteral { value: true }, span.clone());
+        let checked = environment
+            .check_expression(&expression, &ValueType::Boolean, &point, true)
+            .expect("typed expression");
+        let clause = Clause::new(
+            ClauseId::new("C-evidence-0").expect("clause"),
+            ClauseKind::Assertion,
+            Some(point),
+            span.clone(),
+            checked,
+        )
+        .expect("clause");
+        let requirement = Requirement::<TypedExpression>::new(
+            &package_id,
+            requirement_id,
+            revision,
+            span.clone(),
+            vec![clause],
+        )
+        .expect("requirement");
+        let package = ContractPackage::new(
+            package_id,
+            SchemaVersion::V1_1,
+            span.source().clone(),
+            vec![requirement],
+        )
+        .expect("package");
+        let statement = crate::StatementInput::from_clause(
+            &package,
+            &package.requirements()[0],
+            &package.requirements()[0].clauses()[0],
+            environment,
+        )
+        .expect("statement");
+        lower_boolean_statements(&[statement], &[]).expect("query")
+    }
+
+    /// Off Linux a `containment_failure` is `unsupported-platform`, whose disposition is
+    /// `unavailable`; on Linux it is `cleanup-failed`, which is inconclusive.
     #[test]
-    fn containment_failure_is_unsupported_off_linux() {
-        assert_eq!(
-            state_outcome(State::ContainmentFailure, false),
-            Some(SolverOutcome::UnsupportedPlatform)
-        );
-        assert_eq!(
-            state_outcome(State::ContainmentFailure, true),
-            Some(SolverOutcome::CleanupFailed)
-        );
+    fn containment_failure_disposition_follows_the_host() {
+        let query = one_statement_query();
+        let config = SolverConfig::new(SolverEngine::Z3, "/opt/z3", AdapterLimits::default())
+            .expect("solver config");
+        let version = completed_version();
+        let failure = parsed(&json!({"kind": "containment_failure"}));
+        for (host_is_linux, outcome, disposition) in [
+            (
+                false,
+                SolverOutcome::UnsupportedPlatform,
+                DifferentialDisposition::Unavailable,
+            ),
+            (
+                true,
+                SolverOutcome::CleanupFailed,
+                DifferentialDisposition::Inconclusive,
+            ),
+        ] {
+            let record = record_on_host(&query, &config, &version, Some(&failure), host_is_linux);
+            assert_eq!(record.outcome(), outcome);
+            assert_eq!(
+                compare_solver_records(&query, &record, &record).disposition(),
+                disposition
+            );
+        }
     }
 }
