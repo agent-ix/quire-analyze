@@ -34,7 +34,9 @@ solver quantifier.
 - Analysis-model input. The contract model has no range-domain quantifier form, so a range reaches
   lowering as an analysis-model formula attached to a statement:
   - `AnalysisFormula` is a Boolean tree whose leaves are quantifier-free contract expressions
-    (`Term`) and whose nodes are `Not`, `And`, `Or`, `Implies` and `Range`. A leaf names a
+    (`Term`) and whose nodes are `Not`, `And`, `Or`, `Implies`, `Range` and `Domain`. `Range` holds
+    a `RangeQuantifier`; `Domain` holds the `DomainQuantifier` defined by
+    [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md). A leaf names a
     quantifier's bound variable with `LocalReference`; the nearest enclosing quantifier that binds
     that name wins, so an inner quantifier that reuses a name shadows the outer one, and a
     `ValueReference` of the same name is a different, free variable that is never captured.
@@ -54,19 +56,22 @@ solver quantifier.
     different formula over one clause is a different assertion. `with_formula` refuses, as
     `InvalidStatement`, an empty quantifier identity, a bound-variable reference with no enclosing
     quantifier, a non-empty literal range that lies outside `local_type`, and a declared bound
-    whose input type lies outside `local_type`. Whether a bound is finite is decided at lowering.
+    whose input type lies outside `local_type`. For a `DomainQuantifier`, it also checks the
+    domain/local-type match and each finite-collection member as defined in
+    [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md) and
+    [FR-030-AC-6](./FR-030-bounded-quantifier-domains.md). Whether a range bound is finite is
+    decided at lowering.
   - `QueryBundle::quantifiers` is the quantifier map of [FR-030](./FR-030-bounded-quantifier-domains.md).
+    Its entry carries either range bounds or typed domain members; these alternatives cannot both
+    be present.
 - Budget order. The budget of [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md) is
   spent in canonical order: statements in ascending assertion-symbol order, and within a statement
   the quantifiers in depth-first pre-order (a quantifier before the quantifiers in its body,
   siblings left to right). The quantifier map lists entries in that order, so the encodings do not
   depend on the order in which the caller lists the statements.
-- Instance identity. Expansion follows [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md)
-  for instance order, substitution and budget. The per-instance retention of the quantifier's source
-  identity and element, and the counterexample that names a failing instance
-  ([FR-031-AC-5](./FR-031-enum-and-collection-quantifier-lowering.md)), are provided for a range by
-  the quantified replay of [FR-033](./FR-033-quantified-assertion-replay.md); until then the
-  assertion map names the failing assertion and the quantifier map records the source identity.
+- Instance identity. Range expansion records its lower and upper bounds in the quantifier map;
+  enum and collection expansion records typed members in instance order. Replay identifies a
+  failing instance under [FR-033](./FR-033-quantified-assertion-replay.md).
 - Interim replay. Expanded ranges are quantifier-free and replay exactly. A bounded solver
   quantifier is not replayed until FR-033: a satisfiable model of a query that holds one is
   incomplete with reason `quantifier_not_replayable` ([FR-011](./FR-011-integer-witness-replay.md))

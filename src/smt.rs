@@ -5,17 +5,18 @@ use std::{
 
 use quire_contract_model::{
     BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
-    DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType,
-    NumericOperator, OverflowPolicy, QuantifierKind, RecordDeclaration, RecordLiteralField,
-    Requirement, RequirementRef, SourceSpan, StateObservation, SymbolName, TypeDeclaration,
-    TypedExpression, ValueDeclarationKind, ValueType,
+    DeclarationEnvironment, EnumDeclaration, ExecutionPoint, Expression, ExpressionKind,
+    IntegerDomain, IntegerType, NumericOperator, OverflowPolicy, QuantifierKind, RecordDeclaration,
+    RecordLiteralField, Requirement, RequirementRef, SourceSpan, StateObservation, SymbolName,
+    TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
 
 use crate::datatype_replay::{ReplayDatum, ReplayItem, ReplayShape, ReplayValue};
 use crate::quantifier::{
-    expansion_cost, literal_width, AnalysisFormula, QuantifierDomainClass, QuantifierEncoding,
-    QuantifierEntry, QuantifierReason, QuantifierRefusal, RangeBound, RangeQuantifier,
+    AnalysisFormula, DomainElement, DomainQuantifier, QuantifierDomain, QuantifierEncoding,
+    QuantifierEntry, QuantifierEntryDomain, QuantifierReason, QuantifierRefusal, RangeBound,
+    RangeQuantifier, expansion_cost, literal_width,
 };
 
 /// The accepted engine-neutral analysis model profile.
@@ -474,7 +475,11 @@ impl BindingGroup {
             .skip(1)
             .any(|member| !members[0].compatible_with(member))
         {
-            return Err(LoweringError::new(LoweringErrorCode::InvalidBinding, "binding.members", "binding members differ in package, kind, observation, execution point, or type shape"));
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidBinding,
+                "binding.members",
+                "binding members differ in package, kind, observation, execution point, or type shape",
+            ));
         }
         Ok(Self { id, members })
     }
@@ -535,6 +540,8 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "option_presence",
         "option_access",
         "range_quantifier",
+        "enum_quantifier",
+        "collection_quantifier",
     ],
     unsupported_constructs: &[
         "non_linear_arithmetic",
@@ -1391,15 +1398,31 @@ struct QuantifierState {
 /// A bound variable in scope while a quantifier body is lowered.
 struct LocalBinding {
     name: SymbolName,
-    value_type: IntegerType,
+    value_type: ValueType,
     value: LocalValue,
 }
 
+#[derive(Clone)]
 enum LocalValue {
-    /// An expanded instance: the element itself.
+    /// An expanded integer instance: the element itself.
     Element(i128),
+    /// An expanded Boolean instance.
+    Boolean(bool),
+    /// An expanded enum instance.
+    Variant {
+        enumeration: SymbolName,
+        variant: SymbolName,
+    },
     /// A bounded quantifier: the bound variable's query symbol.
     Symbol(String),
+}
+
+/// The members one expanded quantifier ranges over, with the bound variable they bind.
+struct Instances<'a, I> {
+    kind: QuantifierKind,
+    local: &'a SymbolName,
+    local_type: &'a ValueType,
+    members: I,
 }
 
 /// A formula whose quantifiers have each been given an encoding.
@@ -1414,6 +1437,12 @@ enum Planned<'f> {
         quantifier: &'f RangeQuantifier,
         lower: i128,
         upper: i128,
+        body: Box<Planned<'f>>,
+    },
+    /// An enum or collection domain expanded to one body instance per member, in domain order.
+    Enumerated {
+        quantifier: &'f DomainQuantifier,
+        members: Vec<LocalValue>,
         body: Box<Planned<'f>>,
     },
     /// A solver quantifier with a finite interval guard.
@@ -1489,6 +1518,9 @@ impl LowerState<'_> {
             AnalysisFormula::Range(quantifier) => {
                 self.plan_range(quantifier, depth, path, enclosing)?
             }
+            AnalysisFormula::Domain(quantifier) => {
+                self.plan_domain(quantifier, depth, path, enclosing)?
+            }
         })
     }
 
@@ -1518,11 +1550,12 @@ impl LowerState<'_> {
         self.quantifiers.entries.push(QuantifierEntry {
             source: quantifier.identity.clone(),
             kind: quantifier.kind,
-            domain: QuantifierDomainClass::Range,
             encoding,
             instance_count: count,
-            lower: quantifier.lower.clone(),
-            upper: quantifier.upper.clone(),
+            domain_data: QuantifierEntryDomain::Range {
+                lower: quantifier.lower.clone(),
+                upper: quantifier.upper.clone(),
+            },
         });
         let body_path = path.child("body");
         Ok(match expansion {
@@ -1546,6 +1579,139 @@ impl LowerState<'_> {
                 }
             }
         })
+    }
+
+    /// Expands an enum or collection domain. The domain is refused when it has no finite exact
+    /// members or when its expansion does not fit the remaining budget; such a quantifier is
+    /// never bounded, because only a range has a solver form.
+    fn plan_domain<'f>(
+        &mut self,
+        quantifier: &'f DomainQuantifier,
+        depth: usize,
+        path: &ExprPath<'_>,
+        enclosing: u128,
+    ) -> Result<Planned<'f>, LoweringError> {
+        let (domain_data, elements) = self.domain_members(quantifier, path)?;
+        let width = u128::try_from(elements.len()).ok();
+        let Some(count) = expansion_cost(width, enclosing, self.quantifiers.used) else {
+            return Err(refused(
+                path,
+                &quantifier.identity,
+                QuantifierReason::ExpansionCeiling,
+                "domain expansion exceeds the instance budget (expansion-ceiling)",
+            ));
+        };
+        // `count` is at most the budget, so the sum cannot overflow.
+        self.quantifiers.used += count;
+        self.quantifiers.entries.push(QuantifierEntry {
+            source: quantifier.identity.clone(),
+            kind: quantifier.kind,
+            encoding: QuantifierEncoding::Expanded,
+            instance_count: count,
+            domain_data,
+        });
+        let members = elements
+            .into_iter()
+            .map(|element| match element {
+                DomainElement::Boolean(value) => LocalValue::Boolean(value),
+                DomainElement::Enum {
+                    enumeration,
+                    variant,
+                } => LocalValue::Variant {
+                    enumeration,
+                    variant,
+                },
+                DomainElement::Integer(value) => LocalValue::Element(value),
+            })
+            .collect();
+        let body = self.plan(&quantifier.body, depth + 1, &path.child("body"), count)?;
+        Ok(Planned::Enumerated {
+            quantifier,
+            members,
+            body: Box::new(body),
+        })
+    }
+
+    /// The members of a domain in instance order, with the domain class of the quantifier map.
+    fn domain_members(
+        &self,
+        quantifier: &DomainQuantifier,
+        path: &ExprPath<'_>,
+    ) -> Result<(QuantifierEntryDomain, Vec<DomainElement>), LoweringError> {
+        match &quantifier.domain {
+            QuantifierDomain::Unbounded(class) => Err(refused(
+                path,
+                &quantifier.identity,
+                class.reason(),
+                &format!("{} domain has no finite members", class.as_str()),
+            )),
+            QuantifierDomain::Enum(name) => {
+                let declaration = enum_declaration(&self.statement.environment, name)
+                    .ok_or_else(|| invalid_domain(path, "enum domain does not resolve"))?;
+                let members: Vec<DomainElement> = declaration
+                    .variants()
+                    .iter()
+                    .map(|variant| DomainElement::Enum {
+                        enumeration: name.clone(),
+                        variant: variant.name().clone(),
+                    })
+                    .collect();
+                Ok((
+                    QuantifierEntryDomain::Enum {
+                        elements: members.clone(),
+                    },
+                    members,
+                ))
+            }
+            QuantifierDomain::Collection { kind, elements } => {
+                let mut keyed = Vec::with_capacity(elements.len());
+                for element in elements {
+                    let key = self.element_key(element).ok_or_else(|| {
+                        invalid_domain(path, "collection element does not resolve")
+                    })?;
+                    keyed.push((key, element));
+                }
+                if kind.sorted() {
+                    // The sort is stable, so equal elements of a bag keep their written order.
+                    keyed.sort_by_key(|(key, _)| *key);
+                }
+                if kind.collapses_repeats() {
+                    let mut seen = BTreeSet::new();
+                    keyed.retain(|(key, _)| seen.insert(*key));
+                }
+                let members: Vec<DomainElement> = keyed
+                    .into_iter()
+                    .map(|(_, element)| element.clone())
+                    .collect();
+                Ok((
+                    QuantifierEntryDomain::Collection {
+                        elements: members.clone(),
+                    },
+                    members,
+                ))
+            }
+        }
+    }
+
+    /// The canonical order key of a collection element: false before true, an enum variant by
+    /// declaration position, an integer ascending. A collection holds one sort, so keys of
+    /// different sorts are never compared.
+    fn element_key(&self, element: &DomainElement) -> Option<i128> {
+        match element {
+            DomainElement::Boolean(value) => Some(i128::from(*value)),
+            DomainElement::Integer(value) => Some(*value),
+            DomainElement::Enum {
+                enumeration,
+                variant,
+            } => {
+                let declaration = enum_declaration(&self.statement.environment, enumeration)?;
+                let position = declaration
+                    .variants()
+                    .iter()
+                    .position(|candidate| candidate.name() == variant)?;
+                i128::try_from(position).ok()
+            }
+        }
     }
 
     /// Shows a range bound finite, or refuses the quantifier with `non-finite-bound`. A declared
@@ -1572,15 +1738,12 @@ impl LowerState<'_> {
                 .map(|_| FiniteBound::Declared(name)),
         };
         finite.ok_or_else(|| {
-            let mut error = unsupported(
-                &path.render(),
+            refused(
+                path,
+                &quantifier.identity,
+                QuantifierReason::NonFiniteBound,
                 "range bound is not provably finite (non-finite-bound)",
-            );
-            error.refusal = Some(QuantifierRefusal {
-                identity: quantifier.identity.clone(),
-                reason: QuantifierReason::NonFiniteBound,
-            });
-            error
+            )
         })
     }
 
@@ -1638,6 +1801,21 @@ impl LowerState<'_> {
                 upper,
                 body,
             } => self.lower_expanded(quantifier, (*lower, *upper), body, depth, path),
+            Planned::Enumerated {
+                quantifier,
+                members,
+                body,
+            } => self.lower_instances(
+                Instances {
+                    kind: quantifier.kind,
+                    local: &quantifier.local,
+                    local_type: &quantifier.local_type,
+                    members: members.iter().cloned(),
+                },
+                body,
+                depth,
+                path,
+            ),
             Planned::Bounded {
                 quantifier,
                 lower,
@@ -1657,13 +1835,36 @@ impl LowerState<'_> {
         depth: usize,
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        let universal = quantifier.kind == QuantifierKind::ForAll;
+        let local_type = ValueType::integer(quantifier.local_type.clone());
+        self.lower_instances(
+            Instances {
+                kind: quantifier.kind,
+                local: &quantifier.local,
+                local_type: &local_type,
+                members: (lower..=upper).map(LocalValue::Element),
+            },
+            body,
+            depth,
+            path,
+        )
+    }
+
+    /// One instance of the body per member, in the order given, joined by conjunction for a
+    /// universal and by disjunction for an existential quantifier.
+    fn lower_instances(
+        &mut self,
+        instances: Instances<'_, impl Iterator<Item = LocalValue>>,
+        body: &Planned<'_>,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let universal = instances.kind == QuantifierKind::ForAll;
         let mut parts = Vec::new();
-        for element in lower..=upper {
+        for value in instances.members {
             self.scope.push(LocalBinding {
-                name: quantifier.local.clone(),
-                value_type: quantifier.local_type.clone(),
-                value: LocalValue::Element(element),
+                name: instances.local.clone(),
+                value_type: instances.local_type.clone(),
+                value,
             });
             let instance = self.lower_planned(body, depth + 1, &path.child("body"));
             self.scope.pop();
@@ -1715,7 +1916,7 @@ impl LowerState<'_> {
         let symbol = format!("bv_{}", self.bound_depth);
         self.scope.push(LocalBinding {
             name: quantifier.local.clone(),
-            value_type: quantifier.local_type.clone(),
+            value_type: ValueType::integer(quantifier.local_type.clone()),
             value: LocalValue::Symbol(symbol.clone()),
         });
         self.bound_depth += 1;
@@ -1781,26 +1982,25 @@ impl LowerState<'_> {
             ExpressionKind::EnumLiteral {
                 enumeration,
                 variant,
-            } => {
-                let sort = self.enum_sort(enumeration)?;
-                let constructor = sort
-                    .constructors
-                    .iter()
-                    .find(|constructor| constructor.variant == variant.as_str())
-                    .map(|constructor| constructor.symbol.clone())
-                    .ok_or_else(|| {
-                        LoweringError::new(
-                            LoweringErrorCode::InvalidStatement,
-                            "expression.enum_literal",
-                            "validated enum variant no longer resolves",
-                        )
-                    })?;
-                Ok(LoweredExpression {
-                    replay: ReplayExpression::Datum(Box::new(ReplayDatum::Enum(
-                        constructor.clone(),
-                    ))),
-                    smt: constructor,
-                })
+            } => self.lower_enum_variant(enumeration, variant),
+            ExpressionKind::LocalReference { name } => {
+                let binding = self.local(name).ok_or_else(|| {
+                    unsupported(&path.render(), "local reference outside a quantifier")
+                })?;
+                match binding.value.clone() {
+                    LocalValue::Boolean(value) => Ok(LoweredExpression {
+                        smt: value.to_string(),
+                        replay: ReplayExpression::Literal(value),
+                    }),
+                    LocalValue::Variant {
+                        enumeration,
+                        variant,
+                    } => self.lower_enum_variant(&enumeration, &variant),
+                    LocalValue::Element(_) | LocalValue::Symbol(_) => Err(unsupported(
+                        &path.render(),
+                        "an integer bound variable is not a Boolean term",
+                    )),
+                }
             }
             ExpressionKind::RecordLiteral { record, fields } => {
                 self.lower_record_literal(record, fields, depth, path)
@@ -1855,6 +2055,30 @@ impl LowerState<'_> {
             } => self.lower_comparison(operator, left, right, depth, path),
             other => Err(unsupported(&path.render(), construct_name(other))),
         }
+    }
+
+    fn lower_enum_variant(
+        &mut self,
+        enumeration: &SymbolName,
+        variant: &SymbolName,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let sort = self.enum_sort(enumeration)?;
+        let constructor = sort
+            .constructors
+            .iter()
+            .find(|constructor| constructor.variant == variant.as_str())
+            .map(|constructor| constructor.symbol.clone())
+            .ok_or_else(|| {
+                LoweringError::new(
+                    LoweringErrorCode::InvalidStatement,
+                    "expression.enum_literal",
+                    "validated enum variant no longer resolves",
+                )
+            })?;
+        Ok(LoweredExpression {
+            replay: ReplayExpression::Datum(Box::new(ReplayDatum::Enum(constructor.clone()))),
+            smt: constructor,
+        })
     }
 
     fn lower_record_literal(
@@ -2015,9 +2239,8 @@ impl LowerState<'_> {
                 "ordering comparison of non-integer terms is unsupported",
             ));
         }
-        let environment = &self.statement.environment;
-        let left_type = term_type(environment, left);
-        let right_type = term_type(environment, right);
+        let left_type = self.type_of(left);
+        let right_type = self.type_of(right);
         let left = self.lower(left, depth + 1, &path.child("left"))?;
         let right = self.lower(right, depth + 1, &path.child("right"))?;
         let left_sort = self.comparable_sort(left_type.as_ref())?;
@@ -2056,11 +2279,23 @@ impl LowerState<'_> {
         })
     }
 
+    /// The type of a term, reading a bound variable's sort from its quantifier.
+    fn type_of(&self, expression: &Expression) -> Option<ValueType> {
+        match expression.kind() {
+            ExpressionKind::LocalReference { name } => {
+                self.local(name).map(|binding| binding.value_type.clone())
+            }
+            _ => term_type(&self.statement.environment, expression),
+        }
+    }
+
     /// Whether the term is integer-typed. Validation makes both comparison operands agree, so
     /// the left operand decides.
     fn is_integer_term(&self, expression: &Expression) -> bool {
         match expression.kind() {
-            ExpressionKind::LocalReference { name } => self.local(name).is_some(),
+            ExpressionKind::LocalReference { name } => self
+                .local(name)
+                .is_some_and(|binding| matches!(binding.value_type, ValueType::Integer { .. })),
             ExpressionKind::Numeric { left, right, .. } => {
                 self.is_integer_term(left) || self.is_integer_term(right)
             }
@@ -2121,22 +2356,13 @@ impl LowerState<'_> {
     /// Declares the enum datatype of the statement environment on first use and returns its map.
     fn enum_sort(&mut self, name: &SymbolName) -> Result<EnumSortMap, LoweringError> {
         let environment = &self.statement.environment;
-        let declaration = environment
-            .types()
-            .iter()
-            .find_map(|candidate| match candidate {
-                TypeDeclaration::Enum { declaration } if declaration.name() == name => {
-                    Some(declaration)
-                }
-                _ => None,
-            })
-            .ok_or_else(|| {
-                LoweringError::new(
-                    LoweringErrorCode::InvalidBinding,
-                    "binding.type",
-                    "enum declaration does not resolve",
-                )
-            })?;
+        let declaration = enum_declaration(environment, name).ok_or_else(|| {
+            LoweringError::new(
+                LoweringErrorCode::InvalidBinding,
+                "binding.type",
+                "enum declaration does not resolve",
+            )
+        })?;
         if declaration.variants().len() > MAX_ENUM_VARIANTS {
             return Err(LoweringError::new(
                 LoweringErrorCode::ResourceLimit,
@@ -2418,10 +2644,12 @@ impl LowerState<'_> {
                 sort: self.sort_of(value_type, 1, "")?.sort,
                 payload: Box::new(self.replay_shape(value)?),
             },
-            _ => return Err(unsupported(
-                "expression.value_reference",
-                "only Boolean, integer, enum, record and option parts have an exact replay shape",
-            )),
+            _ => {
+                return Err(unsupported(
+                    "expression.value_reference",
+                    "only Boolean, integer, enum, record and option parts have an exact replay shape",
+                ));
+            }
         })
     }
 
@@ -2660,10 +2888,12 @@ impl LowerState<'_> {
                 datatype_value = Some(datatype);
                 None
             }
-            _ => return Err(unsupported(
-                "expression.value_reference",
-                "only Boolean, integer, enum, record and option value references are exact in quire.smtlib2/v2",
-            )),
+            _ => {
+                return Err(unsupported(
+                    "expression.value_reference",
+                    "only Boolean, integer, enum, record and option value references are exact in quire.smtlib2/v2",
+                ));
+            }
         };
         let kind = declaration_kind(declaration.kind());
         let point = execution_point_key(&statement.execution_point);
@@ -2947,11 +3177,15 @@ struct Resolvers<'a> {
 /// The integer tree and type of a bound variable in scope: an expanded element is a constant.
 fn local_tree(scope: &[LocalBinding], name: &SymbolName) -> Option<(IntegerTree, IntegerType)> {
     let binding = scope.iter().rev().find(|binding| &binding.name == name)?;
+    let ValueType::Integer { value: value_type } = &binding.value_type else {
+        return None;
+    };
     let tree = match &binding.value {
         LocalValue::Element(value) => IntegerTree::Constant(*value),
         LocalValue::Symbol(symbol) => IntegerTree::Bound(symbol.clone()),
+        LocalValue::Boolean(_) | LocalValue::Variant { .. } => return None,
     };
-    Some((tree, binding.value_type.clone()))
+    Some((tree, value_type.clone()))
 }
 
 /// Folds every maximal constant subtree to one literal and rejects any term outside linear
@@ -3024,14 +3258,14 @@ fn fold_integer(
                         UnsupportedClass::IntegerDivision,
                         path,
                         "integer division is outside linear integer arithmetic",
-                    ))
+                    ));
                 }
                 NumericOperator::Remainder => {
                     return Err(integer_unsupported(
                         UnsupportedClass::IntegerRemainder,
                         path,
                         "integer remainder is outside linear integer arithmetic",
-                    ))
+                    ));
                 }
                 NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
             }
@@ -3064,7 +3298,7 @@ fn fold_integer(
                         UnsupportedClass::NonLinearArithmetic,
                         path,
                         "product of two non-constant terms",
-                    ))
+                    ));
                 }
             };
             Ok(FoldedInteger {
@@ -3192,6 +3426,95 @@ fn validate_formula<'f>(
             );
             scope.pop();
         }
+        AnalysisFormula::Domain(quantifier) => {
+            if quantifier.identity.is_empty() {
+                errors.push(invalid("quantifier identity is empty".to_owned()));
+            }
+            validate_domain(quantifier, environment, &invalid, errors);
+            scope.push(&quantifier.local);
+            validate_formula(
+                &quantifier.body,
+                environment,
+                scope,
+                &path.child("body"),
+                errors,
+            );
+            scope.pop();
+        }
+    }
+}
+
+/// Checks that a domain quantifier's bound variable has the sort its domain's members have, and
+/// that every member resolves in the statement's declarations.
+fn validate_domain(
+    quantifier: &DomainQuantifier,
+    environment: &DeclarationEnvironment,
+    invalid: &dyn Fn(String) -> LoweringError,
+    errors: &mut Vec<LoweringError>,
+) {
+    let local = quantifier.local.as_str();
+    match &quantifier.domain {
+        QuantifierDomain::Unbounded(_) => {}
+        QuantifierDomain::Enum(name) => {
+            let sort = ValueType::Enum { name: name.clone() };
+            if enum_declaration(environment, name).is_none() {
+                errors.push(invalid(format!(
+                    "enum domain {} is not declared",
+                    name.as_str()
+                )));
+            } else if quantifier.local_type != sort {
+                errors.push(invalid(format!(
+                    "bound variable {local} is not of enum domain type {}",
+                    name.as_str()
+                )));
+            }
+        }
+        QuantifierDomain::Collection { elements, .. } => {
+            let sort_fits = match &quantifier.local_type {
+                ValueType::Boolean | ValueType::Integer { .. } => true,
+                ValueType::Enum { name } => enum_declaration(environment, name).is_some(),
+                ValueType::Rational { .. }
+                | ValueType::Text
+                | ValueType::Record { .. }
+                | ValueType::Option { .. }
+                | ValueType::Collection { .. } => false,
+            };
+            if !sort_fits {
+                errors.push(invalid(format!(
+                    "collection element sort is not encodable for bound variable {local}"
+                )));
+            }
+            for element in elements {
+                let fits = match (element, &quantifier.local_type) {
+                    (DomainElement::Boolean(_), ValueType::Boolean) => true,
+                    (DomainElement::Integer(value), ValueType::Integer { value: ty }) => {
+                        (ty.minimum()..=ty.maximum()).contains(value)
+                    }
+                    (
+                        DomainElement::Enum {
+                            enumeration,
+                            variant,
+                        },
+                        ValueType::Enum { name },
+                    ) => {
+                        enumeration == name
+                            && enum_declaration(environment, name).is_some_and(|declaration| {
+                                declaration
+                                    .variants()
+                                    .iter()
+                                    .any(|candidate| candidate.name() == variant)
+                            })
+                    }
+                    _ => false,
+                };
+                if !fits {
+                    errors.push(invalid(format!(
+                        "collection element {} does not fit the type of bound variable {local}",
+                        element.label()
+                    )));
+                }
+            }
+        }
     }
 }
 
@@ -3210,6 +3533,40 @@ fn local_references<'e>(expression: &'e Expression, found: &mut Vec<&'e SymbolNa
         }
         _ => {}
     }
+}
+
+/// A refusal of the quantifier `identity`, naming its reason class.
+fn refused(
+    path: &ExprPath<'_>,
+    identity: &str,
+    reason: QuantifierReason,
+    message: &str,
+) -> LoweringError {
+    let mut error = unsupported(&path.render(), message);
+    error.refusal = Some(QuantifierRefusal {
+        identity: identity.to_owned(),
+        reason,
+    });
+    error
+}
+
+fn invalid_domain(path: &ExprPath<'_>, message: &str) -> LoweringError {
+    LoweringError::new(LoweringErrorCode::InvalidStatement, path.render(), message)
+}
+
+fn enum_declaration<'a>(
+    environment: &'a DeclarationEnvironment,
+    name: &SymbolName,
+) -> Option<&'a EnumDeclaration> {
+    environment
+        .types()
+        .iter()
+        .find_map(|candidate| match candidate {
+            TypeDeclaration::Enum { declaration } if declaration.name() == name => {
+                Some(declaration)
+            }
+            _ => None,
+        })
 }
 
 fn depth_limit() -> LoweringError {
@@ -4131,6 +4488,7 @@ mod tests {
                     holds.any(|result| result)
                 }
             }
+            AnalysisFormula::Domain(_) => panic!("the oracle decides literal ranges only"),
         }
     }
 
