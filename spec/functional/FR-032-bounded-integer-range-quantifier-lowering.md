@@ -31,10 +31,11 @@ solver quantifier.
     variable (`forall` with an implication guard, `exists` with a conjunction guard). A bounded
     quantifier consumes no budget.
   - A range wider than the budget is therefore never `unsupported`; it takes the bounded form.
-- Logic: a query holding a bounded solver quantifier declares the quantified linear-integer logic
-  that the capability contract names for it, with the datatype sorts of
-  [FR-020](./FR-020-datatype-lowering.md) included when the body mentions an enum, record or option.
-  The logic is part of the one profile `quire.smtlib2/v2`, not a second profile.
+- Logic: a query holding a bounded solver quantifier declares the logic of its feature set
+  ([FR-020](./FR-020-datatype-lowering.md)) with the quantifier-free prefix removed: `LIA` when it
+  declares no datatype and `UFDTLIA` when it declares at least one (an enum, record or option in the
+  body). Every other query keeps `QF_LIA` or `QF_UFDTLIA`. The logic is part of the one profile
+  `quire.smtlib2/v2`, not a second profile.
 - Decidability argument: expansion is quantifier-free linear integer arithmetic. Quantified linear
   integer arithmetic is decidable in principle (Presburger arithmetic), independent of the interval
   guards; the guards keep every quantifier finite, which makes the instance count checkable and
@@ -61,7 +62,7 @@ solver quantifier.
 | FR-032-AC-3 | A literal range whose instance count fits the budget is expanded, and one exceeding it is emitted as a bounded quantifier and not refused; the quantifier map records each choice. | Test (TC-030) |
 | FR-032-AC-4 | In the bounded form every quantifier carries a finite interval guard; a quantifier without one is never emitted. | Test (TC-030) |
 | FR-032-AC-5 | Lowering a range-quantified package twice yields byte-identical SMT-LIB2 output. | Test (TC-030) |
-| FR-032-AC-6 | A bounded quantifier whose body mentions an enum declares a logic that includes datatype sorts, and one whose body is integer-only does not. | Test (TC-030) |
+| FR-032-AC-6 | A bounded quantifier whose body mentions an enum declares `UFDTLIA`, and one whose body is integer-only declares `LIA`. | Test (TC-030) |
 
 ## Dependencies
 

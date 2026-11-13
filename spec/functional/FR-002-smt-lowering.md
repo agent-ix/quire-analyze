@@ -33,8 +33,8 @@ construct has a declared exact encoding under the selected profile.
   by [FR-030](./FR-030-bounded-quantifier-domains.md) through
   [FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md) under the same profile; no further
   profile is introduced. A query that holds a bounded solver quantifier (FR-032) declares the
-  quantified counterpart of the logic its feature set requires; every other query follows the rule
-  above.
+  logic of its feature set without the quantifier-free prefix (`LIA`, or `UFDTLIA` with datatypes);
+  every other query follows the rule above.
 - Collection is unsupported by the live profile in every use except one: a collection literal whose
   elements are fixed literals may be the domain of a quantifier admitted by FR-030, where it lowers
   by expansion (FR-031) and introduces no collection sort. Collection membership, size, indexing,

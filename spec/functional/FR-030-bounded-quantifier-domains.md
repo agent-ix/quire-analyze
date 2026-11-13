@@ -54,7 +54,9 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   request.
 - The collection domain is the only admitted use of a collection. The collection refusals of
   [FR-020](./FR-020-datatype-lowering.md) and [FR-022](./FR-022-datatype-package-translation.md)
-  (including FR-022-AC-3) hold unchanged for every other use of a collection term.
+  (including FR-020-AC-8, FR-022-AC-3 and the `quire.op.option.value` exit on `claim-N`) hold unchanged for
+  every other use of a collection term; a collection literal in domain position is consumed by this
+  requirement before expression lowering and never reaches the `CollectionLiteral` refusal.
 - Admission is decided from the analysis model alone, before any solver is invoked.
 
 ## Acceptance Criteria

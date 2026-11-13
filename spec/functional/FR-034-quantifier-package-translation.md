@@ -52,7 +52,8 @@ that [FR-030](./FR-030-bounded-quantifier-domains.md) admits.
   option, collection), or any other collection operation, exits `2` naming the node. A collection
   term in any other position exits `2` as FR-009 and
   [FR-022](./FR-022-datatype-package-translation.md) state; the collection refusals of FR-020 and
-  FR-022 are unchanged except for this domain position.
+  FR-022 are unchanged except for this domain position (FR-020-AC-8 and FR-022-AC-3 stay true for every
+  other use).
 - The domain is taken from the package's declared types and bounds only; the translation does not
   infer a bound from the body and does not widen a missing bound.
 - A quantifier whose domain is not admitted makes the translation stop at its node and the runner
