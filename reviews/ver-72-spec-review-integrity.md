@@ -44,3 +44,16 @@ non-conclusive, `4` publication) match `publish-report` in `src/main.rs`, and th
 | FND-001 | fixed | verified in 9e07114 |
 | FND-002 | fixed | verified in 9e07114 |
 | FND-003 | fixed | verified in 9e07114 |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-005 | medium | ContractPackageV1::read does not exist on quire-contract-ir main. The reader is ContractPackageWireV1::read(bytes, limits, dependencies), which returns ContractPackageReadResult::Admitted(Box<ContractPackageV1>), Refused, Incomplete or CatalogUnavailable (crates/quire-contract-model/src/checked_package/v2/contract_package.rs:1702, 1071). It needs caller-supplied CheckedPackageReadLimits and a ContractDependencies map of admitted dependency packages, and FR-009 supplies neither, with only one --package. Fix: name the real reader; state that dependencies are empty (a package with dependencies exits 2), that limits are CheckedPackageReadLimits::bounded(), and how Incomplete and CatalogUnavailable map to exit classes. | spec/functional/FR-009-package-runner.md Input / AC-6 |
+| FND-006 | medium | examples/checked-handoff/model.semantic-ir.json is a semantic-IR domain model (keys constructs, types, populations; format semantic-ir/2.0.0). QSL's checked_handoff::write takes it as a model input; it is not a checked package. So the TC-015 step that lowers it through quire-contract-model cannot run, and FR-009's input section calls it a checked package. Gap 1 also says QSL tests do not call the IR lowering, but the cfg(test) module qsl-package/src/emit/extent_agreement.rs calls CheckedPackageV2::lower. Fix: produce the checked package at test time with QSL's checked_handoff::write over the examples/checked-handoff units and model, then lower it with CheckedPackageV2::lower to CompleteContractPackageV2::canonical_bytes; correct the Gap 1 wording. | spec/test/TC-015-package-runner.md Test Procedure |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-004 | fixed | verified in 720b33c |

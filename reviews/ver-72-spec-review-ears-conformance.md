@@ -43,3 +43,9 @@ shall`) conform.
 | FND-002 | fixed | verified in 9e07114 |
 | FND-003 | fixed | verified in 9e07114 |
 | FND-004 | fixed | verified in 9e07114 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-005 | fixed | verified in 720b33c |

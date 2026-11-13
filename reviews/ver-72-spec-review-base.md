@@ -56,3 +56,22 @@ NFR-003-AC-1 are falsifiable and well targeted.
 | FND-005 | fixed | verified in 9e07114 |
 | FND-006 | fixed | verified in 9e07114 |
 | FND-007 | fixed | verified in 9e07114 |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-012 | high | The budget is taken from the solver limits, i.e. AdapterLimits::default(), whose stdout limit is 16,777,216 bytes (src/solver.rs:37). producer-execution-request/v1 caps maxStdoutBytes at 8,388,608 (the engineering-assurance request schema; MAX_STREAM_BYTES in src/producer_execution.rs), and FR-029 refuses an over-limit bound with producer_execute_request_structure_invalid and exit 2. FR-009 maps that to runner exit 4, so every run exits 4. maxDescendants, maxConcurrency, maxOutputArtifacts and maxOutputBytes have no source in AdapterLimits. Fix: state the budget mapping explicitly, with stdout at most 8,388,608 and a value for each of the other fields. | spec/functional/FR-009-package-runner.md Behavior |
+| FND-013 | high | A stdin input artifact is a declared input file that the executor opens relative to the request's capability root (FR-019; request schema stdin {kind: input_artifact, role}). So the runner has to write the lowered query to a file. That contradicts 'The runner shall write no file other than the staged and published report' and FR-009-AC-12. Fix: specify a runner-owned temporary capability root (where it lives, its permissions and its removal), and amend the no-file bullet and AC-12 to allow it. | spec/functional/FR-009-package-runner.md AC-12 / Behavior |
+| FND-014 | medium | The request has required fields the runner must fill that FR-009 leaves open: capabilityRoot (also the solver's working directory), producer name and version (for the query run the version is only known after the version run), caller, the containment contract that process-group-v1 requires, and cancellation. Two implementers would fill them differently, which also bears on byte-identical reports. Fix: state the value or rule for each field. | spec/functional/FR-009-package-runner.md Behavior |
+| FND-015 | medium | 'Analysable clause' is undefined, as Gap 2 itself says ('no definition says which graph nodes are analysable clauses'). Yet the request FR-009 fixes, AC-6's no-analysable-clause case and the consistent and contradictory fixtures of AC-2 and AC-3 all depend on it, and the gap names no owner or ticket. Fix: define the selection rule in FR-009, since quire-analyze is the consumer and owns it, or cite the owning ticket and state that the dependent ACs wait on it. | spec/functional/FR-009-package-runner.md AC-6 / Gaps 2 |
+| FND-016 | low | The Behavior covers producer-execute exiting with status 2, but not another non-zero exit, a signal or no result line. AC-8 tests only a relative producer-execute path, though the Behavior also lists empty, non-UTF-8 and over-long paths. Fix: treat any non-zero exit or missing result as exit 4, and list all four path cases in AC-8. | spec/functional/FR-009-package-runner.md AC-5 / AC-8 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-008 | fixed | verified in 720b33c |
+| FND-009 | fixed | verified in 720b33c |
+| FND-010 | fixed | verified in 720b33c |
+| FND-011 | still-open | FR-009-AC-6 now says 'over the reader's byte limit', but the reader's limits are caller-supplied (CheckedPackageReadLimits) and FR-009 does not choose them, so the boundary is still unnamed. Naming CheckedPackageReadLimits::bounded() (1 MiB) would close it; see integrity FND-005. |

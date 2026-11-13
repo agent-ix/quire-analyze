@@ -35,3 +35,13 @@ stated as the runner's own interface, with no new term.
 | FND-001 | fixed | verified in 9e07114 |
 | FND-002 | fixed | verified in 9e07114 |
 | FND-003 | fixed | verified in 9e07114 |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-004 | low | 'The earlier boundary that Quire and Quoin do not execute a producer' refers to text that #46 deleted from this repository. Nothing live states it. Fix: delete the sentence. | spec/functional/FR-009-package-runner.md Producer-execute |
+
+## Correction (disposition pass 2)
+
+Correction to FND-003 (review pass): `producer-execute` is an existing command, specified by engineering-assurance FR-029 and FR-019 (src/producer_execution.rs, src/producer_execute_host.rs). The finding was right that the PR's self-defined term had no grounded content, but its proposed fix (delete the term and leave pass/fail to the caller) was wrong. The correct fix is the one 720b33c makes: cite the engineering-assurance contract by reference. The round-1 'fixed' outcome stands; no new row is added.
