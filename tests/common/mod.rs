@@ -162,7 +162,7 @@ impl Document {
     pub fn int_literal(&mut self, ty: &str, value: i64) -> String {
         let label = self.fresh("value/literal");
         let body = literal(ty, "integer", json!(value.to_string()));
-        self.node(&label, "value", "expression", "literal", ty, &[ty], body);
+        self.node(&label, "value", "expression", "literal", ty, &[], body);
         label
     }
 
@@ -424,6 +424,37 @@ pub fn value_reference(package: &ContractPackageV1, label: &str) -> ExpressionKi
         name: quire_contract_model::SymbolName::new(symbol(package, label)).expect("symbol"),
         observation: StateObservation::Current,
     }
+}
+
+/// The admitted package read from `bytes`.
+pub fn read_package(bytes: &[u8]) -> ContractPackageV1 {
+    match ContractPackageWireV1::read(
+        bytes,
+        CheckedPackageReadLimits::bounded(),
+        &Default::default(),
+    ) {
+        ContractPackageReadResult::Admitted(package) => *package,
+        other => panic!("contract package refused: {other:?}"),
+    }
+}
+
+/// The package bytes with the operation identity of the application `label` replaced, for an
+/// operation the fixture builder cannot lower (its catalog laws are not modelled here).
+pub fn with_identity(bytes: &[u8], label: &str, identity: &str) -> Vec<u8> {
+    let package = read_package(bytes);
+    let node = index(&package, label);
+    let mut value: Value = serde_json::from_slice(bytes).expect("package json");
+    value["semantic_graph"]["nodes"][node]["body"]["operation"]["identity"] = json!(identity);
+    serde_json::to_vec(&value).expect("package bytes")
+}
+
+/// The package bytes with the graph node `label` edited.
+pub fn with_node(bytes: &[u8], label: &str, edit: impl FnOnce(&mut Value)) -> Vec<u8> {
+    let package = read_package(bytes);
+    let node = index(&package, label);
+    let mut value: Value = serde_json::from_slice(bytes).expect("package json");
+    edit(&mut value["semantic_graph"]["nodes"][node]);
+    serde_json::to_vec(&value).expect("package bytes")
 }
 
 static TEMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

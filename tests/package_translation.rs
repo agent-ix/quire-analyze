@@ -295,10 +295,12 @@ fn an_operation_outside_the_supported_subset_is_refused_at_its_node() {
     let range = document.range();
     let a = document.parameter_of(&range);
     let b = document.parameter_of(&range);
-    let other = document.application("quire.op.integer.min", &[&a, &b], &range);
+    let other = document.application("quire.op.integer.add", &[&a, &b], &range);
     let less = document.application("quire.op.integer.lt", &[&other, &b], "scalar_type/boolean");
     let claim = document.claim(&less);
-    let (package, error) = refusal(&document, &[&claim]);
+    let bytes = with_identity(&document.bytes(&[&claim]), &other, "quire.op.integer.min");
+    let package = read_package(&bytes);
+    let error = translate_analysis_claims(&package).expect_err("refused");
     assert_refused_at(&package, &error, TranslationErrorKind::CannotLower, &other);
 }
 

@@ -19,7 +19,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use common::{cycle_document, id, not_chain, Document, Sized, TempDir, AND, NOT};
+use common::{cycle_document, id, not_chain, with_identity, Document, Sized, TempDir, AND, NOT};
 use ix_trace_rs::trace;
 use quire_analyze::{
     lower_analysis_request, translate_analysis_claims, validate_report_document,
@@ -1025,14 +1025,19 @@ fn untranslatable() -> (Vec<u8>, String) {
     let range = document.range();
     let a = document.parameter_of(&range);
     let b = document.parameter_of(&range);
-    let quotient = document.application("quire.op.integer.div", &[&a, &b], &range);
+    let quotient = document.application("quire.op.integer.add", &[&a, &b], &range);
     let less = document.application(
         "quire.op.integer.lt",
         &[&quotient, &b],
         "scalar_type/boolean",
     );
     let claim = document.claim(&less);
-    (document.bytes(&[&claim]), quotient)
+    let bytes = with_identity(
+        &document.bytes(&[&claim]),
+        &quotient,
+        "quire.op.integer.div",
+    );
+    (bytes, quotient)
 }
 
 fn node_index(bytes: &[u8], label: &str) -> usize {
