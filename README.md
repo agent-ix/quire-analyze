@@ -54,7 +54,7 @@ addition, subtraction, multiplication by a constant, and the six comparisons, pl
 enum literals, enum value references, and enum equality and inequality (membership is a
 disjunction of equalities), plus records and options: record literals, field access,
 option `none`, `some`, presence and `Unwrap` (only under a presence proof), and equality and
-inequality of both. Models of datatype-sorted queries are not replayed yet and stay unverified.
+inequality of both. Models of datatype-sorted queries are replayed against the declared enum, record and option types before they are published as verified.
 For every datatype-sorted variable the query asserts the declared range of each integer part
 through one non-recursive range predicate (define-fun) per typed shape, a datatype sort together
 with the integer ranges of its parts (two options over integer payloads of different ranges share
@@ -84,7 +84,7 @@ Every analysis ends in one `AnalysisStatus`. Only `satisfied` and `refuted` are 
 | Status | Meaning |
 | --- | --- |
 | `satisfied` | The property holds (consistent, or the implication is valid). |
-| `refuted` | The property fails; a verified witness model is attached when the solver produced one. A satisfiable query over integers keeps its model unverified (explanation `Incomplete`) until integer witness replay exists. |
+| `refuted` | The property fails; a verified witness model is attached when the solver produced one. |
 | `unknown` | The solver answered `unknown`. |
 | `timeout` | The wall-clock limit was reached, or the run was cancelled. |
 | `unsupported` | The platform cannot run the solver adapter. |

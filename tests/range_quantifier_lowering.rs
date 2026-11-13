@@ -1204,8 +1204,60 @@ fn bounded_quantifier_models_stay_unverified() {
     );
     assert_eq!(failure.reason().as_str(), "quantifier_not_replayable");
     assert!(failure.subject().expect("assertion").starts_with("a_p"));
-    // A datatype-free quantified query never reports a datatype reason.
-    assert_ne!(failure.reason().as_str(), "sort_not_replayable");
+}
+
+/// FR-032-AC-8: a bounded quantifier whose body mentions an enum is also unverified for the
+/// quantifier alone, because datatype witnesses replay (FR-021) and only the quantifier does not.
+#[trace("TC-030", "FR-032-AC-8")]
+#[test]
+fn bounded_quantifier_over_an_enum_body_is_unverified_for_the_quantifier_alone() {
+    let enum_body = AnalysisFormula::And(
+        Box::new(below_x()),
+        Box::new(term(compare(
+            ComparisonOperator::Equal,
+            var("role"),
+            node(ExpressionKind::EnumLiteral {
+                enumeration: symbol("Role"),
+                variant: symbol("Admin"),
+            }),
+        ))),
+    );
+    let query = analysis_query(vec![statement(
+        "enum-model",
+        literal_range("Q-enum", QuantifierKind::Exists, 0, 5000, enum_body),
+    )]);
+    assert_eq!(query.logic(), "UFDTLIA");
+    let sort = &query.enum_sorts()[0];
+    let admin = sort
+        .constructors
+        .iter()
+        .find(|constructor| constructor.variant == "Admin")
+        .expect("Admin")
+        .symbol
+        .clone();
+    let definitions: Vec<_> = query
+        .variables()
+        .iter()
+        .map(|variable| {
+            if variable
+                .origins
+                .iter()
+                .any(|origin| origin.contains("|role|"))
+            {
+                format!("(define-fun {} () {} {admin})", variable.symbol, sort.sort)
+            } else {
+                format!("(define-fun {} () Int 7)", variable.symbol)
+            }
+        })
+        .collect();
+    let model = format!("sat\n(model {})\n", definitions.join(" "));
+    let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
+    assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
+    assert!(conclusion.verified_model().is_none());
+    assert_eq!(
+        conclusion.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::QuantifierNotReplayable
+    );
 }
 
 /// FR-032-AC-1: real solvers decide the expanded and bounded fixtures; run only where installed.

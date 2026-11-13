@@ -16,7 +16,7 @@ use quire_analyze::{
     lower_boolean_statements, render_differential_report, validate_differential_report,
     validate_report_document, AdapterLimits, AnalysisRequest, AnalysisStatus, CancellationToken,
     DifferentialDisposition, ExplanationState, LoweringError, LoweringErrorCode, QueryBundle,
-    ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome, StatementInput,
+    ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome, StatementInput, WitnessValue,
     CAPABILITY_CONTRACT,
 };
 use quire_contract_model::{
@@ -403,11 +403,11 @@ fn unsatisfiable_membership_agrees_and_reports_the_datatype_logic() {
     validate_differential_report(&report, &query, &run).expect("valid");
 }
 
-/// FR-020-AC-1 and FR-021: a satisfiable enum model is decided sat but stays unverified until
-/// enum witness replay exists.
-#[trace("TC-020", "FR-020-AC-1", "FR-020-AC-10")]
+/// FR-020-AC-1 and FR-021-AC-1: a satisfiable enum model is decided sat and its model verifies
+/// in both engines' spellings; a model that violates an assertion stays unverified.
+#[trace("TC-020", "FR-020-AC-1", "FR-020-AC-10", "FR-021-AC-1", "FR-021-AC-4")]
 #[test]
-fn satisfiable_membership_is_decided_but_its_model_stays_unverified() {
+fn satisfiable_membership_model_is_replayed() {
     let query = lower(sat_fixture());
     let sort = &query.enum_sorts()[0];
     let auditor = &sort.constructors[1].symbol;
@@ -417,17 +417,40 @@ fn satisfiable_membership_is_decided_but_its_model_stays_unverified() {
         sort.sort
     );
     let z3 = response_record(&query, &model, SolverEngine::Z3);
-    let cvc5 = response_record(&query, &model, SolverEngine::Cvc5);
+    let cvc5_model = format!(
+        "sat\n((define-fun {variable} () {} {auditor}))\n",
+        sort.sort
+    );
+    let cvc5 = response_record(&query, &cvc5_model, SolverEngine::Cvc5);
     let run = compare_solver_records(&query, &z3, &cvc5);
-    assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
-    assert!(!run.is_conclusive());
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(run.agreed_status(), Some(AnalysisStatus::Satisfied));
     let conclusion = classify_analysis(&query, &z3);
+    assert_eq!(conclusion.explanation(), ExplanationState::Verified);
+    let model = conclusion.verified_model().expect("verified model");
+    assert_eq!(
+        model.datatype_values()[0].value(),
+        &WitnessValue::Enum {
+            enumeration: "Role".to_owned(),
+            variant: "Auditor".to_owned()
+        }
+    );
+
+    // `role != Admin` is violated by Admin: the solver "satisfied" it, the replay does not.
+    let admin = &sort.constructors[0].symbol;
+    let bad = format!(
+        "sat\n(model (define-fun {variable} () {} {admin}))\n",
+        sort.sort
+    );
+    let record = response_record(&query, &bad, SolverEngine::Z3);
+    let conclusion = classify_analysis(&query, &record);
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
     assert!(conclusion.verified_model().is_none());
     assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
     let failure = conclusion.replay_failure().expect("replay failure");
-    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-    assert_eq!(failure.subject(), Some(variable.as_str()));
+    assert_eq!(failure.reason(), ReplayFailureReason::AssertionFalse);
+    let run = compare_solver_records(&query, &record, &record);
+    assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
 }
 
 /// FR-020-AC-9: a report naming v1, `QF_UF`, or a logic the feature set does not require is
@@ -711,19 +734,19 @@ fn real_z3_cvc5_decide_membership_fixtures() {
         assert_eq!(record.outcome(), SolverOutcome::Sat);
     }
     let run = quire_analyze::execute_differential(&sat, &z3, &cvc5, &token).expect("run");
-    assert!(!run.is_conclusive());
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
     let unsat = lower(unsat_fixture());
     let run = quire_analyze::execute_differential(&unsat, &z3, &cvc5, &token).expect("run");
     assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
     assert_eq!(run.agreed_status(), Some(AnalysisStatus::Refuted));
 }
 
-/// FR-020-AC-10: a query that declares an enum but holds only enum literals has no enum variable
-/// and is still never verified, even when a short-circuit would decide the replay, and an empty
-/// model gets the same reason.
-#[trace("TC-020", "FR-020-AC-10")]
+/// FR-021-AC-1: a query that declares an enum but holds only enum literals replays its Boolean
+/// variable and the literal comparison; a false model and a model without the variable do not
+/// verify.
+#[trace("TC-020", "FR-020-AC-10", "FR-021-AC-1", "FR-021-AC-5")]
 #[test]
-fn literal_only_enum_query_is_never_verified() {
+fn literal_only_enum_query_is_replayed() {
     let statements = try_statements(
         "literals",
         vec![enum_type("Role", ROLES)],
@@ -741,16 +764,20 @@ fn literal_only_enum_query_is_never_verified() {
     let query = lower(statements);
     assert_eq!(query.logic(), "QF_UFDTLIA");
     let flag = &query.variables()[0].symbol;
-    for model in [
-        format!("sat\n(model (define-fun {flag} () Bool true))\n"),
-        "sat\n".to_owned(),
-    ] {
-        let record = response_record(&query, &model, SolverEngine::Z3);
-        let conclusion = classify_analysis(&query, &record);
-        assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-        assert!(conclusion.verified_model().is_none());
-        let failure = conclusion.replay_failure().expect("replay failure");
-        assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-        assert_eq!(failure.subject(), Some(query.enum_sorts()[0].sort.as_str()));
-    }
+    let verdict = |model: &str| {
+        let record = response_record(&query, model, SolverEngine::Z3);
+        classify_analysis(&query, &record)
+    };
+    let verified = verdict(&format!("sat\n(model (define-fun {flag} () Bool true))\n"));
+    assert_eq!(verified.explanation(), ExplanationState::Verified);
+    let falsified = verdict(&format!("sat\n(model (define-fun {flag} () Bool false))\n"));
+    assert_eq!(
+        falsified.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::AssertionFalse
+    );
+    let omitted = verdict("sat\n(model )\n");
+    assert_eq!(
+        omitted.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::SymbolMissing
+    );
 }

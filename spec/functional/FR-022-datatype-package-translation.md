@@ -24,7 +24,7 @@ other rule of that requirement (identity, anchor, spans, node and depth bounds, 
 
 - **Types and declarations.** The runner shall build the `DeclarationEnvironment` of FR-009 with
   the type declarations of the enums and records that the reached nodes name, taken from the
-  package's `semantic_type` nodes, and shall not invent a variant, field or type. A type node that
+  package's `semantic_type` nodes, and shall not invent a variant, field or type. A type is named `t{N}` after the index `N` of its type node in `semantic_graph.nodes`; a type node with no source occurrence takes the source span of the claim being translated. A type node that
   cannot be resolved to an enum, record or option over a supported payload is refused, naming the node.
 - **Value declarations.** A `value/parameter` node whose `semantic_type` is an enum, record or option
   declares one `ValueDeclaration` of that type under the FR-009 naming and ordering rule, kind `Input`,
@@ -34,7 +34,7 @@ other rule of that requirement (identity, anchor, spans, node and depth bounds, 
 
 | Term | Result |
 |---|---|
-| `Literal` of an enum type | `ExpressionKind::EnumLiteral` |
+| `Literal` of an enum type, or a `Reference` to an enum `value/enum_value` member node | `ExpressionKind::EnumLiteral` |
 | `Literal` of value kind `none` with an option type | `ExpressionKind::OptionNone` |
 | `Reference` to an enum, record or option typed `value/parameter` | `ExpressionKind::ValueReference`, as for Boolean |
 | `Application` of `quire.op.enum.eq` / `quire.op.enum.ne` | `Compare` with `Equal` / `NotEqual` |
@@ -69,7 +69,7 @@ other rule of that requirement (identity, anchor, spans, node and depth bounds, 
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-022-AC-1 | Six built contract-package fixtures run end to end through `run-package` with real solvers where installed, each with a fixed expected exit: an enum-membership disjunction (`role = Admin` or `role = Auditor`) with `role != Admin` exits `0`; the same disjunction with `role = Guest` exits `1`; a record-field claim `record.project(user)` with field `role` equal to `Admin` exits `0`; and the same with a second claim that field equal to `Guest` exits `1`. A fifth fixture is a single claim, `quire.op.boolean.implies` with antecedent `quire.op.option.present` of an option-of-`Role` parameter `o` and consequent `quire.op.enum.eq` of `quire.op.option.value` of `o` with `Admin`. It translates to an `Unwrap` and the request is satisfiable (`o` absent, or `o` present as `Admin`), so it exits `0`. A sixth fixture is the same consequent alone, without the antecedent, and exits `2` naming the clause `claim-N` and the validator's path. | Test |
+| FR-022-AC-1 | Six built contract-package fixtures run end to end through `run-package`, with a stub `producer-execute` and with real solvers where installed, each with a fixed expected exit: an enum-membership disjunction (`role = Admin` or `role = Auditor`) with `role != Admin`; the same disjunction with `role = Guest`, which exits `1`; a record-field claim `record.project(user)` with field `role` equal to `Admin`; and the same with a second claim that field equal to `Guest`, which exits `1`. A fifth fixture is a single claim, `quire.op.boolean.implies` with antecedent `quire.op.option.present` of an option-of-`Role` parameter `o` and consequent `quire.op.enum.eq` of `quire.op.option.value` of `o` with `Admin`; it translates to an `Unwrap` and the request is satisfiable (`o` absent, or `o` present as `Admin`). The first, third and fifth fixtures are satisfiable: its model replays under FR-021 and verifies, so with a verified model from both engines the run exits `0`, and with a model that fails replay (for example one that omits the datatype symbol) it exits `3` with both engines `satisfied`, the witness incomplete and the differential run inconclusive. A sixth fixture is the same consequent alone, without the antecedent, and exits `2` naming the clause `claim-N` and the validator's path. | Test |
 | FR-022-AC-2 | Every enum variant, record field and type in the lowered query comes from the package's `semantic_type` nodes, and a fixture naming an unresolved type exits `2` naming the node. | Test |
 | FR-022-AC-3 | An unsupported datatype term (collection, except a collection literal consumed as a quantifier domain per [FR-030](./FR-030-bounded-quantifier-domains.md) and [FR-034](./FR-034-quantifier-package-translation.md); text, rational, enum ordering, a record nesting a collection or text) exits `2` naming `semantic_graph.nodes[N]`, writes no report and invokes no solver. An unguarded `quire.op.option.value` is the one exception: it exits `2` naming `claim-N` and the validator's path, writes no report and invokes no solver. | Test |
 | FR-022-AC-4 | Datatype terms are translated by a pure function of the admitted package: the same bytes yield the same clause order, declarations and query. | Test |

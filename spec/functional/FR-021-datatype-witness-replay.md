@@ -45,6 +45,14 @@ untrusted external engine.
   `or` (a true left operand makes it true), without evaluating the guarded operand. An `Unwrap` that is
   evaluated on an absent option is a replay failure and the model is invalid. The evaluator never reads
   the solver's value of the `some` selector on `none`, and never substitutes a default.
+- A datatype failure is one of the nine reasons of [FR-011](./FR-011-integer-witness-replay.md):
+  `value_malformed` for text that is not a value, names a constructor no declared datatype has (an
+  abstract element included), a sort that is not a single symbol (a parametric spelling such as `(Option S)`), or nests a constructor application beyond its declared shape (a
+  depth-9 text for a depth-8 declared type, for example); `sort_mismatch` for a constructor of
+  another datatype, a nullary constructor where a Boolean or integer is expected, a wrong arity or
+  a declared datatype sort other than the symbol's own (an undeclared sort symbol is `value_malformed`); `value_out_of_domain` for an integer part
+  outside its declared range or an integer beyond 128 bits; and `assertion_false` for a failed
+  assertion, including an `Unwrap` evaluated on an absent option.
 - An invalid or incomplete model keeps the logical response and marks the requested counterexample
   evidence incomplete; it never fabricates a source value, never repairs a mismatched value, and
   never makes the result conclusive on the strength of a model that failed replay. The exact adapter
@@ -53,7 +61,7 @@ untrusted external engine.
   from the query map, and show enum values by variant name, record values by field name, and options
   as `absent` or `present` with the payload.
 - Model parsing is bounded by the parsed-model ceiling of [NFR-001](../nonfunctional/NFR-001-determinism-bounds.md)
-  and by the datatype nesting bound of NFR-020.
+  and parsing follows the declared shape, whose nesting is bounded by NFR-020.
 
 ## Acceptance Criteria
 
@@ -65,7 +73,7 @@ untrusted external engine.
 | FR-021-AC-4 | A model that satisfies the solver but violates one asserted expression under the independent evaluator is rejected as incomplete. | Test |
 | FR-021-AC-5 | A model that omits a declared datatype symbol, or defines an unknown symbol or a symbol twice, is not verified. | Test |
 | FR-021-AC-7 | An implication, short-circuit `and` or short-circuit `or` whose guard excludes the unwrapped operand replays without evaluating its `Unwrap`, and an `Unwrap` evaluated on an absent option fails replay and the model is invalid. | Test |
-| FR-021-AC-6 | A model nested deeper than the NFR-020 bound or larger than the model ceiling is rejected as a limit breach and is never conclusive. | Test |
+| FR-021-AC-6 | A model value nested beyond its declared shape (which lowering bounds at the NFR-020 depth) is `value_malformed` without unbounded recursion, and a model larger than the model ceiling is the adapter `ModelLimit`; neither is ever conclusive. | Test |
 
 ## Dependencies
 
