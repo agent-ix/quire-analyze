@@ -41,19 +41,25 @@ and that every unbounded quantifier and every exhausted limit is non-conclusive.
    the lowered query equals its golden query and the enumeration oracle of FR-033 yields the expected
    status; where Z3 and cvc5 are installed, both also answer the matching `sat`/`unsat`. The oracle
    and golden checks run everywhere, so the case can fail without installed solvers.
-4. Replay: one passing and one failing model per domain form and quantifier form, a bound above the
-   replay limit, and a model that satisfies the lowered query but fails one original instance.
+4. Replay: one passing and one failing model per domain form and quantifier form; for an existential
+   with a holding second instance and later domain elements, assert replay visits exactly two
+   instances and skips all later elements. Verify that a complete replay of all assertions publishes
+   the returned model as `verified`; failed or incomplete replay does not. Also test bounds exactly at
+   and one above the replay limit, and a model that satisfies the lowered query but fails one original
+   instance.
 5. Resources: instance budget and replay limit at and one above their values, a 2^64-wide range,
    the nested width-100 fixture, a stalled solver and a solver answering `unknown` on a quantified
-   query.
+   query. Distinguish replay exhaustion from solver exhaustion.
 6. Package: a QSL contract package with admitted and refused quantifiers through `run-package`, including an integer-literal collection one above the budget and a range-domain operand with no upstream form (both exit `2`), and the Boolean and integer fixtures with no quantifier.
 
 ## Expected Results
 
 Admitted fixtures match their golden queries and expected statuses; refused fixtures return
 `unsupported` with their reason class and no query; repeated lowerings are byte-identical; replay
-reports the first failing instance and returns `incomplete` above the limit; exhausted limits yield
-`timeout` or `unknown`.
+reports the first failing instance and returns `incomplete` with reason `replay_limit_exceeded` above
+its instance limit, without evaluating more than the limit or publishing the model as verified.
+Solver execution exhaustion yields `timeout` or `unknown` for that solver; it does not change the
+replay-limit outcome.
 
 ## Limitations
 

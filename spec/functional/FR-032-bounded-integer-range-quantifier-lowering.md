@@ -72,10 +72,9 @@ solver quantifier.
 - Instance identity. Range expansion records its lower and upper bounds in the quantifier map;
   enum and collection expansion records typed members in instance order. Replay identifies a
   failing instance under [FR-033](./FR-033-quantified-assertion-replay.md).
-- Interim replay. Expanded ranges are quantifier-free and replay exactly. A bounded solver
-  quantifier is not replayed until FR-033: a satisfiable model of a query that holds one is
-  incomplete with reason `quantifier_not_replayable` ([FR-011](./FR-011-integer-witness-replay.md))
-  and is never verified, and the logical response of the solver is unchanged.
+- Replay. Expanded ranges are quantifier-free. A bounded solver quantifier is replayed over its
+  original range by [FR-033](./FR-033-quantified-assertion-replay.md). Replay failures and limits
+  leave the solver's logical response unchanged and never publish the model as verified.
 - Package path: until the upstream contract model and operation catalog define a range-domain
   quantifier operand, no QSL package reaches the bounded solver quantifier; a package range arrives
   as a literal integer collection and is expanded or refused as `expansion-ceiling`
@@ -115,7 +114,7 @@ solver quantifier.
 | FR-032-AC-5 | Lowering a range-quantified package twice yields byte-identical SMT-LIB2 output. | Test (TC-030) |
 | FR-032-AC-6 | A bounded quantifier whose body mentions an enum declares `UFDTLIA`, and one whose body is integer-only declares `LIA`. | Test (TC-030) |
 | FR-032-AC-7 | `with_formula` refuses an empty quantifier identity, a bound-variable reference with no enclosing quantifier, a non-empty literal range outside `local_type` and a declared bound outside `local_type`, each as `InvalidStatement`. | Test (TC-030) |
-| FR-032-AC-8 | A satisfiable model of a query that holds a bounded solver quantifier is incomplete with reason `quantifier_not_replayable`, never verified, and the solver's logical response is unchanged. | Test (TC-030) |
+| FR-032-AC-8 | A satisfiable model of a query containing a bounded solver quantifier is replayed over the original range as specified by FR-033; it is published as verified only when replay succeeds, and the solver's logical response is unchanged. | Test (TC-030) |
 | FR-032-AC-9 | A contested budget gives the same encodings and the same quantifier map for any order of the caller's statements, and spends the budget in depth-first pre-order within a statement. | Test (TC-030) |
 
 ## Dependencies

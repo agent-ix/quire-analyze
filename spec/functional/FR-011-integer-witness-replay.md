@@ -44,14 +44,14 @@ model, so a witness is never accepted on a solver's own word. This extends the B
   it is verified by a unit test over an unchecked replay expression. Every assertion must evaluate true.
 - **Typed failure and precedence.** A model that does not verify is reported with exactly one reason
   from the closed set `value_malformed`, `symbol_repeated`, `symbol_unknown`, `sort_mismatch`,
-  `symbol_missing`, `value_out_of_domain`, `evaluation_overflow`, `assertion_false` and
-  `quantifier_not_replayable`. When several apply, the first in that order is reported; within a
-  reason the first symbol in ascending symbol order, or the first assertion in assertion-map order
-  (for the last three reasons, the first assertion that does not evaluate true, whichever reason it
-  has), is named. `quantifier_not_replayable` is an interim reason: an assertion that holds a bounded
-  solver quantifier ([FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md)) is not replayed
-  until [FR-033](./FR-033-quantified-assertion-replay.md) is implemented, so a model whose replay
-  reaches such an assertion first is incomplete with this reason and is never verified.
+  `symbol_missing`, `bound_undecodable`, `value_out_of_domain`, `evaluation_overflow`,
+  `replay_limit_exceeded` and `assertion_false`. When several apply, the first in that order is
+  reported. For symbol-related reasons, the first symbol in ascending symbol order is named; for
+  `bound_undecodable`, the first undecodable bound symbol is named; and for `evaluation_overflow` or
+  `assertion_false`, the first assertion in assertion-map order is named. A replay that exceeds its
+  instance limit reports `replay_limit_exceeded` as defined by
+  [FR-033](./FR-033-quantified-assertion-replay.md) and
+  [NFR-031](../nonfunctional/NFR-031-quantifier-replay-bound.md).
 - **Incomplete, never verified.** A model that fails replay, or that omits an integer symbol, leaves
   the logical response of the solver unchanged but marks the requested witness evidence incomplete
   (as FR-004 states). It is never published as a verified witness and no value is invented to fill a
@@ -59,7 +59,7 @@ model, so a witness is never accepted on a solver's own word. This extends the B
 - **Published values.** A verified integer value preserves every complete origin identity and explicit
   binding group of its symbol from the variable map, as Boolean values do.
 - **Datatype-sorted symbols.** Enum, record and option symbols are replayed by
-  [FR-021](./FR-021-datatype-witness-replay.md), whose failures use this requirement's nine reasons.
+  [FR-021](./FR-021-datatype-witness-replay.md), whose failures use this requirement's ten reasons.
 - **No in-house proving.** Replay checks one concrete assignment. It does not search for, repair or
   derive a model.
 
