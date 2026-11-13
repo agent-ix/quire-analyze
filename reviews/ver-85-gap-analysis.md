@@ -60,3 +60,14 @@ Examined, with no finding:
 - TC-020: the lowering, permutation and bound parts for enums.
 
 The edits in `src/report.rs` were judged only for this PR's change (the logic check), not the concurrent VER-82 work.
+
+## Dispositions
+
+Round 1, verified against PR head 2c7a7a1 (fix commit 1fe1917, spec commit 2c7a7a1).
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | Per the ruling, FR-020's case table and AC-5 now say enum ordering and mixed-sort comparisons are refused at statement build as `InvalidStatement`, with `UnsupportedConstruct` as a defensive lowering check over an unchecked expression. Both paths are tested. |
+| FND-002 | fixed | `unresolved_names_are_refused_before_lowering` feeds `StatementInput::from_clause` a clause checked under a wider environment and asserts `InvalidStatement` at path `statement.expression` for an unresolved variant and an unresolved enumeration. It also asserts that an orphaned value type fails at `DeclarationEnvironment::new`. |
+| FND-003 | fixed | The case-table row now reads "refused by `DeclarationEnvironment::new` as `OrphanedTypeReference`, so no environment and no statement exists". |
+| FND-004 | fixed | The capability bullet lists `enum_inequality`. |

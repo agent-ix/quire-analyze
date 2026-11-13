@@ -1998,6 +1998,7 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
     let mut declared: Option<String> = None;
     let mut datatypes = false;
     let mut seen_declaration = false;
+    let mut set_logics = 0_usize;
     let mut logic_argument = false;
     while cursor < query.len() {
         match query[cursor] {
@@ -2010,6 +2011,9 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
                 cursor += 1;
                 while cursor < query.len() && query[cursor] != b'|' {
                     cursor += 1;
+                }
+                if cursor >= query.len() {
+                    return None;
                 }
                 cursor += 1;
                 expect_head = false;
@@ -2051,9 +2055,10 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
                 if expect_head {
                     match atom {
                         b"set-logic" => {
-                            if declared.is_some() || seen_declaration {
+                            if set_logics > 0 || seen_declaration {
                                 return None;
                             }
+                            set_logics += 1;
                             logic_argument = true;
                         }
                         b"declare-datatypes"
@@ -2252,6 +2257,11 @@ mod tests {
             None
         );
         assert_eq!(logic_of("(declare-fun x () Bool)\n"), None);
+        assert_eq!(logic_of("(set-logic)\n(set-logic QF_LIA)\n"), None);
+        assert_eq!(
+            logic_of("(set-logic QF_LIA)\n(declare-fun |x () Bool)\n"),
+            None
+        );
     }
 
     fn unchecked_statement(

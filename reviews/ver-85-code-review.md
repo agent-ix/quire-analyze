@@ -73,3 +73,24 @@ allows exactly `QF_LIA` and `QF_UFDTLIA`, and v1 and `QF_UF` are refused. The
 public-repo hygiene check is clean: no standard text, no roadmap, no build
 artifacts, no compatibility layer, and no new hash, SHA or pin ceremony. The
 digests in the golden file are encoded symbol identities.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-007 | medium | The `sort_not_replayable` guard in `verify_model` fires only when the query has an enum-sorted *variable* (`enum_variables()`). A query that declares an enum datatype but compares only literals, for example `flag or Role.Admin = Role.Guest` (well-typed upstream), has no enum variable. Its model is parsed and replayed under the FR-011 order, and `Or(flag, EnumUnreplayed)` short-circuits to `Ok(true)` when `flag` is true, so the model is verified. FR-020 "Replay until FR-021" says a model for a query that declares any datatype-sorted symbol (constructors included) is never verified and that this reason is checked before every FR-011 reason. The verified result is sound, but it contradicts the spec, and for such queries the failure names an assertion instead of an enum symbol. Fix by guarding on `!query.enum_sorts().is_empty()` (naming the first enum variable, or the first constructor when there is none), or narrow the spec to datatype-sorted variables. | `src/analysis.rs:669-676`, `src/smt.rs:629`, `spec/functional/FR-020-datatype-lowering.md` (Replay until FR-021) |
+| FND-008 | low | An empty model returns `value_malformed` (an FR-011 reason) before the `sort_not_replayable` guard, although FR-020 says `sort_not_replayable` is checked before every FR-011 reason. | `src/analysis.rs:661-663` |
+| FND-009 | low | Two `query_logic` scanner edge cases. (1) The repeat guard keys on `declared.is_some()`, so `(set-logic)` with no argument followed by `(set-logic QF_LIA)` is accepted as one logic with two `set-logic` commands. (2) An unterminated quoted symbol `\|...` runs to the end of input and is accepted, while an unterminated string is refused. Neither occurs in generated queries, and both are invalid SMT-LIB that a solver rejects. | `src/smt.rs` (`query_logic`, `b'\|'` arm and `set-logic` arm) |
+
+## Dispositions
+
+Round 1, verified against PR head 2c7a7a1 (fix commit 1fe1917, main merge 6a8e355).
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | `query_logic` scans the top-level commands, skipping comments, quoted symbols and strings. It counts the singular and plural datatype and codatatype heads, requires exactly one `set-logic` before every declaration, and requires balanced parentheses. `report.rs` requires declared == required == the report's `logic` field. A unit test covers each evasion. |
+| FND-002 | fixed | `ordering_and_mixed_sorts_are_refused_at_statement_build` asserts `IllTypedExpression` for ordering and for Bool-against-enum. `lowering_refuses_unchecked_enum_ordering_and_mixed_sorts` drives both defensive branches over an unchecked expression and asserts `UnsupportedConstruct`. |
+| FND-003 | fixed | The real-solver test now asserts `sat` from each engine, a non-conclusive differential for the sat fixture, and Agreement/Refuted for the unsat fixture. |
+| FND-004 | fixed | The README names `QF_UFDTLIA` for enum queries and lists enum literals, references and equality as supported, with only enum ordering refused. |
+| FND-005 | fixed | Main (#95) removed `Unreplayed`. The new `ReplayExpression::EnumUnreplayed` doc describes enum terms. |
+| FND-006 | fixed | `EnumSortMap::constructors` is `Vec<EnumConstructor>` with named fields `variant` and `symbol`. |

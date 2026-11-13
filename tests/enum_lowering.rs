@@ -719,3 +719,40 @@ fn real_z3_cvc5_decide_membership_fixtures() {
     assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
     assert_eq!(run.agreed_status(), Some(AnalysisStatus::Refuted));
 }
+
+/// FR-020-AC-10: a query that declares an enum but holds only enum literals has no enum variable
+/// and is still never verified, even when a short-circuit would decide the replay, and an empty
+/// model gets the same reason.
+#[trace("TC-020", "FR-020-AC-10")]
+#[test]
+fn literal_only_enum_query_is_never_verified() {
+    let statements = try_statements(
+        "literals",
+        vec![enum_type("Role", ROLES)],
+        vec![input("flag", ValueType::Boolean)],
+        vec![or(
+            var("flag"),
+            compare(
+                ComparisonOperator::Equal,
+                variant("Role", "Admin"),
+                variant("Role", "Guest"),
+            ),
+        )],
+    )
+    .expect("statements");
+    let query = lower(statements);
+    assert_eq!(query.logic(), "QF_UFDTLIA");
+    let flag = &query.variables()[0].symbol;
+    for model in [
+        format!("sat\n(model (define-fun {flag} () Bool true))\n"),
+        "sat\n".to_owned(),
+    ] {
+        let record = response_record(&query, &model, SolverEngine::Z3);
+        let conclusion = classify_analysis(&query, &record);
+        assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
+        assert!(conclusion.verified_model().is_none());
+        let failure = conclusion.replay_failure().expect("replay failure");
+        assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
+        assert_eq!(failure.subject(), Some(query.enum_sorts()[0].sort.as_str()));
+    }
+}
