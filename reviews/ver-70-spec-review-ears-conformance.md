@@ -32,3 +32,10 @@ Ticket: VER-70. EARS grammar of the FR-010, FR-011, FR-012 Descriptions and the 
 ## Verdict
 
 PASS with low findings. FR-011 and FR-012 are singular ubiquitous statements with a named subject; no vague-response verbs.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in f1ad0f5 |
+| FND-002 | fixed | verified in f1ad0f5 |

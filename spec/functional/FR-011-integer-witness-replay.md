@@ -38,8 +38,9 @@ model, so a witness is never accepted on a solver's own word. This extends the B
   query's range constraints are unnamed assertions (FR-010), so this check, not an assertion
   replay, is the domain verdict.
 - **Replay.** Every replay assertion is evaluated on the analysis expression with exact 128-bit signed
-  arithmetic that detects overflow; an evaluation that overflows fails replay and never wraps. This is
-  reachable when a declared domain spans the 128-bit extremes. Every assertion must evaluate true.
+  arithmetic that detects overflow; an evaluation that overflows fails replay and never wraps. `evaluation_overflow` is a defensive reason: IR validation refuses an admitted
+  clause whose intermediate results can leave the 128-bit range, so no admitted fixture reaches it, and
+  it is verified by a unit test over an unchecked replay expression. Every assertion must evaluate true.
 - **Typed failure and precedence.** A model that does not verify is reported with exactly one reason
   from the closed set `value_malformed`, `symbol_repeated`, `symbol_unknown`, `sort_mismatch`,
   `symbol_missing`, `value_out_of_domain`, `evaluation_overflow` and `assertion_false`. When several
@@ -65,10 +66,10 @@ model, so a witness is never accepted on a solver's own word. This extends the B
 | FR-011-AC-4 | A model that omits one declared integer symbol is reported incomplete with reason `symbol_missing`; a model with an undeclared symbol, a repeated symbol, or an integer value for a Boolean symbol (or the reverse) is reported with `symbol_unknown`, `symbol_repeated` or `sort_mismatch`. | Test (TC-017) |
 | FR-011-AC-5 | A value one above the declared maximum, one below the declared minimum, and a value exactly at each bound: the first two fail with `value_out_of_domain`, the bound values verify. | Test (TC-017) |
 | FR-011-AC-6 | A decimal, a real-sorted and an exponent-form numeral, and a numeral of 1,025 characters, each fail with `value_malformed` without panicking; a numeral of 1,024 characters, and the value 2^127, each fail with `value_out_of_domain`. | Test (TC-017) |
-| FR-011-AC-7 | With a symbol declared over the full 128-bit signed range set to its maximum, the assertion `x + 1 > 0` fails with `evaluation_overflow`, not a wrapped result. | Test (TC-017) |
+| FR-011-AC-7 | A unit test of the replay evaluator over an unchecked expression (constructed directly, not an admitted fixture) `x + 1 > 0` with `x` at the 128-bit signed maximum fails with `evaluation_overflow`, not a wrapped result. | Test (TC-017) |
 | FR-011-AC-8 | In every failing case above the logical status of the solver response (`sat`) and the adapter outcome remain available and the witness evidence is marked incomplete. | Test (TC-017) |
 | FR-011-AC-9 | Replay reads only the typed analysis expressions and the parsed assignment; mutating the SMT-LIB query text of a lowered query does not change a replay verdict. | Test (TC-017) |
-| FR-011-AC-10 | A model with a missing symbol and a malformed numeral reports `value_malformed`; a model with an out-of-domain value and a false assertion reports `value_out_of_domain`; a model with an overflowing assertion before a false one in assertion-map order reports `evaluation_overflow`, and the reverse order reports `assertion_false`. | Test (TC-017) |
+| FR-011-AC-10 | A model with a missing symbol and a malformed numeral reports `value_malformed`; a model with an out-of-domain value and a false assertion reports `value_out_of_domain`; in the same unchecked-expression unit test, an overflowing assertion before a false one in assertion-map order reports `evaluation_overflow`, and the reverse order reports `assertion_false`. | Test (TC-017) |
 
 ## Dependencies
 

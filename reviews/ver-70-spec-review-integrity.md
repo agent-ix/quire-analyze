@@ -48,3 +48,24 @@ Ticket: VER-70. Consistency check of the PR #90 diff (FR-010..012, NFR-004, TC-0
 ## Verdict
 
 FAIL: FND-001 to FND-005 are contradictions a coder cannot resolve without a spec change. Clean: the v2-replaces-v1 wording adds no fallback or compatibility reader (ADR-0010 already says profile changes invalidate evidence with no silent migration); ids FR-010..012, NFR-004 and TC-016..018 do not collide with PRs #87 (FR-030..034), #88 (FR-020..022, NFR-010) or #89 (FR-040..042); test-matrix rows are only edited by this PR; no hash, pin or version-tracking content, no paywalled text and no roadmap content was added.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-011 | low | interface_001 still describes the lowering as Boolean-v1 outside the fixed lowering_v2 block: 'lowering uses fixed Boolean-v1 profiles and ceilings' (line 17), 'current: implemented library Boolean-v1 lowering' (line 27) and the Features row 'Boolean-v1 analysis stages' (line 84). The v2 profile replaces v1, so these describe a profile that no longer exists. Fix: say v2 (Boolean and linear integer) in these three places. | spec/interface/interface-001-analysis-api.md:17, 27, 84 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in f1ad0f5 |
+| FND-002 | fixed | verified in f1ad0f5 |
+| FND-003 | fixed | verified in f1ad0f5 |
+| FND-004 | fixed | verified in f1ad0f5 |
+| FND-005 | fixed | verified in f1ad0f5 |
+| FND-006 | fixed | verified in f1ad0f5 |
+| FND-007 | fixed | verified in f1ad0f5 |
+| FND-008 | fixed | verified in f1ad0f5 |
+| FND-009 | fixed | verified in f1ad0f5 |
+| FND-010 | fixed | verified in f1ad0f5 |

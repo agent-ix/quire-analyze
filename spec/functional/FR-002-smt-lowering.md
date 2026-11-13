@@ -24,7 +24,8 @@ construct has a declared exact encoding under the selected profile.
 - The live profile is `quire.smtlib2/v2` ([FR-010](./FR-010-linear-integer-arithmetic.md)). Literals,
   typed Boolean input/state references, negation, short-circuit and total conjunction/disjunction,
   implication, and Boolean equality or inequality lower exactly to SMT-LIB 2.6, and every query,
-  including a query with no integer construct, declares logic `QF_LIA`. The Boolean-only profile
+  including a query with no integer construct, declares logic `QF_LIA` when it has no datatype declarations;
+  a query that declares datatypes declares the logic its feature set requires, as FR-020 specifies. The Boolean-only profile
   `quire.smtlib2/v1` (logic `QF_UF`) is replaced; it is not selectable and no fallback to it exists.
 - Rational, text, enum, record, option, collection, field/index/option access, calls, non-linear
   arithmetic, locals, and quantifiers are explicitly unsupported by the live profile. The

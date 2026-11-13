@@ -71,3 +71,18 @@ Ticket: VER-70. Base checklist (ID formats, AC testability, TC coverage, hash/pi
 ## Verdict
 
 FAIL at medium. Clean: id formats; TC frontmatter verifies relationships; real-solver criteria are marked skip-not-pass where solvers are absent; no hash, digest, pin or SHA tracking; no compat layer or fallback (the v2-replaces-v1 wording forbids one); no paywalled standard text; no roadmap or research content in this public repo.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-005 | medium | The new constant_overflow case of FR-010-AC-4 (a constant fold outside the 128-bit signed range) cannot be built from an admitted statement. Every clause passes check_expression in StatementInput::from_clause (src/smt.rs:205). For reject-policy results, quire-contract-ir proves each result interval lies inside its named bounds, which are themselves i128, or refuses the clause (expression.rs:2672-2697). Saturating results are already unsupported. So no admitted constant subtree folds outside i128, and the AC case has no fixture. Fix: drop constant_overflow from AC-4 and keep it as a defensive class verified by inspection, or state the unchecked construction route. | spec/functional/FR-010-linear-integer-arithmetic.md:89 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in f1ad0f5 |
+| FND-002 | fixed | verified in f1ad0f5 |
+| FND-003 | fixed | verified in f1ad0f5 |
+| FND-004 | fixed | verified in f1ad0f5 |
