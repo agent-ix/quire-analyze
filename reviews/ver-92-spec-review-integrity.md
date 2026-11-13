@@ -35,3 +35,9 @@ Ticket VER-92. Checked the consistency between quantifier behavior, replay-limit
 ## Verdict
 
 FAIL at medium. The omissions are observable: a passing existential model near the budget can be rejected, and current TC-030 does not detect that behavior.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | Verified in 179076b. after_excerpt: `Replay of an existential quantifier stops at and reports its first holding instance with its element and source identity, does not evaluate later elements, and completes the assertion successfully; when none holds, it reports no holding instance and the count enumerated.` |

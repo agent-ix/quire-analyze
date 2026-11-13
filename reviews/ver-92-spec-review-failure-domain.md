@@ -32,3 +32,9 @@ Ticket VER-92. Checked failure behavior at the replay limit, range-bound decodin
 ## Verdict
 
 FAIL at medium. Existing explicit bound and overflow handling protect the resource boundary, but the true existential path needs an early-stop rule to avoid a false resource-exhaustion result.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | Verified in 179076b. after_excerpt: `Replay of an existential quantifier stops at and reports its first holding instance with its element and source identity, does not evaluate later elements, and completes the assertion successfully; when none holds, it reports no holding instance and the count enumerated.` |

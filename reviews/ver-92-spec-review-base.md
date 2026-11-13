@@ -38,3 +38,10 @@ Ticket VER-92. Reviewed the changed requirement identifiers, test links, AC test
 ## Verdict
 
 FAIL at medium. The structural validation passes and the changed IDs and cross-references are valid. The existential success path must stop at a witness to remain correct under the replay budget, and AC-8 needs to require the positive publication outcome.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | Verified in 179076b. after_excerpt: `Replay of an existential quantifier stops at and reports its first holding instance with its element and source identity, does not evaluate later elements, and completes the assertion successfully; when none holds, it reports no holding instance and the count enumerated.` |
+| FND-002 | fixed | Verified in 179076b. after_excerpt: `When replay evaluates every assertion for a returned model and each holds, the model is published as verified; if an assertion fails or replay is incomplete, it is not.` |
