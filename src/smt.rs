@@ -6,11 +6,16 @@ use std::{
 use quire_contract_model::{
     BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
     DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType,
-    NumericOperator, OverflowPolicy, RecordDeclaration, RecordLiteralField, Requirement,
-    RequirementRef, SourceSpan, StateObservation, SymbolName, TypeDeclaration, TypedExpression,
-    ValueDeclarationKind, ValueType,
+    NumericOperator, OverflowPolicy, QuantifierKind, RecordDeclaration, RecordLiteralField,
+    Requirement, RequirementRef, SourceSpan, StateObservation, SymbolName, TypeDeclaration,
+    TypedExpression, ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
+
+use crate::quantifier::{
+    expansion_cost, literal_width, AnalysisFormula, QuantifierDomainClass, QuantifierEncoding,
+    QuantifierEntry, QuantifierReason, QuantifierRefusal, RangeBound, RangeQuantifier,
+};
 
 /// The accepted engine-neutral analysis model profile.
 pub const ANALYSIS_MODEL_PROFILE: &str = "quire.analysis-model/v1";
@@ -20,6 +25,10 @@ pub const SMTLIB2_PROFILE: &str = "quire.smtlib2/v2";
 pub const SMTLIB2_LOGIC: &str = "QF_LIA";
 /// The logic of every query that declares at least one datatype.
 pub const SMTLIB2_DATATYPE_LOGIC: &str = "QF_UFDTLIA";
+/// The logic of a query that holds a bounded solver quantifier and declares no datatype.
+pub const SMTLIB2_QUANTIFIED_LOGIC: &str = "LIA";
+/// The logic of a query that holds a bounded solver quantifier and declares a datatype.
+pub const SMTLIB2_QUANTIFIED_DATATYPE_LOGIC: &str = "UFDTLIA";
 /// Bound on variants of one enum.
 pub const MAX_ENUM_VARIANTS: usize = 256;
 /// Bound on datatypes declared in one query.
@@ -138,6 +147,7 @@ impl UnsupportedClass {
 pub struct LoweringError {
     code: LoweringErrorCode,
     class: Option<UnsupportedClass>,
+    refusal: Option<QuantifierRefusal>,
     path: String,
     message: String,
 }
@@ -147,6 +157,7 @@ impl LoweringError {
         Self {
             code,
             class: None,
+            refusal: None,
             path: path.into(),
             message: message.into(),
         }
@@ -158,6 +169,10 @@ impl LoweringError {
     /// The integer construct class of an unsupported integer term, when it has one.
     pub const fn unsupported_class(&self) -> Option<UnsupportedClass> {
         self.class
+    }
+    /// The quantifier identity and reason class of a refused quantifier.
+    pub const fn quantifier_refusal(&self) -> Option<&QuantifierRefusal> {
+        self.refusal.as_ref()
     }
     pub fn path(&self) -> &str {
         &self.path
@@ -204,6 +219,7 @@ pub struct StatementInput {
     execution_point: ExecutionPoint,
     environment: DeclarationEnvironment,
     expression: Expression,
+    formula: Option<AnalysisFormula>,
     source: SourceSpan,
 }
 
@@ -274,6 +290,7 @@ impl StatementInput {
                 execution_point,
                 environment,
                 expression: clause.body().expression().clone(),
+                formula: None,
                 source: clause.source().clone(),
             })
         } else {
@@ -293,6 +310,15 @@ impl StatementInput {
     }
     pub fn expression(&self) -> &Expression {
         &self.expression
+    }
+
+    /// Replaces the lowered body with an analysis-model formula. The contract model has no
+    /// range-domain quantifier form, so a range quantifier reaches lowering only this way; the
+    /// clause still supplies the statement's identity and declarations.
+    #[must_use]
+    pub fn with_formula(mut self, formula: AnalysisFormula) -> Self {
+        self.formula = Some(formula);
+        self
     }
 }
 
@@ -471,6 +497,7 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "option_equality",
         "option_presence",
         "option_access",
+        "range_quantifier",
     ],
     unsupported_constructs: &[
         "non_linear_arithmetic",
@@ -776,6 +803,9 @@ pub(crate) enum ReplayExpression {
     /// A term over a datatype sort. Datatype witnesses are not replayed yet (VER-87), so it never
     /// evaluates to a verdict.
     DatatypeUnreplayed,
+    /// A bounded solver quantifier. Its replay is not implemented yet (VER-92), so it never
+    /// evaluates to a verdict.
+    QuantifierUnreplayed,
     /// A comparison of two integer terms.
     Compare {
         operator: ComparisonOperator,
@@ -801,7 +831,9 @@ impl ReplayExpression {
             Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
-            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
+            Self::DatatypeUnreplayed | Self::QuantifierUnreplayed => {
+                Err(ReplayFault::DatatypeUnreplayed)
+            }
             Self::Compare {
                 operator,
                 left,
@@ -846,6 +878,7 @@ pub struct QueryBundle {
     datatype_variables: Vec<String>,
     replay_assertions: Vec<ReplayAssertion>,
     integer_ranges: BTreeMap<String, (i128, i128)>,
+    quantifiers: Vec<QuantifierEntry>,
 }
 
 impl QueryBundle {
@@ -920,6 +953,11 @@ impl QueryBundle {
         &self.option_sorts
     }
 
+    /// The quantifier map: one entry per admitted quantifier, in canonical order.
+    pub fn quantifiers(&self) -> &[QuantifierEntry] {
+        &self.quantifiers
+    }
+
     pub(crate) fn replay_assertions(&self) -> &[ReplayAssertion] {
         &self.replay_assertions
     }
@@ -987,7 +1025,11 @@ fn lower_statement_specs(
     let mut datatypes = DatatypeSet::default();
     let mut lowered = Vec::with_capacity(statements.len());
     let mut errors = Vec::new();
+    let mut quantifiers = QuantifierState::default();
 
+    // Lowering runs in canonical assertion order so that the quantifier budget is spent in an
+    // order independent of the order the caller listed the statements in.
+    let mut ordered = Vec::with_capacity(statements.len());
     for specification in statements {
         let source_digest = statement_digest(specification.statement, binding_set_digest);
         let mapped_digest = analysis_kind.map_or(source_digest, |kind| {
@@ -1003,6 +1045,10 @@ fn lower_statement_specs(
             )
         });
         let assertion_name = assertion_symbol(specification.statement, mapped_digest);
+        ordered.push((assertion_name, mapped_digest, specification));
+    }
+    ordered.sort_by(|left, right| left.0.cmp(&right.0));
+    for (assertion_name, mapped_digest, specification) in ordered {
         match lower_expression(
             specification.statement,
             &binding_lookup,
@@ -1010,6 +1056,7 @@ fn lower_statement_specs(
             &mut variables,
             &mut ranges,
             &mut datatypes,
+            &mut quantifiers,
         ) {
             Ok(mut expression) => {
                 if specification.polarity == AssertionPolarity::Negated {
@@ -1074,10 +1121,11 @@ fn lower_statement_specs(
     query.push_str("(set-info :source |");
     query.push_str(SMTLIB2_PROFILE);
     query.push_str("|)\n(set-option :produce-models true)\n(set-logic ");
-    let logic = if datatypes.is_empty() {
-        SMTLIB2_LOGIC
-    } else {
-        SMTLIB2_DATATYPE_LOGIC
+    let logic = match (quantifiers.bounded, datatypes.is_empty()) {
+        (false, true) => SMTLIB2_LOGIC,
+        (false, false) => SMTLIB2_DATATYPE_LOGIC,
+        (true, true) => SMTLIB2_QUANTIFIED_LOGIC,
+        (true, false) => SMTLIB2_QUANTIFIED_DATATYPE_LOGIC,
     };
     query.push_str(logic);
     query.push_str(")\n");
@@ -1170,6 +1218,7 @@ fn lower_statement_specs(
         datatype_variables: datatypes.variable_sorts.into_keys().collect(),
         replay_assertions,
         integer_ranges: ranges,
+        quantifiers: quantifiers.entries,
     })
 }
 
@@ -1230,6 +1279,7 @@ fn lower_expression(
     variables: &mut BTreeMap<String, VariableMap>,
     ranges: &mut BTreeMap<String, (i128, i128)>,
     datatypes: &mut DatatypeSet,
+    quantifiers: &mut QuantifierState,
 ) -> Result<LoweredExpression, LoweringError> {
     let mut state = LowerState {
         statement,
@@ -1238,10 +1288,59 @@ fn lower_expression(
         variables,
         ranges,
         datatypes,
+        quantifiers,
+        scope: Vec::new(),
+        bound_depth: 0,
         built_records: BTreeMap::new(),
         nodes: 0,
     };
-    state.lower(&statement.expression, 1, &ExprPath::ROOT)
+    match &statement.formula {
+        Some(formula) => {
+            let planned = state.plan(formula, 1, &ExprPath::ROOT, 1)?;
+            state.lower_planned(&planned, 1, &ExprPath::ROOT)
+        }
+        None => state.lower(&statement.expression, 1, &ExprPath::ROOT),
+    }
+}
+
+/// What lowering accumulates across statements for quantifiers.
+#[derive(Default)]
+struct QuantifierState {
+    /// Instances charged against the expansion budget so far.
+    used: u128,
+    /// Whether any quantifier took the bounded solver form.
+    bounded: bool,
+    entries: Vec<QuantifierEntry>,
+}
+
+/// A bound variable in scope while a quantifier body is lowered.
+struct LocalBinding {
+    name: SymbolName,
+    value_type: IntegerType,
+    value: LocalValue,
+}
+
+enum LocalValue {
+    /// An expanded instance: the element itself.
+    Element(i128),
+    /// A bounded quantifier: the bound variable's query symbol.
+    Symbol(String),
+}
+
+/// A formula whose quantifiers have each been given an encoding.
+enum Planned<'f> {
+    Term(&'f Expression),
+    Not(Box<Planned<'f>>),
+    And(Box<Planned<'f>>, Box<Planned<'f>>),
+    Or(Box<Planned<'f>>, Box<Planned<'f>>),
+    Implies(Box<Planned<'f>>, Box<Planned<'f>>),
+    Range {
+        quantifier: &'f RangeQuantifier,
+        encoding: QuantifierEncoding,
+        /// The literal bounds of an expanded range.
+        elements: Option<(i64, i64)>,
+        body: Box<Planned<'f>>,
+    },
 }
 
 struct LowerState<'a> {
@@ -1251,12 +1350,305 @@ struct LowerState<'a> {
     variables: &'a mut BTreeMap<String, VariableMap>,
     ranges: &'a mut BTreeMap<String, (i128, i128)>,
     datatypes: &'a mut DatatypeSet,
+    quantifiers: &'a mut QuantifierState,
+    scope: Vec<LocalBinding>,
+    /// Bounded quantifiers enclosing the position being lowered.
+    bound_depth: usize,
     /// The record sorts already built for this statement's environment, by record name.
     built_records: BTreeMap<SymbolName, BuiltSort>,
     nodes: usize,
 }
 
 impl LowerState<'_> {
+    /// Gives every quantifier of the formula its encoding, outermost first, spending the shared
+    /// expansion budget and recording the quantifier map. `enclosing` is the product of the
+    /// instance counts of the enclosing expanded quantifiers.
+    fn plan<'f>(
+        &mut self,
+        formula: &'f AnalysisFormula,
+        depth: usize,
+        path: &ExprPath<'_>,
+        enclosing: u128,
+    ) -> Result<Planned<'f>, LoweringError> {
+        count_node(depth, &mut self.nodes)?;
+        let child = |state: &mut Self, formula: &'f AnalysisFormula, segment: &str| {
+            state.plan(formula, depth + 1, &path.child(segment), enclosing)
+        };
+        Ok(match formula {
+            AnalysisFormula::Term(expression) => Planned::Term(expression),
+            AnalysisFormula::Not(operand) => {
+                Planned::Not(Box::new(child(self, operand, "operand")?))
+            }
+            AnalysisFormula::And(left, right) => Planned::And(
+                Box::new(child(self, left, "left")?),
+                Box::new(child(self, right, "right")?),
+            ),
+            AnalysisFormula::Or(left, right) => Planned::Or(
+                Box::new(child(self, left, "left")?),
+                Box::new(child(self, right, "right")?),
+            ),
+            AnalysisFormula::Implies(left, right) => Planned::Implies(
+                Box::new(child(self, left, "left")?),
+                Box::new(child(self, right, "right")?),
+            ),
+            AnalysisFormula::Range(quantifier) => {
+                self.plan_range(quantifier, depth, path, enclosing)?
+            }
+        })
+    }
+
+    fn plan_range<'f>(
+        &mut self,
+        quantifier: &'f RangeQuantifier,
+        depth: usize,
+        path: &ExprPath<'_>,
+        enclosing: u128,
+    ) -> Result<Planned<'f>, LoweringError> {
+        self.require_finite(&quantifier.lower, quantifier, path)?;
+        self.require_finite(&quantifier.upper, quantifier, path)?;
+        let literals = match (&quantifier.lower, &quantifier.upper) {
+            (RangeBound::Literal(lower), RangeBound::Literal(upper)) => Some((*lower, *upper)),
+            _ => None,
+        };
+        // A declared bound is only known to the solver, so only literal ranges can expand.
+        let cost = literals.and_then(|(lower, upper)| {
+            expansion_cost(literal_width(lower, upper), enclosing, self.quantifiers.used)
+        });
+        let (encoding, count) = match cost {
+            Some(count) => (QuantifierEncoding::Expanded, count),
+            None => (QuantifierEncoding::Bounded, 0),
+        };
+        self.quantifiers.used = self.quantifiers.used.saturating_add(count);
+        self.quantifiers.entries.push(QuantifierEntry {
+            source: quantifier.identity.clone(),
+            kind: quantifier.kind,
+            domain: QuantifierDomainClass::Range,
+            encoding,
+            instance_count: count,
+            lower: quantifier.lower.clone(),
+            upper: quantifier.upper.clone(),
+        });
+        let inner = match (encoding, literals) {
+            (QuantifierEncoding::Expanded, Some((lower, upper))) => {
+                enclosing.saturating_mul(literal_width(lower, upper).unwrap_or(1))
+            }
+            _ => enclosing,
+        };
+        let body = self.plan(&quantifier.body, depth + 1, &path.child("body"), inner)?;
+        Ok(Planned::Range {
+            quantifier,
+            encoding,
+            elements: cost.and(literals),
+            body: Box::new(body),
+        })
+    }
+
+    /// Refuses a range bound that is not provably finite.
+    fn require_finite(
+        &self,
+        bound: &RangeBound,
+        quantifier: &RangeQuantifier,
+        path: &ExprPath<'_>,
+    ) -> Result<(), LoweringError> {
+        let finite = match bound {
+            RangeBound::Literal(_) => true,
+            RangeBound::Unbounded => false,
+            RangeBound::Declared(name) => self
+                .statement
+                .environment
+                .values()
+                .iter()
+                .find(|value| value.name() == name)
+                .is_some_and(|declaration| {
+                    declaration.kind() == ValueDeclarationKind::Input
+                        && matches!(declaration.value_type(), ValueType::Integer { .. })
+                }),
+        };
+        if finite {
+            return Ok(());
+        }
+        let mut error = unsupported(
+            &path.render(),
+            "range bound is not provably finite (non-finite-bound)",
+        );
+        error.refusal = Some(QuantifierRefusal {
+            identity: quantifier.identity.clone(),
+            reason: QuantifierReason::NonFiniteBound,
+        });
+        Err(error)
+    }
+
+    fn lower_planned(
+        &mut self,
+        planned: &Planned<'_>,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        if let Planned::Term(expression) = planned {
+            return self.lower(expression, depth, path);
+        }
+        count_node(depth, &mut self.nodes)?;
+        match planned {
+            Planned::Term(_) => unreachable!("terms return above"),
+            Planned::Not(operand) => {
+                let operand = self.lower_planned(operand, depth + 1, &path.child("operand"))?;
+                Ok(LoweredExpression {
+                    smt: format!("(not {})", operand.smt),
+                    replay: ReplayExpression::Not(Box::new(operand.replay)),
+                })
+            }
+            Planned::And(left, right) | Planned::Or(left, right) | Planned::Implies(left, right) => {
+                let left_lowered = self.lower_planned(left, depth + 1, &path.child("left"))?;
+                let right_lowered = self.lower_planned(right, depth + 1, &path.child("right"))?;
+                let (name, replay) = match planned {
+                    Planned::And(..) => (
+                        "and",
+                        ReplayExpression::And(
+                            Box::new(left_lowered.replay),
+                            Box::new(right_lowered.replay),
+                        ),
+                    ),
+                    Planned::Or(..) => (
+                        "or",
+                        ReplayExpression::Or(
+                            Box::new(left_lowered.replay),
+                            Box::new(right_lowered.replay),
+                        ),
+                    ),
+                    _ => (
+                        "=>",
+                        ReplayExpression::Implies(
+                            Box::new(left_lowered.replay),
+                            Box::new(right_lowered.replay),
+                        ),
+                    ),
+                };
+                Ok(LoweredExpression {
+                    smt: format!("({name} {} {})", left_lowered.smt, right_lowered.smt),
+                    replay,
+                })
+            }
+            Planned::Range {
+                quantifier,
+                encoding,
+                elements,
+                body,
+            } => match (encoding, elements) {
+                (QuantifierEncoding::Expanded, Some((lower, upper))) => {
+                    self.lower_expanded(quantifier, (*lower, *upper), body, depth, path)
+                }
+                _ => self.lower_bounded(quantifier, body, depth, path),
+            },
+        }
+    }
+
+    /// One instance of the body per element, joined by conjunction for a universal and by
+    /// disjunction for an existential quantifier, in ascending element order.
+    fn lower_expanded(
+        &mut self,
+        quantifier: &RangeQuantifier,
+        (lower, upper): (i64, i64),
+        body: &Planned<'_>,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let universal = quantifier.kind == QuantifierKind::ForAll;
+        let mut parts = Vec::new();
+        for element in lower..=upper {
+            self.scope.push(LocalBinding {
+                name: quantifier.local.clone(),
+                value_type: quantifier.local_type.clone(),
+                value: LocalValue::Element(i128::from(element)),
+            });
+            let instance = self.lower_planned(body, depth + 1, &path.child("body"));
+            self.scope.pop();
+            parts.push(instance?);
+        }
+        let (operator, empty) = if universal {
+            ("and", true)
+        } else {
+            ("or", false)
+        };
+        if parts.len() <= 1 {
+            return Ok(parts.pop().unwrap_or(LoweredExpression {
+                smt: empty.to_string(),
+                replay: ReplayExpression::Literal(empty),
+            }));
+        }
+        let smt = format!(
+            "({operator} {})",
+            parts
+                .iter()
+                .map(|part| part.smt.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let mut replays = parts.into_iter().map(|part| part.replay);
+        let first = replays.next().unwrap_or(ReplayExpression::Literal(empty));
+        let replay = replays.fold(first, |accumulated, next| {
+            if universal {
+                ReplayExpression::And(Box::new(accumulated), Box::new(next))
+            } else {
+                ReplayExpression::Or(Box::new(accumulated), Box::new(next))
+            }
+        });
+        Ok(LoweredExpression { smt, replay })
+    }
+
+    /// A solver quantifier whose finite interval guard conjoins both bounds to the bound
+    /// variable. The body is lowered once, over the bound variable's symbol.
+    fn lower_bounded(
+        &mut self,
+        quantifier: &RangeQuantifier,
+        body: &Planned<'_>,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let lower = self.bound_term(&quantifier.lower)?;
+        let upper = self.bound_term(&quantifier.upper)?;
+        let symbol = format!("bv_{}", self.bound_depth);
+        self.scope.push(LocalBinding {
+            name: quantifier.local.clone(),
+            value_type: quantifier.local_type.clone(),
+            value: LocalValue::Symbol(symbol.clone()),
+        });
+        self.bound_depth += 1;
+        let lowered = self.lower_planned(body, depth + 1, &path.child("body"));
+        self.bound_depth -= 1;
+        self.scope.pop();
+        let lowered = lowered?;
+        self.quantifiers.bounded = true;
+        let guard = format!("(<= {lower} {symbol}) (<= {symbol} {upper})");
+        let smt = if quantifier.kind == QuantifierKind::ForAll {
+            format!(
+                "(forall (({symbol} Int)) (=> (and {guard}) {}))",
+                lowered.smt
+            )
+        } else {
+            format!("(exists (({symbol} Int)) (and {guard} {}))", lowered.smt)
+        };
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::QuantifierUnreplayed,
+        })
+    }
+
+    /// The query term of a finite range bound.
+    fn bound_term(&mut self, bound: &RangeBound) -> Result<String, LoweringError> {
+        match bound {
+            RangeBound::Literal(value) => Ok(numeral(i128::from(*value))),
+            RangeBound::Declared(name) => self.reference(name, StateObservation::Current),
+            RangeBound::Unbounded => Err(unsupported(
+                "expression.quantifier",
+                "range bound is not provably finite (non-finite-bound)",
+            )),
+        }
+    }
+
+    fn local(&self, name: &SymbolName) -> Option<&LocalBinding> {
+        self.scope.iter().rev().find(|binding| &binding.name == name)
+    }
+
     fn lower(
         &mut self,
         expression: &Expression,
@@ -1539,10 +1931,17 @@ impl LowerState<'_> {
     /// Whether the term is integer-typed. Validation makes both comparison operands agree, so
     /// the left operand decides.
     fn is_integer_term(&self, expression: &Expression) -> bool {
-        matches!(
-            term_type(&self.statement.environment, expression),
-            Some(ValueType::Integer { .. })
-        )
+        match expression.kind() {
+            ExpressionKind::LocalReference { name } => self.local(name).is_some(),
+            ExpressionKind::Numeric { left, right, .. } => {
+                self.is_integer_term(left) || self.is_integer_term(right)
+            }
+            ExpressionKind::NumericNegate { operand } => self.is_integer_term(operand),
+            _ => matches!(
+                term_type(&self.statement.environment, expression),
+                Some(ValueType::Integer { .. })
+            ),
+        }
     }
 
     /// Lowers a term of any exact sort: an integer term through linear folding, anything else
@@ -1559,7 +1958,14 @@ impl LowerState<'_> {
         let environment = &self.statement.environment;
         let types = |name: &SymbolName| integer_declaration_type(environment, name);
         let terms = |term: &Expression| datatype_integer_type(environment, term);
-        let folded = fold_integer(expression, path, &types, &terms, depth, &mut self.nodes)?;
+        let scope = &self.scope;
+        let locals = |name: &SymbolName| local_tree(scope, name);
+        let resolvers = Resolvers {
+            types: &types,
+            terms: &terms,
+            locals: &locals,
+        };
+        let folded = fold_integer(expression, path, &resolvers, depth, &mut self.nodes)?;
         let (smt, _) = self.emit(&folded.tree)?;
         Ok(LoweredExpression {
             smt,
@@ -1948,19 +2354,24 @@ impl LowerState<'_> {
         let environment = &self.statement.environment;
         let types = |name: &SymbolName| integer_declaration_type(environment, name);
         let terms = |term: &Expression| datatype_integer_type(environment, term);
+        let scope = &self.scope;
+        let locals = |name: &SymbolName| local_tree(scope, name);
+        let resolvers = Resolvers {
+            types: &types,
+            terms: &terms,
+            locals: &locals,
+        };
         let left = fold_integer(
             left,
             &path.child("left"),
-            &types,
-            &terms,
+            &resolvers,
             depth + 1,
             &mut self.nodes,
         )?;
         let right = fold_integer(
             right,
             &path.child("right"),
-            &types,
-            &terms,
+            &resolvers,
             depth + 1,
             &mut self.nodes,
         )?;
@@ -2001,6 +2412,7 @@ impl LowerState<'_> {
                 let lowered = self.lower(expression, *depth, &ExprPath::detached(path))?;
                 (lowered.smt, ReplayTerm::DatatypeUnreplayed)
             }
+            IntegerTree::Bound(symbol) => (symbol.clone(), ReplayTerm::DatatypeUnreplayed),
             IntegerTree::Negate(operand) => {
                 let (smt, term) = self.emit(operand)?;
                 (format!("(- {smt})"), ReplayTerm::Negate(Box::new(term)))
@@ -2309,6 +2721,8 @@ enum IntegerTree {
         name: SymbolName,
         observation: StateObservation,
     },
+    /// The query symbol of a bounded quantifier's bound variable.
+    Bound(String),
     Negate(Box<IntegerTree>),
     Add(Box<IntegerTree>, Box<IntegerTree>),
     Subtract(Box<IntegerTree>, Box<IntegerTree>),
@@ -2340,16 +2754,36 @@ fn integer_unsupported(
     error
 }
 
+/// How `fold_integer` resolves the names a term refers to.
+struct Resolvers<'a> {
+    /// The declared integer type of a value reference.
+    types: &'a dyn Fn(&SymbolName) -> Option<IntegerType>,
+    /// The integer type of a datatype read.
+    terms: &'a dyn Fn(&Expression) -> Option<IntegerType>,
+    /// The value and type of a quantifier's bound variable.
+    locals: &'a dyn Fn(&SymbolName) -> Option<(IntegerTree, IntegerType)>,
+}
+
+/// The integer tree and type of a bound variable in scope: an expanded element is a constant.
+fn local_tree(scope: &[LocalBinding], name: &SymbolName) -> Option<(IntegerTree, IntegerType)> {
+    let binding = scope.iter().rev().find(|binding| &binding.name == name)?;
+    let tree = match &binding.value {
+        LocalValue::Element(value) => IntegerTree::Constant(*value),
+        LocalValue::Symbol(symbol) => IntegerTree::Bound(symbol.clone()),
+    };
+    Some((tree, binding.value_type.clone()))
+}
+
 /// Folds every maximal constant subtree to one literal and rejects any term outside linear
 /// integer arithmetic. `types` resolves a value reference to its declared integer type.
 fn fold_integer(
     expression: &Expression,
     path: &ExprPath<'_>,
-    types: &dyn Fn(&SymbolName) -> Option<IntegerType>,
-    terms: &dyn Fn(&Expression) -> Option<IntegerType>,
+    resolvers: &Resolvers<'_>,
     depth: usize,
     nodes: &mut usize,
 ) -> Result<FoldedInteger, LoweringError> {
+    let (types, terms) = (resolvers.types, resolvers.terms);
     count_node(depth, nodes)?;
     let overflow = || {
         integer_unsupported(
@@ -2378,12 +2812,20 @@ fn fold_integer(
                 value_type,
             })
         }
+        ExpressionKind::LocalReference { name } => {
+            let (tree, value_type) = (resolvers.locals)(name).ok_or_else(|| {
+                unsupported(
+                    &path.render(),
+                    "local reference outside a range quantifier",
+                )
+            })?;
+            Ok(FoldedInteger { tree, value_type })
+        }
         ExpressionKind::NumericNegate { operand } => {
             let operand = fold_integer(
                 operand,
                 &path.child("operand"),
-                types,
-                terms,
+                resolvers,
                 depth + 1,
                 nodes,
             )?;
@@ -2421,8 +2863,8 @@ fn fold_integer(
                 }
                 NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
             }
-            let left = fold_integer(left, &path.child("left"), types, terms, depth + 1, nodes)?;
-            let right = fold_integer(right, &path.child("right"), types, terms, depth + 1, nodes)?;
+            let left = fold_integer(left, &path.child("left"), resolvers, depth + 1, nodes)?;
+            let right = fold_integer(right, &path.child("right"), resolvers, depth + 1, nodes)?;
             reject_saturating(&left.value_type, path)?;
             let tree = match (operator, left.tree, right.tree) {
                 (NumericOperator::Add, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
@@ -2647,7 +3089,7 @@ fn project_type(
 }
 
 fn statement_digest(statement: &StatementInput, binding_digest: AnalysisDigest) -> AnalysisDigest {
-    hash_fields(
+    let base = hash_fields(
         "statement",
         &[
             ANALYSIS_MODEL_PROFILE.as_bytes(),
@@ -2670,7 +3112,15 @@ fn statement_digest(statement: &StatementInput, binding_digest: AnalysisDigest) 
             execution_point_key(&statement.execution_point).as_bytes(),
             binding_digest.as_bytes(),
         ],
-    )
+    );
+    match &statement.formula {
+        Some(formula) => {
+            let mut text = String::new();
+            formula.canonical(&mut text);
+            hash_fields("statement-formula", &[base.as_bytes(), text.as_bytes()])
+        }
+        None => base,
+    }
 }
 
 fn assertion_symbol(statement: &StatementInput, digest: AnalysisDigest) -> String {
@@ -2774,13 +3224,16 @@ pub(crate) struct QueryLogic {
 
 /// Scans the top-level commands of a query, skipping comments, quoted symbols and string
 /// literals. Returns `None` unless there is exactly one `set-logic` that precedes every
-/// declaration. Datatypes need `QF_UFDTLIA`, otherwise `QF_LIA`.
+/// declaration. Datatypes need `QF_UFDTLIA`, otherwise `QF_LIA`; a solver quantifier removes the
+/// quantifier-free prefix (`UFDTLIA`, `LIA`).
 pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
     let mut depth = 0_usize;
     let mut cursor = 0;
     let mut expect_head = false;
     let mut declared: Option<String> = None;
     let mut datatypes = false;
+    let mut quantified = false;
+    let mut after_open = false;
     let mut seen_declaration = false;
     let mut set_logics = 0_usize;
     let mut logic_argument = false;
@@ -2792,6 +3245,7 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
                 }
             }
             b'|' => {
+                after_open = false;
                 cursor += 1;
                 while cursor < query.len() && query[cursor] != b'|' {
                     cursor += 1;
@@ -2803,6 +3257,7 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
                 expect_head = false;
             }
             b'"' => {
+                after_open = false;
                 cursor += 1;
                 loop {
                     match query.get(cursor) {
@@ -2817,11 +3272,13 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
             }
             b'(' => {
                 depth += 1;
+                after_open = true;
                 expect_head = depth == 1;
                 cursor += 1;
             }
             b')' => {
                 depth = depth.checked_sub(1)?;
+                after_open = false;
                 expect_head = false;
                 logic_argument = false;
                 cursor += 1;
@@ -2836,6 +3293,8 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
                     cursor += 1;
                 }
                 let atom = &query[start..cursor];
+                quantified |= after_open && matches!(atom, b"forall" | b"exists");
+                after_open = false;
                 if expect_head {
                     match atom {
                         b"set-logic" => {
@@ -2868,10 +3327,11 @@ pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
         return None;
     }
     Some(QueryLogic {
-        required: if datatypes {
-            SMTLIB2_DATATYPE_LOGIC
-        } else {
-            SMTLIB2_LOGIC
+        required: match (quantified, datatypes) {
+            (false, false) => SMTLIB2_LOGIC,
+            (false, true) => SMTLIB2_DATATYPE_LOGIC,
+            (true, false) => SMTLIB2_QUANTIFIED_LOGIC,
+            (true, true) => SMTLIB2_QUANTIFIED_DATATYPE_LOGIC,
         },
         declared: declared?,
     })
@@ -2939,7 +3399,17 @@ mod tests {
     }
 
     fn fold(expression: &Expression) -> Result<FoldedInteger, LoweringError> {
-        fold_integer(expression, &ExprPath::ROOT, &|_| None, &|_| None, 1, &mut 0)
+        fold_integer(
+            expression,
+            &ExprPath::ROOT,
+            &Resolvers {
+                types: &|_| None,
+                terms: &|_| None,
+                locals: &|_| None,
+            },
+            1,
+            &mut 0,
+        )
     }
 
     /// FR-010-AC-11: a constant fold outside the 128-bit signed range is refused, not wrapped.
@@ -3070,6 +3540,7 @@ mod tests {
             },
             environment: DeclarationEnvironment::new(owner, types, values, vec![]).expect("env"),
             expression,
+            formula: None,
             source: span(),
         }
     }
