@@ -1,11 +1,12 @@
-use std::{env, fs, path::PathBuf, process::ExitCode};
+use std::{env, ffi::OsString, fs, path::PathBuf, process::ExitCode};
 
 use ix_cli_kit::{
     exit::caller_exit_code,
-    streams::{Diagnostics, Record},
+    streams::{write_primary_stdout, Diagnostics, Record},
 };
 use quire_analyze::{
-    publish_report_new, validate_report_document, DifferentialDisposition, MAX_REPORT_BYTES,
+    parse_run_package_arguments, publish_report_new, run_package, run_package_help,
+    validate_report_document, DifferentialDisposition, RunPackageCommand, MAX_REPORT_BYTES,
 };
 use serde_json::Value;
 
@@ -34,8 +35,15 @@ fn emit_error(message: &str) {
 fn run() -> Result<u8, (u8, String)> {
     let mut arguments = env::args_os();
     let _program = arguments.next();
-    if arguments.next().as_deref() != Some(std::ffi::OsStr::new("publish-report")) {
-        return Err((2, usage()));
+    match arguments.next().as_deref().and_then(|name| name.to_str()) {
+        Some("publish-report") => {}
+        Some("run-package") => return run_package_command(arguments),
+        _ => {
+            return Err((
+                2,
+                format!("{}\n       quire-analyze run-package --help", usage()),
+            ))
+        }
     }
     let mut input = None;
     let mut output = None;
@@ -58,6 +66,21 @@ fn run() -> Result<u8, (u8, String)> {
     publish_report_new(&output, &bytes).map_err(|error| (4, error.to_string()))?;
     eprintln!("quire-analyze: published {}", output.display());
     Ok(exit_class)
+}
+
+fn run_package_command(arguments: impl Iterator<Item = OsString>) -> Result<u8, (u8, String)> {
+    match parse_run_package_arguments(arguments)
+        .map_err(|error| (error.class(), error.to_string()))?
+    {
+        RunPackageCommand::Help => {
+            write_primary_stdout(run_package_help().as_bytes())
+                .map_err(|error| (4, error.to_string()))?;
+            Ok(0)
+        }
+        RunPackageCommand::Run(arguments) => {
+            run_package(&arguments).map_err(|error| (error.class(), error.to_string()))
+        }
+    }
 }
 
 fn report_exit_class(bytes: &[u8], disposition: DifferentialDisposition) -> Result<u8, String> {

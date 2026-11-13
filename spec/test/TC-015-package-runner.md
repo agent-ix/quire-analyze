@@ -46,7 +46,7 @@ with real or stub solvers. Cases:
     through the TC-008 publication seam maps to exit `4` with the durability state named.
 11. Run each passing case twice and compare bytes; snapshot the package directory before and after.
 12. Validate every logged request against `producer-execute --schema request` and check the budget values; check the version-then-query sequencing and the unavailable-on-bad-version rule; check the capability root is `0700` during the run and gone after each exit path.
-13. Repeat case 2 with closed stdin, no network and a minimal environment, and compare with a normal run.
+13. Repeat case 2 with null stdin and an empty environment, and compare with a run whose stdin is an open pipe holding unread data and whose environment is full (reports compared with `elapsedMs` set to `0`; no network restriction is applied).
 14. With the real executable and real solvers on a stall and a flood stub solver: exit `3`.
 15. Real executable and real solvers on a built contract package: exit `0` or `1`; skipped with a stated reason
     when absent.
@@ -69,10 +69,11 @@ with real or stub solvers. Cases:
     spawning the binary over the same built packages, including the 61-node shared-subterm chain, which
     exits `2` without hanging.
 21. Inspect the tests directory: no committed contract-package document (AC-27).
+22. A stub that leaves an unreadable entry in the capability root: the root path is named on stderr, the report is published and the exit status is unchanged (AC-28).
 
 Inspect `run-package --help` for the arguments and exit classes.
 
 ## Expected Results
 
 Every case produces the stated exit status. Reports validate; refused inputs leave no report; repeated
-runs are byte-identical; the package directory is unchanged; the hermetic run equals the normal run.
+runs are byte-identical apart from `elapsedMs`; the package directory is unchanged; the hermetic run equals the normal run.
