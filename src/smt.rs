@@ -919,7 +919,6 @@ impl QueryBundle {
         &self.datatype_shapes
     }
 
-
     /// Every datatype sort symbol the query declares, in ascending order.
     /// The enum datatypes the query declares, in ascending sort-symbol order.
     pub fn enum_sorts(&self) -> &[EnumSortMap] {

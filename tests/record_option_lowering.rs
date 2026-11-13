@@ -519,11 +519,11 @@ fn record_fixtures_are_decided_and_reported_under_the_datatype_logic() {
     validate_differential_report(&report, &query, &run).expect("valid");
 }
 
-/// FR-020-AC-3: a satisfiable record model is decided sat but stays unverified, naming the record
-/// variable, until datatype witness replay exists.
-#[trace("TC-020", "FR-020-AC-3", "FR-020-AC-10")]
+/// FR-020-AC-3 and FR-021-AC-1: a satisfiable record model is decided sat and replays, in both
+/// engines, to the same typed record.
+#[trace("TC-020", "FR-020-AC-3", "FR-021-AC-1")]
 #[test]
-fn satisfiable_record_model_is_decided_but_unverified() {
+fn satisfiable_record_model_is_decided_and_replayed() {
     let query = lower(record_sat_fixture());
     let sort = &query.record_sorts()[0];
     let variable = &query.variables()[0].symbol;
@@ -534,21 +534,22 @@ fn satisfiable_record_model_is_decided_but_unverified() {
         query.enum_sorts()[0].constructors[0].symbol
     );
     let run = decide(&query, &model);
-    assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
-    assert!(!run.is_conclusive());
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
     let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
-    let failure = conclusion.replay_failure().expect("replay failure");
-    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-    assert_eq!(failure.subject(), Some(variable.as_str()));
+    assert_eq!(conclusion.explanation(), ExplanationState::Verified);
+    let verified = conclusion.verified_model().expect("verified");
+    assert_eq!(
+        verified.datatype_values()[0].value().to_string(),
+        "{active: true, level: 5, role: Admin}"
+    );
 }
 
-/// FR-020-AC-3: the option fixtures are decided, and a satisfiable option model stays unverified.
-#[trace("TC-020", "FR-020-AC-3", "FR-020-AC-10")]
+/// FR-020-AC-3 and FR-021-AC-1: the option fixtures are decided, and a satisfiable option model
+/// replays.
+#[trace("TC-020", "FR-020-AC-3", "FR-021-AC-1")]
 #[test]
-fn option_fixtures_are_decided_and_models_stay_unverified() {
+fn option_fixtures_are_decided_and_models_replay() {
     let query = lower(option_unsat_fixture());
     let run = decide(&query, "unsat\n");
     assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
@@ -565,24 +566,31 @@ fn option_fixtures_are_decided_and_models_stay_unverified() {
     );
     let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    let failure = conclusion.replay_failure().expect("replay failure");
-    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-    assert_eq!(failure.subject(), Some(variable.as_str()));
-    // An empty model gets the same reason, naming the same first datatype-sorted variable.
+    let verified = conclusion.verified_model().expect("verified");
+    assert_eq!(
+        verified.datatype_values()[0].value().to_string(),
+        "present(3)"
+    );
+    // `none` fails the `IsPresent` assertion; an empty model defines no symbol.
+    let absent = format!(
+        "sat\n(model (define-fun {variable} () {} {}))\n",
+        option.sort, option.none
+    );
+    let failed = classify_analysis(&query, &response_record(&query, &absent, SolverEngine::Z3));
+    assert!(failed.verified_model().is_none());
+    assert_eq!(
+        failed.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::AssertionFalse
+    );
     let empty = classify_analysis(&query, &response_record(&query, "sat\n", SolverEngine::Z3));
     assert!(empty.verified_model().is_none());
-    assert_eq!(
-        empty.replay_failure().expect("failure").reason(),
-        ReplayFailureReason::SortNotReplayable
-    );
 }
 
-/// FR-020-AC-3: a query holding only record or option literals has no datatype variable and is
-/// still never verified; the reason names the first declared datatype sort.
-#[trace("TC-020", "FR-020-AC-10")]
+/// FR-021-AC-1: a query holding only record or option literals replays its Boolean variable
+/// through the literals.
+#[trace("TC-020", "FR-021-AC-1")]
 #[test]
-fn literal_only_record_and_option_queries_are_never_verified() {
+fn literal_only_record_and_option_queries_are_replayed() {
     let option = option_of_integer();
     let literal_only = statements(
         "literals",
@@ -613,26 +621,13 @@ fn literal_only_record_and_option_queries_are_never_verified() {
     );
     let query = lower(literal_only);
     assert_eq!(query.logic(), "QF_UFDTLIA");
-    assert_eq!(
-        query.enum_sorts().len() + query.record_sorts().len() + query.option_sorts().len(),
-        3
-    );
     let flag = &query.variables()[0].symbol;
-    let model = format!("sat\n(model (define-fun {flag} () Bool true))\n");
-    let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
-    assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    let failure = conclusion.replay_failure().expect("replay failure");
-    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-    let first = [
-        query.enum_sorts()[0].sort.clone(),
-        query.record_sorts()[0].sort.clone(),
-        query.option_sorts()[0].sort.clone(),
-    ]
-    .into_iter()
-    .min()
-    .expect("a sort");
-    assert_eq!(failure.subject(), Some(first.as_str()));
+    for (value, verifies) in [("true", true), ("false", true)] {
+        let model = format!("sat\n(model (define-fun {flag} () Bool {value}))\n");
+        let conclusion =
+            classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
+        assert_eq!(conclusion.verified_model().is_some(), verifies, "{value}");
+    }
 }
 
 /// FR-020-AC-3: integer parts of a datatype variable are range-constrained through one range
