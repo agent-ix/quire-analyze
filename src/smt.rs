@@ -12,6 +12,8 @@ use quire_contract_model::{
 };
 use sha2::{Digest as _, Sha256};
 
+use crate::datatype_replay::{ReplayDatum, ReplayItem, ReplayShape, ReplayValue};
+
 /// The accepted engine-neutral analysis model profile.
 pub const ANALYSIS_MODEL_PROFILE: &str = "quire.analysis-model/v1";
 /// The exact SMT-LIB2 encoding profile: Boolean and linear integer arithmetic.
@@ -584,6 +586,8 @@ struct DatatypeSet {
     records: BTreeMap<String, RecordSortMap>,
     options: BTreeMap<String, OptionSortMap>,
     variable_sorts: BTreeMap<String, String>,
+    /// The declared type of each datatype-sorted variable, by variable symbol.
+    variable_shapes: BTreeMap<String, ReplayShape>,
     /// The range predicates of typed shapes with integer parts, by predicate symbol.
     range_predicates: BTreeMap<String, RangePredicate>,
     /// The predicate of each typed shape already examined, by shape identity; `None` when the
@@ -608,19 +612,6 @@ impl DatatypeSet {
 
     fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Every declared datatype sort symbol, ascending.
-    fn sort_symbols(&self) -> Vec<String> {
-        let mut symbols: Vec<String> = self
-            .enums
-            .keys()
-            .chain(self.records.keys())
-            .chain(self.options.keys())
-            .cloned()
-            .collect();
-        symbols.sort_unstable();
-        symbols
     }
 
     /// The range predicate definitions in dependency order, ties broken by the predicate symbol.
@@ -704,6 +695,8 @@ impl DatatypeSet {
 pub(crate) struct ReplayAssignment {
     pub(crate) booleans: BTreeMap<String, bool>,
     pub(crate) integers: BTreeMap<String, i128>,
+    /// Enum, record and option values by query symbol.
+    pub(crate) datums: BTreeMap<String, ReplayValue>,
 }
 
 /// Why a replay expression produced no verdict.
@@ -713,8 +706,10 @@ pub(crate) enum ReplayFault {
     Overflow,
     /// A referenced symbol has no value in the assignment.
     Unassigned,
-    /// The expression involves a datatype term, which is not replayed yet (VER-87).
-    DatatypeUnreplayed,
+    /// An `Unwrap` was evaluated on an absent option.
+    AbsentOption,
+    /// A term evaluated to a value of the wrong type for its position.
+    IllTyped,
 }
 
 /// An integer-valued replay term, evaluated with checked 128-bit signed arithmetic.
@@ -729,8 +724,8 @@ pub(crate) enum ReplayTerm {
         factor: i128,
         term: Box<Self>,
     },
-    /// A term read out of a datatype, which is not replayed yet (VER-87).
-    DatatypeUnreplayed,
+    /// An integer read out of a datatype value.
+    Datum(Box<ReplayDatum>),
 }
 
 impl ReplayTerm {
@@ -758,7 +753,10 @@ impl ReplayTerm {
                 .evaluate(values)?
                 .checked_mul(*factor)
                 .ok_or(ReplayFault::Overflow),
-            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
+            Self::Datum(datum) => match datum.evaluate(values)? {
+                ReplayValue::Int(value) => Ok(value),
+                _ => Err(ReplayFault::IllTyped),
+            },
         }
     }
 }
@@ -773,9 +771,18 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
-    /// A term over a datatype sort. Datatype witnesses are not replayed yet (VER-87), so it never
-    /// evaluates to a verdict.
-    DatatypeUnreplayed,
+    /// A datatype-valued term. Evaluated as a Boolean it must read a Boolean out of the datatype.
+    Datum(Box<ReplayDatum>),
+    /// An integer-valued term lowered where a typed value is carried (a record field or payload).
+    Integer(ReplayTerm),
+    /// Whether an option value is present.
+    IsPresent(Box<ReplayDatum>),
+    /// Equality of two datatype values, or inequality when `negated`.
+    DatumEqual {
+        left: Box<ReplayDatum>,
+        right: Box<ReplayDatum>,
+        negated: bool,
+    },
     /// A comparison of two integer terms.
     Compare {
         operator: ComparisonOperator,
@@ -801,7 +808,20 @@ impl ReplayExpression {
             Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
-            Self::DatatypeUnreplayed => Err(ReplayFault::DatatypeUnreplayed),
+            Self::Datum(datum) => match datum.evaluate(values)? {
+                ReplayValue::Bool(value) => Ok(value),
+                _ => Err(ReplayFault::IllTyped),
+            },
+            Self::Integer(_) => Err(ReplayFault::IllTyped),
+            Self::IsPresent(option) => match option.evaluate(values)? {
+                ReplayValue::Option(value) => Ok(value.is_some()),
+                _ => Err(ReplayFault::IllTyped),
+            },
+            Self::DatumEqual {
+                left,
+                right,
+                negated,
+            } => Ok((left.evaluate(values)? == right.evaluate(values)?) != *negated),
             Self::Compare {
                 operator,
                 left,
@@ -842,8 +862,7 @@ pub struct QueryBundle {
     enum_sorts: Vec<EnumSortMap>,
     record_sorts: Vec<RecordSortMap>,
     option_sorts: Vec<OptionSortMap>,
-    datatype_sorts: Vec<String>,
-    datatype_variables: Vec<String>,
+    datatype_shapes: BTreeMap<String, ReplayShape>,
     replay_assertions: Vec<ReplayAssertion>,
     integer_ranges: BTreeMap<String, (i128, i128)>,
 }
@@ -895,14 +914,9 @@ impl QueryBundle {
         &self.variables
     }
 
-    /// The symbols of datatype-sorted variables, in ascending order.
-    pub(crate) fn datatype_variables(&self) -> &[String] {
-        &self.datatype_variables
-    }
-
-    /// Every datatype sort symbol the query declares, in ascending order.
-    pub(crate) fn datatype_sorts(&self) -> &[String] {
-        &self.datatype_sorts
+    /// The declared type of each datatype-sorted variable, by variable symbol.
+    pub(crate) fn datatype_shapes(&self) -> &BTreeMap<String, ReplayShape> {
+        &self.datatype_shapes
     }
 
     /// The enum datatypes the query declares, in ascending sort-symbol order.
@@ -1163,11 +1177,10 @@ fn lower_statement_specs(
         requests_model,
         assertions,
         variables: variables.into_values().collect(),
-        datatype_sorts: datatypes.sort_symbols(),
         enum_sorts: datatypes.enums.into_values().collect(),
         record_sorts: datatypes.records.into_values().collect(),
         option_sorts: datatypes.options.into_values().collect(),
-        datatype_variables: datatypes.variable_sorts.into_keys().collect(),
+        datatype_shapes: datatypes.variable_shapes,
         replay_assertions,
         integer_ranges: ranges,
     })
@@ -1178,6 +1191,29 @@ type BindingLookup = BTreeMap<String, String>;
 struct LoweredExpression {
     smt: String,
     replay: ReplayExpression,
+}
+
+impl ReplayExpression {
+    /// The datatype-valued form of a lowered datatype term.
+    fn into_datum(self) -> Result<ReplayDatum, LoweringError> {
+        match self {
+            Self::Datum(datum) => Ok(*datum),
+            _ => Err(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                "expression",
+                "validated datatype operand no longer lowers to a datatype term",
+            )),
+        }
+    }
+
+    /// The typed item a lowered term stands for as a record field or option payload.
+    fn into_item(self) -> ReplayItem {
+        match self {
+            Self::Datum(datum) => ReplayItem::Datum(*datum),
+            Self::Integer(term) => ReplayItem::Int(term),
+            other => ReplayItem::Bool(other),
+        }
+    }
 }
 
 fn validate_bindings(
@@ -1271,9 +1307,14 @@ impl LowerState<'_> {
             }),
             ExpressionKind::ValueReference { name, observation } => {
                 let symbol = self.reference(name, *observation)?;
+                let replay = if self.datatypes.variable_shapes.contains_key(&symbol) {
+                    ReplayExpression::Datum(Box::new(ReplayDatum::Variable(symbol.clone())))
+                } else {
+                    ReplayExpression::Variable(symbol.clone())
+                };
                 Ok(LoweredExpression {
-                    smt: symbol.clone(),
-                    replay: ReplayExpression::Variable(symbol),
+                    smt: symbol,
+                    replay,
                 })
             }
             ExpressionKind::EnumLiteral {
@@ -1294,8 +1335,10 @@ impl LowerState<'_> {
                         )
                     })?;
                 Ok(LoweredExpression {
+                    replay: ReplayExpression::Datum(Box::new(ReplayDatum::Enum(
+                        constructor.clone(),
+                    ))),
                     smt: constructor,
-                    replay: ReplayExpression::DatatypeUnreplayed,
                 })
             }
             ExpressionKind::RecordLiteral { record, fields } => {
@@ -1370,6 +1413,7 @@ impl LowerState<'_> {
             ));
         }
         let mut smt = format!("({}", map.constructor);
+        let mut items = Vec::with_capacity(map.fields.len());
         for field in &map.fields {
             let value = fields
                 .iter()
@@ -1384,11 +1428,12 @@ impl LowerState<'_> {
             let value = self.lower_term(value.value(), depth + 1, &path.child("field"))?;
             smt.push(' ');
             smt.push_str(&value.smt);
+            items.push(value.replay.into_item());
         }
         smt.push(')');
         Ok(LoweredExpression {
             smt,
-            replay: ReplayExpression::DatatypeUnreplayed,
+            replay: ReplayExpression::Datum(Box::new(ReplayDatum::Record(items))),
         })
     }
 
@@ -1407,11 +1452,12 @@ impl LowerState<'_> {
         };
         let base = self.lower(base, depth + 1, &path.child("base"))?;
         let built = self.record_sort(&name, 1, "")?;
-        let selector = self.datatypes.records[&built.sort]
+        let (index, selector) = self.datatypes.records[&built.sort]
             .fields
             .iter()
-            .find(|candidate| candidate.field == field.as_str())
-            .map(|candidate| candidate.selector.clone())
+            .enumerate()
+            .find(|(_, candidate)| candidate.field == field.as_str())
+            .map(|(index, candidate)| (index, candidate.selector.clone()))
             .ok_or_else(|| {
                 LoweringError::new(
                     LoweringErrorCode::InvalidStatement,
@@ -1421,7 +1467,10 @@ impl LowerState<'_> {
             })?;
         Ok(LoweredExpression {
             smt: format!("({selector} {})", base.smt),
-            replay: ReplayExpression::DatatypeUnreplayed,
+            replay: ReplayExpression::Datum(Box::new(ReplayDatum::Field {
+                base: Box::new(base.replay.into_datum()?),
+                index,
+            })),
         })
     }
 
@@ -1432,7 +1481,7 @@ impl LowerState<'_> {
         let map = self.option_map(value_type, "expression.option_none")?;
         Ok(LoweredExpression {
             smt: map.none,
-            replay: ReplayExpression::DatatypeUnreplayed,
+            replay: ReplayExpression::Datum(Box::new(ReplayDatum::None)),
         })
     }
 
@@ -1447,7 +1496,9 @@ impl LowerState<'_> {
         let value = self.lower_term(value, depth + 1, &path.child("value"))?;
         Ok(LoweredExpression {
             smt: format!("({} {})", map.some, value.smt),
-            replay: ReplayExpression::DatatypeUnreplayed,
+            replay: ReplayExpression::Datum(Box::new(ReplayDatum::Some(Box::new(
+                value.replay.into_item(),
+            )))),
         })
     }
 
@@ -1468,15 +1519,19 @@ impl LowerState<'_> {
         };
         let operand = self.lower(option, depth + 1, &path.child("option"))?;
         let map = self.option_map(&option_type, "expression.option")?;
-        let smt = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
-            format!("((_ is {}) {})", map.some, operand.smt)
+        let option = Box::new(operand.replay.into_datum()?);
+        let (smt, replay) = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
+            (
+                format!("((_ is {}) {})", map.some, operand.smt),
+                ReplayExpression::IsPresent(option),
+            )
         } else {
-            format!("({} {})", map.selector, operand.smt)
+            (
+                format!("({} {})", map.selector, operand.smt),
+                ReplayExpression::Datum(Box::new(ReplayDatum::Unwrap(option))),
+            )
         };
-        Ok(LoweredExpression {
-            smt,
-            replay: ReplayExpression::DatatypeUnreplayed,
-        })
+        Ok(LoweredExpression { smt, replay })
     }
 
     fn lower_comparison(
@@ -1520,7 +1575,11 @@ impl LowerState<'_> {
             };
             return Ok(LoweredExpression {
                 smt: format!("({name} {} {})", left.smt, right.smt),
-                replay: ReplayExpression::DatatypeUnreplayed,
+                replay: ReplayExpression::DatumEqual {
+                    left: Box::new(left.replay.into_datum()?),
+                    right: Box::new(right.replay.into_datum()?),
+                    negated: *operator != ComparisonOperator::Equal,
+                },
             });
         }
         Ok(if *operator == ComparisonOperator::Equal {
@@ -1560,10 +1619,10 @@ impl LowerState<'_> {
         let types = |name: &SymbolName| integer_declaration_type(environment, name);
         let terms = |term: &Expression| datatype_integer_type(environment, term);
         let folded = fold_integer(expression, path, &types, &terms, depth, &mut self.nodes)?;
-        let (smt, _) = self.emit(&folded.tree)?;
+        let (smt, term) = self.emit(&folded.tree)?;
         Ok(LoweredExpression {
             smt,
-            replay: ReplayExpression::DatatypeUnreplayed,
+            replay: ReplayExpression::Integer(term),
         })
     }
 
@@ -1844,6 +1903,53 @@ impl LowerState<'_> {
         Ok(self.datatypes.options[&built.sort].clone())
     }
 
+    /// The declared type of a value, with the encoded sort symbols of its datatypes.
+    fn replay_shape(&mut self, value_type: &ValueType) -> Result<ReplayShape, LoweringError> {
+        Ok(match value_type {
+            ValueType::Boolean => ReplayShape::Bool,
+            ValueType::Integer { value } => ReplayShape::Int {
+                minimum: value.minimum(),
+                maximum: value.maximum(),
+            },
+            ValueType::Enum { .. } => ReplayShape::Enum {
+                sort: self.sort_of(value_type, 1, "")?.sort,
+            },
+            ValueType::Record { name } => {
+                let sort = self.sort_of(value_type, 1, "")?.sort;
+                let map = self.datatypes.records[&sort].clone();
+                let statement = self.statement;
+                let declaration = record_declaration(&statement.environment, name);
+                let mut fields = Vec::with_capacity(map.fields.len());
+                for field in &map.fields {
+                    let declared = declaration
+                        .and_then(|declaration| {
+                            declaration
+                                .fields()
+                                .iter()
+                                .find(|candidate| candidate.name().as_str() == field.field)
+                        })
+                        .ok_or_else(|| {
+                            LoweringError::new(
+                                LoweringErrorCode::InvalidStatement,
+                                "expression.value_reference",
+                                "validated record field no longer resolves",
+                            )
+                        })?;
+                    fields.push(self.replay_shape(declared.value_type())?);
+                }
+                ReplayShape::Record { sort, fields }
+            }
+            ValueType::Option { value } => ReplayShape::Option {
+                sort: self.sort_of(value_type, 1, "")?.sort,
+                payload: Box::new(self.replay_shape(value)?),
+            },
+            _ => return Err(unsupported(
+                "expression.value_reference",
+                "only Boolean, integer, enum, record and option parts have an exact replay shape",
+            )),
+        })
+    }
+
     /// The range predicate of a record or option type, defined on first use, or `None` when the
     /// type has no integer part. One predicate serves every variable of the same typed shape, so
     /// the query grows with the number of shapes and variables, not with the integer leaves.
@@ -1999,7 +2105,10 @@ impl LowerState<'_> {
                 // `fold_integer` already counted this node, so lowering it must not count it again.
                 self.nodes = self.nodes.saturating_sub(1);
                 let lowered = self.lower(expression, *depth, &ExprPath::detached(path))?;
-                (lowered.smt, ReplayTerm::DatatypeUnreplayed)
+                (
+                    lowered.smt,
+                    ReplayTerm::Datum(Box::new(lowered.replay.into_datum()?)),
+                )
             }
             IntegerTree::Negate(operand) => {
                 let (smt, term) = self.emit(operand)?;
@@ -2128,6 +2237,8 @@ impl LowerState<'_> {
             self.datatypes.variable_sorts.insert(symbol.clone(), sort);
         }
         if let Some(value_type) = datatype_value {
+            let shape = self.replay_shape(value_type)?;
+            self.datatypes.variable_shapes.insert(symbol.clone(), shape);
             if let Some(predicate) = self.range_predicate(value_type)? {
                 self.datatypes
                     .variable_predicates

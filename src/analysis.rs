@@ -4,6 +4,9 @@ use std::{
 };
 
 use crate::{
+    datatype_replay::{
+        read_sort, DatatypeContext, ModelSort, ReplayShape, ReplayValue, ValueDefect, WitnessValue,
+    },
     smt::{
         lower_analysis_statements, AnalysisStatement, ReplayAssertion, ReplayAssignment,
         ReplayFault, ANALYSIS_MODEL_PROFILE,
@@ -416,11 +419,41 @@ impl MappedIntegerValue {
     }
 }
 
+/// An enum, record or option value of a verified model, mapped to the requirement values it
+/// stands for.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MappedDatatypeValue {
+    symbol: String,
+    value: WitnessValue,
+    origins: Vec<String>,
+    binding_group: Option<String>,
+}
+
+impl MappedDatatypeValue {
+    /// The query symbol the solver assigned the value to.
+    pub fn symbol(&self) -> &str {
+        &self.symbol
+    }
+
+    /// The replay-verified value.
+    pub const fn value(&self) -> &WitnessValue {
+        &self.value
+    }
+
+    /// Every complete origin identity of the symbol from the variable map.
+    pub fn origins(&self) -> &[String] {
+        &self.origins
+    }
+
+    /// The explicit binding group of the symbol, if it has one.
+    pub fn binding_group(&self) -> Option<&str> {
+        self.binding_group.as_deref()
+    }
+}
+
 /// The closed set of reasons a returned model fails replay, in precedence order.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ReplayFailureReason {
-    /// The query has a symbol of a sort whose models are not replayed yet.
-    SortNotReplayable,
     ValueMalformed,
     SymbolRepeated,
     SymbolUnknown,
@@ -435,7 +468,6 @@ impl ReplayFailureReason {
     /// The reason's stable snake_case code.
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::SortNotReplayable => "sort_not_replayable",
             Self::ValueMalformed => "value_malformed",
             Self::SymbolRepeated => "symbol_repeated",
             Self::SymbolUnknown => "symbol_unknown",
@@ -484,6 +516,7 @@ pub struct VerifiedBooleanModel {
     purpose: ModelPurpose,
     values: Vec<MappedBooleanValue>,
     integer_values: Vec<MappedIntegerValue>,
+    datatype_values: Vec<MappedDatatypeValue>,
     replayed_assertions: Vec<String>,
 }
 
@@ -499,6 +532,11 @@ impl VerifiedBooleanModel {
     /// The verified integer values, in query symbol order.
     pub fn integer_values(&self) -> &[MappedIntegerValue] {
         &self.integer_values
+    }
+
+    /// The verified enum, record and option values, in query symbol order.
+    pub fn datatype_values(&self) -> &[MappedDatatypeValue] {
+        &self.datatype_values
     }
 
     pub fn replayed_assertions(&self) -> &[String] {
@@ -658,16 +696,6 @@ fn verify_model(
     bytes: &[u8],
     purpose: ModelPurpose,
 ) -> Result<VerifiedBooleanModel, ReplayFailure> {
-    // Datatype witness replay belongs to VER-87. Any declared datatype sort makes the model
-    // unreplayable, checked before every other reason. The subject is the first datatype-sorted
-    // variable in ascending order, or the first declared sort symbol when no variable has one.
-    if let Some(sort) = query.datatype_sorts().first() {
-        let subject = query.datatype_variables().first().unwrap_or(sort).clone();
-        return Err(ReplayFailure::new(
-            ReplayFailureReason::SortNotReplayable,
-            Some(subject),
-        ));
-    }
     if bytes.is_empty() {
         return Err(malformed_model());
     }
@@ -677,12 +705,15 @@ fn verify_model(
         .map(|assertion| assertion.name.as_str())
         .collect::<BTreeSet<_>>();
     let ranges = query.integer_ranges();
-    // A symbol with no declared range is read as Bool.
+    let datatypes = DatatypeContext::new(query);
+    // A symbol with no declared range or datatype shape is read as Bool.
     let declared = query
         .variables()
         .iter()
         .map(|variable| {
-            let sort = if ranges.contains_key(&variable.symbol) {
+            let sort = if datatypes.shape(&variable.symbol).is_some() {
+                Sort::Datatype
+            } else if ranges.contains_key(&variable.symbol) {
                 Sort::Int
             } else {
                 Sort::Bool
@@ -690,7 +721,7 @@ fn verify_model(
             (variable.symbol.as_str(), sort)
         })
         .collect::<BTreeMap<_, _>>();
-    let parsed = parse_model(bytes, &declared, &assertion_aliases)?;
+    let parsed = parse_model(bytes, &declared, &assertion_aliases, &datatypes)?;
     if let Some(failure) = parsed.first_defect() {
         return Err(failure);
     }
@@ -711,10 +742,20 @@ fn verify_model(
             let (minimum, maximum) = ranges.get(symbol)?;
             (value < minimum || value > maximum).then_some(symbol)
         });
-    if let Some(symbol) = [parsed.out_of_domain.as_ref(), out_of_range]
-        .into_iter()
-        .flatten()
-        .min()
+    let datatype_out_of_range = parsed.assignment.datums.iter().find_map(|(symbol, value)| {
+        datatypes
+            .shape(symbol)?
+            .out_of_range(value)
+            .then_some(symbol)
+    });
+    if let Some(symbol) = [
+        parsed.out_of_domain.as_ref(),
+        out_of_range,
+        datatype_out_of_range,
+    ]
+    .into_iter()
+    .flatten()
+    .min()
     {
         return Err(ReplayFailure::new(
             ReplayFailureReason::ValueOutOfDomain,
@@ -746,10 +787,33 @@ fn verify_model(
             })
         })
         .collect();
+    // A value that cannot be published fails the model; it is never dropped from a verified one.
+    let mut datatype_values = Vec::new();
+    for variable in query.variables() {
+        let (Some(value), Some(shape)) = (
+            parsed.assignment.datums.get(&variable.symbol),
+            datatypes.shape(&variable.symbol),
+        ) else {
+            continue;
+        };
+        let Some(published) = datatypes.witness(shape, value) else {
+            return Err(ReplayFailure::new(
+                ReplayFailureReason::SortMismatch,
+                Some(variable.symbol.clone()),
+            ));
+        };
+        datatype_values.push(MappedDatatypeValue {
+            symbol: variable.symbol.clone(),
+            value: published,
+            origins: variable.origins.clone(),
+            binding_group: variable.binding_group.clone(),
+        });
+    }
     Ok(VerifiedBooleanModel {
         purpose,
         values,
         integer_values,
+        datatype_values,
         replayed_assertions,
     })
 }
@@ -767,9 +831,11 @@ fn replay_assertions(
                 replayed.push(assertion.name.clone());
                 continue;
             }
-            Ok(false) | Err(ReplayFault::Unassigned) => ReplayFailureReason::AssertionFalse,
+            Ok(false)
+            | Err(ReplayFault::Unassigned | ReplayFault::AbsentOption | ReplayFault::IllTyped) => {
+                ReplayFailureReason::AssertionFalse
+            }
             Err(ReplayFault::Overflow) => ReplayFailureReason::EvaluationOverflow,
-            Err(ReplayFault::DatatypeUnreplayed) => ReplayFailureReason::SortNotReplayable,
         };
         return Err(ReplayFailure::new(reason, Some(assertion.name.clone())));
     }
@@ -780,6 +846,7 @@ fn replay_assertions(
 enum Sort {
     Bool,
     Int,
+    Datatype,
 }
 
 /// Longest accepted integer numeral, in characters.
@@ -823,12 +890,22 @@ fn note(slot: &mut Option<String>, symbol: &str) {
     }
 }
 
-enum ModelValue {
+/// A scalar model value.
+pub(crate) enum ModelScalar {
     Boolean(bool),
     Integer(i128),
     /// A well-formed numeral beyond the 128-bit signed range.
     OutOfDomain,
     Malformed,
+}
+
+enum ModelValue {
+    Scalar(ModelScalar),
+    Datatype(ReplayValue),
+    /// A datatype value of a symbol the query does not declare; never read.
+    Opaque,
+    /// A datatype value that fails against its declared type.
+    Defect(ValueDefect),
 }
 
 fn malformed_model() -> ReplayFailure {
@@ -842,6 +919,7 @@ fn parse_model(
     bytes: &[u8],
     declared: &BTreeMap<&str, Sort>,
     assertion_aliases: &BTreeSet<&str>,
+    datatypes: &DatatypeContext<'_>,
 ) -> Result<ParsedModel, ReplayFailure> {
     let tokens = tokenize_model(bytes).map_err(|_| malformed_model())?;
     let shape = |result: Result<(), String>| result.map_err(|_| malformed_model());
@@ -857,12 +935,21 @@ fn parse_model(
         let symbol = take_atom(&tokens, &mut cursor).map_err(|_| malformed_model())?;
         shape(expect_token(&tokens, &mut cursor, &ModelToken::Open))?;
         shape(expect_token(&tokens, &mut cursor, &ModelToken::Close))?;
-        let sort = take_atom(&tokens, &mut cursor).map_err(|_| malformed_model())?;
+        let sort = read_sort(&tokens, &mut cursor).ok_or_else(malformed_model)?;
         if !declared.contains_key(symbol.as_str()) && assertion_aliases.contains(symbol.as_str()) {
             shape(skip_model_term(&tokens, &mut cursor))?;
         } else {
-            let value = take_model_value(&tokens, &mut cursor)?;
-            record_value(&mut parsed, declared, &symbol, &sort, value);
+            let value = match datatypes.shape(&symbol) {
+                Some(shape) if declared.contains_key(symbol.as_str()) => {
+                    take_datatype_value(&tokens, &mut cursor, shape, datatypes)?
+                }
+                None if datatypes.is_sort(&sort) => {
+                    shape(skip_model_term(&tokens, &mut cursor))?;
+                    ModelValue::Opaque
+                }
+                _ => take_model_value(&tokens, &mut cursor)?,
+            };
+            record_value(&mut parsed, declared, datatypes, &symbol, &sort, value);
         }
         shape(expect_token(&tokens, &mut cursor, &ModelToken::Close))?;
     }
@@ -877,47 +964,96 @@ fn parse_model(
 fn record_value(
     parsed: &mut ParsedModel,
     declared: &BTreeMap<&str, Sort>,
+    datatypes: &DatatypeContext<'_>,
     symbol: &str,
-    sort: &str,
+    sort: &ModelSort,
     value: ModelValue,
 ) {
+    let declared_sort = declared.get(symbol).copied();
+    // A sort that is not Bool, Int or the declared datatype is a foreign datatype sort (a sort
+    // mismatch) or no sort at all (malformed).
     let model_sort = match sort {
-        "Bool" => Sort::Bool,
-        "Int" => Sort::Int,
+        sort if sort == "Bool" => Some(Sort::Bool),
+        sort if sort == "Int" => Some(Sort::Int),
+        _ if declared_sort == Some(Sort::Datatype)
+            && datatypes
+                .shape(symbol)
+                .is_some_and(|shape| datatypes.sort_matches(sort, shape)) =>
+        {
+            Some(Sort::Datatype)
+        }
+        _ if datatypes.is_sort(sort) => None,
         _ => return note(&mut parsed.malformed, symbol),
     };
-    // The value is read first: a malformed numeral outranks every symbol-level defect.
-    if matches!(value, ModelValue::Malformed) {
+    // The value is read first: a malformed value outranks every symbol-level defect.
+    if matches!(
+        value,
+        ModelValue::Scalar(ModelScalar::Malformed) | ModelValue::Defect(ValueDefect::Malformed)
+    ) {
         return note(&mut parsed.malformed, symbol);
     }
-    let Some(&declared_sort) = declared.get(symbol) else {
+    let Some(declared_sort) = declared_sort else {
         return note(&mut parsed.unknown, symbol);
     };
     if !parsed.defined.insert(symbol.to_owned()) {
         return note(&mut parsed.repeated, symbol);
     }
-    if declared_sort != model_sort {
+    if model_sort != Some(declared_sort) {
         return note(&mut parsed.sort_mismatch, symbol);
     }
-    match (model_sort, value) {
-        (_, ModelValue::Malformed) => note(&mut parsed.malformed, symbol),
-        (Sort::Bool, ModelValue::Boolean(value)) => {
+    match value {
+        ModelValue::Scalar(ModelScalar::Boolean(value)) if declared_sort == Sort::Bool => {
             parsed.assignment.booleans.insert(symbol.to_owned(), value);
         }
-        (Sort::Int, ModelValue::Integer(value)) => {
+        ModelValue::Scalar(ModelScalar::Integer(value)) if declared_sort == Sort::Int => {
             parsed.assignment.integers.insert(symbol.to_owned(), value);
         }
-        (Sort::Int, ModelValue::OutOfDomain) => note(&mut parsed.out_of_domain, symbol),
+        ModelValue::Scalar(ModelScalar::OutOfDomain)
+        | ModelValue::Defect(ValueDefect::OutOfDomain) => {
+            note(&mut parsed.out_of_domain, symbol);
+        }
+        ModelValue::Datatype(value) => {
+            parsed.assignment.datums.insert(symbol.to_owned(), value);
+        }
         _ => note(&mut parsed.sort_mismatch, symbol),
     }
 }
 
-/// Reads one model value: `true`, `false`, a numeral, or the negation `(- numeral)` of one.
-/// Any other term is consumed and reported as malformed.
+/// Reads one datatype value against its declared shape. A value that fails is skipped whole, so
+/// the model keeps parsing and the defect is recorded for the symbol.
+fn take_datatype_value(
+    tokens: &[ModelToken],
+    cursor: &mut usize,
+    shape: &ReplayShape,
+    datatypes: &DatatypeContext<'_>,
+) -> Result<ModelValue, ReplayFailure> {
+    let start = *cursor;
+    match datatypes.parse_value(tokens, cursor, shape) {
+        Ok(value) => Ok(ModelValue::Datatype(value)),
+        Err(defect) => {
+            *cursor = start;
+            skip_model_term(tokens, cursor).map_err(|_| malformed_model())?;
+            Ok(ModelValue::Defect(defect))
+        }
+    }
+}
+
+/// Reads one scalar model value for a declared Bool or Int symbol.
 fn take_model_value(
     tokens: &[ModelToken],
     cursor: &mut usize,
 ) -> Result<ModelValue, ReplayFailure> {
+    take_model_scalar(tokens, cursor)
+        .map(ModelValue::Scalar)
+        .map_err(|()| malformed_model())
+}
+
+/// Reads one model value: `true`, `false`, a numeral, or the negation `(- numeral)` of one.
+/// Any other term is consumed and reported as malformed; an unreadable term is an error.
+pub(crate) fn take_model_scalar(
+    tokens: &[ModelToken],
+    cursor: &mut usize,
+) -> Result<ModelScalar, ()> {
     let negation = [ModelToken::Open, ModelToken::Atom("-".to_owned())];
     if tokens.get(*cursor..*cursor + 2) == Some(negation.as_slice()) {
         if let (Some(ModelToken::Atom(digits)), Some(ModelToken::Close)) =
@@ -929,59 +1065,58 @@ fn take_model_value(
     }
     let value = match tokens.get(*cursor) {
         Some(ModelToken::Atom(atom)) => match atom.as_str() {
-            "true" => ModelValue::Boolean(true),
-            "false" => ModelValue::Boolean(false),
+            "true" => ModelScalar::Boolean(true),
+            "false" => ModelScalar::Boolean(false),
             digits => parse_numeral(digits, false),
         },
-        _ => ModelValue::Malformed,
+        _ => ModelScalar::Malformed,
     };
-    skip_model_term(tokens, cursor).map_err(|_| malformed_model())?;
+    skip_model_term(tokens, cursor).map_err(|_| ())?;
     Ok(value)
 }
 
 /// A numeral is ASCII digits with no leading zero. The length bound is checked before any
 /// conversion; a value outside the 128-bit signed range is out of domain, not malformed.
-fn parse_numeral(text: &str, negative: bool) -> ModelValue {
+fn parse_numeral(text: &str, negative: bool) -> ModelScalar {
     if text.is_empty()
         || text.len() > MAX_NUMERAL_LENGTH
         || !text.bytes().all(|byte| byte.is_ascii_digit())
         || (text.len() > 1 && text.starts_with('0'))
     {
-        return ModelValue::Malformed;
+        return ModelScalar::Malformed;
     }
     let Ok(magnitude) = text.parse::<u128>() else {
-        return ModelValue::OutOfDomain;
+        return ModelScalar::OutOfDomain;
     };
     let value = if negative {
         0i128.checked_sub_unsigned(magnitude)
     } else {
         i128::try_from(magnitude).ok()
     };
-    value.map_or(ModelValue::OutOfDomain, ModelValue::Integer)
+    value.map_or(ModelScalar::OutOfDomain, ModelScalar::Integer)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum ModelToken {
+pub(crate) enum ModelToken {
     Open,
     Close,
     Atom(String),
 }
 
+/// Consumes one term without recursion, so a deeply nested model cannot exhaust the stack.
 fn skip_model_term(tokens: &[ModelToken], cursor: &mut usize) -> Result<(), String> {
-    match tokens.get(*cursor) {
-        Some(ModelToken::Atom(_)) => {
-            *cursor += 1;
-            Ok(())
+    let mut open = 0usize;
+    loop {
+        match tokens.get(*cursor) {
+            Some(ModelToken::Atom(_)) => {}
+            Some(ModelToken::Open) => open += 1,
+            Some(ModelToken::Close) if open > 0 => open -= 1,
+            _ => return Err("model contains an invalid Boolean term".to_owned()),
         }
-        Some(ModelToken::Open) => {
-            *cursor += 1;
-            while !matches!(tokens.get(*cursor), Some(ModelToken::Close)) {
-                skip_model_term(tokens, cursor)?;
-            }
-            *cursor += 1;
-            Ok(())
+        *cursor += 1;
+        if open == 0 {
+            return Ok(());
         }
-        _ => Err("model contains an invalid Boolean term".to_owned()),
     }
 }
 
@@ -1182,7 +1317,13 @@ mod tests {
 
     fn parse(text: &str, entries: &[(&str, Sort)]) -> Result<ParsedModel, ReplayFailure> {
         let aliases = BTreeSet::from(["assertion"]);
-        parse_model(text.as_bytes(), &declared(entries), &aliases)
+        let query = lower_positive_query();
+        parse_model(
+            text.as_bytes(),
+            &declared(entries),
+            &aliases,
+            &DatatypeContext::new(&query),
+        )
     }
 
     /// The first parse defect, if any. `Ok(None)` means the model parsed cleanly, with an

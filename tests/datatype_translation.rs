@@ -524,12 +524,11 @@ fn a_record_chain_nested_past_the_depth_bound_is_refused_at_a_type_node() {
     assert!(error.message().contains("nests deeper"), "{error}");
 }
 
-/// FR-020 "Replay until FR-021": the model of a satisfiable enum claim is incomplete with the
-/// reason `sort_not_replayable` naming the enum variable.
-#[trace("FR-022-AC-1", "FR-020-AC-10", "TC-020")]
+/// FR-021: the model of a satisfiable translated enum claim replays and verifies.
+#[trace("FR-022-AC-1", "FR-020-AC-10", "FR-021-AC-1", "TC-020")]
 #[test]
-fn a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable() {
-    use quire_analyze::{classify_analysis, execute_solver, ExplanationState, ReplayFailureReason};
+fn a_satisfiable_translated_enum_claim_has_a_verified_model() {
+    use quire_analyze::{classify_analysis, execute_solver, ExplanationState};
 
     let (document, claims) = membership(false);
     let (_, translation) = translate(&document, &labels(&claims));
@@ -551,9 +550,7 @@ fn a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable() 
     let record = execute_solver(&query, &config, &CancellationToken::default());
     let conclusion = classify_analysis(&query, &record);
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
-    let failure = conclusion.replay_failure().expect("replay failure");
-    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
-    assert_eq!(failure.subject(), Some(variable.as_str()));
+    assert_eq!(conclusion.explanation(), ExplanationState::Verified);
+    assert!(conclusion.replay_failure().is_none());
+    assert!(conclusion.verified_model().is_some());
 }
