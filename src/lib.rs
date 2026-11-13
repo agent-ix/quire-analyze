@@ -1,6 +1,7 @@
 //! SMT-backed consistency and implication analysis for versioned requirement contracts.
 
 mod analysis;
+mod datatype_replay;
 mod hybrid_synthesis;
 mod package_runner;
 mod package_translation;
@@ -10,6 +11,7 @@ mod smt;
 mod solver;
 
 pub use analysis::*;
+pub use datatype_replay::WitnessValue;
 pub use hybrid_synthesis::*;
 pub use package_runner::*;
 pub use package_translation::*;
