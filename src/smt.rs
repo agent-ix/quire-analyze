@@ -1234,7 +1234,7 @@ fn integer_unsupported(
     path: &ExprPath<'_>,
     message: &str,
 ) -> LoweringError {
-    let mut error = unsupported(&path.render(), message);
+    let mut error = unsupported(&path.render(), &format!("{}: {message}", class.as_str()));
     error.class = Some(class);
     error
 }

@@ -39,3 +39,19 @@ never pass on a host with real solvers.
 | FND-003 | medium | The path of an unsupported integer construct is relative to the enclosing comparison (`expression.left`, `expression.left.right`), not to the statement root, so a refused product nested inside `and` reports a path that names a different node. FR-010 requires the path of the offending expression. The test only checks `starts_with("expression")`. | src/smt.rs:457-464, tests/integer_lowering.rs:533 |
 | FND-004 | medium | The refusal class (`non_linear_arithmetic` and the others) exists only as a prefix of the human-readable message, and the tests branch on `message().starts_with(class)`. FR-010 requires a stable diagnostic naming the class; rust-style requires a typed condition and forbids branching on error text. Add a typed class to `LoweringError` (or a `Copy` enum) and assert on it. | src/smt.rs:646-648, tests/integer_lowering.rs:528-532, src/smt.rs:886 |
 | FND-005 | low | User-facing docs still describe the Boolean-only profile: the README hero alt text says the query is "over Booleans", and the figure source draws "QF_UF · Booleans" and "non-Boolean constructs are refused when lowering" (rendered into the hero SVGs). The README Outcomes section does not say that an integer sat model stays `Incomplete`, so a differential run never agrees on an integer sat until replay lands. ADR-0010 and tests/adr_0010.rs naming v1 are a historical decision record and are fine. | README.md:18, docs/images/figures.py:33-49, README.md:79-84 |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | low | The fix moved the refusal class out of the message into `unsupported_class()`, but no rendered diagnostic carries it any more: `Display for LoweringError` prints code, path and message only, and `package_runner/execution.rs:211` and `package_translation.rs:364` render `path: message`. A run-package or translation refusal now reads "product of two non-constant terms" with no class name, while FR-010 asks for a diagnostic naming the class. Include `class.as_str()` in `Display` (or in the message) when the class is set. Not reachable through run-package until FR-012 integer translation lands. | src/smt.rs:159-167, src/package_runner/execution.rs:211, src/package_translation.rs:364 |
+
+## Dispositions
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | Real-solver test asserts unsat Agreement/Refuted and, for the sat fixture, Sat outcome, Incomplete explanation, no verified model and Inconclusive disposition (6201879). |
+| FND-002 | fixed | The controlled-response test is retagged FR-010-AC-10; AC-7 stays only on the real-solver test. |
+| FND-003 | fixed | ExprPath threads the statement-root path through Boolean and integer lowering; the test asserts exact paths. |
+| FND-004 | fixed | Typed `UnsupportedClass` with `LoweringError::unsupported_class()`; tests assert the enum, and no code parses the old message prefix. |
+| FND-005 | fixed | README alt text and Outcomes, figures.py and both hero SVGs updated; docs-figures `--check` passes and only the hero pair changed. |

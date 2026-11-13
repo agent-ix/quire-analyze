@@ -30,3 +30,11 @@ pass before FR-011, and AC-4's "status is unsupported" is not asserted.
 | FND-001 | medium | FR-010-AC-7 requires that real solvers decide the satisfiable fixture and that the differential reports agreement. Under FR-005, agreement requires every sat model to be replay-verified, and integer replay is FR-011, which FR-010 does not list as a dependency. Until FR-011 lands, AC-7's sat half is unreachable and its only test (SR-17050 FND-001) fails. Record the dependency on FR-011 in FR-010 or split AC-7 so the sat-agreement half is verified by TC-017. | spec/functional/FR-010-linear-integer-arithmetic.md:96, tests/integer_lowering.rs:694-716 |
 | FND-002 | medium | FR-010-AC-9 (each TC-010 Boolean fixture lowers under v2 and decides the same status; no v1 query) has no tagged test. The renamed Boolean golden in `golden_query_is_order_independent_and_source_mapped` exercises it but is tagged only to FR-002/TC-010. Tag the test(s) that assert it with FR-010-AC-9. | tests/smt_lowering.rs:207-245 |
 | FND-003 | low | FR-010-AC-4 says "the status is `unsupported`", but the test asserts only `LoweringErrorCode::UnsupportedConstruct` from `lower_boolean_statements`; no analysis status is checked. The library has no status for a refused lowering, so either assert the status where one is produced (run-package) or state in the AC that the error code is the status. | tests/integer_lowering.rs:519-586 |
+
+## Dispositions
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-010-AC-7 is scoped to unsat agreement plus an unverified sat model; sat agreement is new FR-011-AC-11 (TC-017); FR-010 Dependencies names FR-011 in prose only, so no depends_on cycle. Consistent with FR-005 agreement rules. |
+| FND-002 | fixed | FR-010-AC-9 tagged on the Boolean golden test and the ten-cell truth-table test. |
+| FND-003 | fixed | FR-010-AC-4 now states that the returned lowering error with no query is the `unsupported` outcome. |

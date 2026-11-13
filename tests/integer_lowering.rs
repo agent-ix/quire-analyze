@@ -538,6 +538,9 @@ fn non_linear_and_unsupported_terms_are_refused() {
         assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
         assert_eq!(errors[0].unsupported_class(), Some(class));
         assert_eq!(errors[0].path(), path);
+        // Every renderer that prints the message or the error names the class.
+        assert!(errors[0].message().starts_with(class.as_str()));
+        assert!(errors[0].to_string().contains(class.as_str()));
     };
     // Facts that a divisor is non-zero and that operands are small come from guards.
     let small = |body: Expression| guarded(&["x", "y"], 10, body);
