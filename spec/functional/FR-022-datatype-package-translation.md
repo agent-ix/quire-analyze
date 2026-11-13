@@ -56,8 +56,10 @@ other rule of that requirement (identity, anchor, spans, node and depth bounds, 
   left operand establishes it. The runner translates `quire.op.boolean.and` and `or` to the total
   operators (FR-009), which establish no fact, so only the implication guard is reachable from a
   package today; a guard through a short-circuit operator needs a short-circuit identity that FR-009
-  does not translate. An unguarded `quire.op.option.value` exits `2` naming the node, as the upstream
-  check refuses it.
+  does not translate. An unguarded `quire.op.option.value` is refused by the upstream `check_expression`
+  and reaches the runner as a clause error, so it exits `2` naming the clause `claim-N` that contains
+  it and the validator's path (as the Refusals bullet states), not the `option.value` node. The
+  translation adds no guard check of its own.
 - **Refusals.** A term that uses a collection, text, a rational, ordering of enums, or a record or
   option that nests a collection or text exits `2` naming the node `semantic_graph.nodes[N]` at which
   the translation stopped. No datatype term is approximated. The node and depth bounds of FR-009 count
@@ -67,9 +69,9 @@ other rule of that requirement (identity, anchor, spans, node and depth bounds, 
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-022-AC-1 | Five built contract-package fixtures run end to end through `run-package` with real solvers where installed, each with a fixed expected exit: an enum-membership disjunction (`role = Admin` or `role = Auditor`) with `role != Admin` exits `0`; the same disjunction with `role = Guest` exits `1`; a record-field claim `record.project(user)` with field `role` equal to `Admin` exits `0`; and the same with a second claim that field equal to `Guest` exits `1`. A fifth fixture, `quire.op.option.value` of a parameter inside the consequent of `implies` with `quire.op.option.present` of the same parameter as antecedent, translates to an `Unwrap` and runs; the same value without the antecedent exits `2`. | Test |
+| FR-022-AC-1 | Six built contract-package fixtures run end to end through `run-package` with real solvers where installed, each with a fixed expected exit: an enum-membership disjunction (`role = Admin` or `role = Auditor`) with `role != Admin` exits `0`; the same disjunction with `role = Guest` exits `1`; a record-field claim `record.project(user)` with field `role` equal to `Admin` exits `0`; and the same with a second claim that field equal to `Guest` exits `1`. A fifth fixture is a single claim, `quire.op.boolean.implies` with antecedent `quire.op.option.present` of an option-of-`Role` parameter `o` and consequent `quire.op.enum.eq` of `quire.op.option.value` of `o` with `Admin`. It translates to an `Unwrap` and the request is satisfiable (`o` absent, or `o` present as `Admin`), so it exits `0`. A sixth fixture is the same consequent alone, without the antecedent, and exits `2` naming the clause `claim-N` and the validator's path. | Test |
 | FR-022-AC-2 | Every enum variant, record field and type in the lowered query comes from the package's `semantic_type` nodes, and a fixture naming an unresolved type exits `2` naming the node. | Test |
-| FR-022-AC-3 | An unsupported datatype term (collection, text, rational, enum ordering, a record nesting a collection or text, an unguarded option access) exits `2` naming `semantic_graph.nodes[N]`, writes no report and invokes no solver. | Test |
+| FR-022-AC-3 | An unsupported datatype term (collection, text, rational, enum ordering, a record nesting a collection or text) exits `2` naming `semantic_graph.nodes[N]`, writes no report and invokes no solver. An unguarded `quire.op.option.value` is the one exception: it exits `2` naming `claim-N` and the validator's path, writes no report and invokes no solver. | Test |
 | FR-022-AC-4 | Datatype terms are translated by a pure function of the admitted package: the same bytes yield the same clause order, declarations and query. | Test |
 | FR-022-AC-5 | Datatype expressions count toward the FR-009 node and depth bounds, and a shared enum or record chain that exceeds them exits `2` without expanding the refused tree. | Test |
 

@@ -41,3 +41,15 @@ falsifiable. The real-solver cases are scoped "where installed", which matches r
 | FND | outcome | reason |
 | --- | --- | --- |
 | FND-001 | fixed | FR-022-AC-1 now fixes an exit per fixture: 0 for the sat membership claim, 1 for the membership claim with Guest, 0 for the record claim and 1 for the record claim with Guest. These match FR-009 (sat→0, unsat→1). |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-003 | low | FR-022-AC-1 opens with "each with a fixed expected exit", but its fifth fixture (`quire.op.option.value` under `implies` with `quire.op.option.present`) only "translates to an `Unwrap` and runs". The AC gives no expected exit for it, only for its unguarded twin (`2`). Fix: state the claim and its exit, for example the guarded value equal to `Admin` with no contradicting claim exits `0`. | FR-022-AC-1 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-002 | fixed | FR-020-AC-1 is now one assertion `role = Admin or role = Auditor` plus one further assertion. `role != Admin` is `sat` and `role = Guest` is `unsat`, which is unambiguous and correct. |

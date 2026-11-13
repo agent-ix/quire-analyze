@@ -56,3 +56,13 @@ the diff.
 | FND-003 | fixed | FR-022 now has an identity-keyed term table, and the `none` literal maps to `OptionNone`. The false unwrap claim the fix relied on is recorded as new FND-006. |
 | FND-004 | fixed | The Verification cells now read `Test`, the TC-015 citation is gone, and the dangling-trace-reference warnings are cleared. |
 | FND-005 | fixed | Renamed NFR-020, and TC-020 now verifies NFR-020. |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-002 | fixed | The FR-020 Logic section now matches #90 at 097098a. `quire.smtlib2/v2` is the only profile. A query with no datatype, including Boolean-only, uses `QF_LIA`, and a query that declares a datatype uses `QF_UFDTLIA`. Reports name v2 and that logic, and `QF_UF` and v1 are refused. #90's FR-010:32-37, FR-002:27-29, FR-005-AC-6 and interface-001:71 defer the datatype case to FR-020 in the same terms. FR-020-AC-9 tests it. |
+| FND-006 | fixed | The FR-022 table maps `quire.op.option.value` to `Unwrap` under a presence proof, and the "Not translated" bullet no longer lists unwrap. |
+| FND-007 | fixed | The link now points at `./FR-010-linear-integer-arithmetic.md`, the name #90 uses. The 3 dangling FR-010 references that remain will clear when #90 lands. |
+| FND-008 | fixed | FR-020-AC-8 now names `CollectionLiteral` and other collection expressions, not package catalog identities. |
+| FND-009 | fixed | After the rebase the PR no longer touches `spec/index.md` (`git diff origin/main...HEAD` lists no index change). |

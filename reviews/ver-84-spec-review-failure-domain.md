@@ -55,3 +55,17 @@ no-approximation rule are well defined.
 | FND-004 | fixed | FR-022 now admits a guard only inside the consequent of `quire.op.boolean.implies` and explains why `and`/`or` cannot carry one. The missing `option.value` translation is recorded as SR-17038 FND-006. |
 | FND-005 | fixed | FR-020-AC-5 now expects `RecursiveType` at `DeclarationEnvironment::new`, with no query. |
 | FND-006 | fixed | NFR-020 now defines nesting depth (outermost datatype is depth 1, with a worked example) and the count of datatypes per query (each option payload counts once). It adds a rationale: 256×256×64 B ≈ 4 MiB, under the 16 MiB query limit, and depth 8 sits well inside expression depth 128. |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-009 | medium | FR-022 says "an unguarded `quire.op.option.value` exits `2` naming the node, as the upstream check refuses it", and FR-022-AC-3 requires the unguarded option access to exit `2` naming `semantic_graph.nodes[N]`. These conflict. A refusal by the upstream `check_expression` reaches the runner as a clause error (`TranslationError::at_clause`, which names `claim-N` at the validator's path, `src/package_translation.rs:181-187`), not a node error naming the `option.value` node. Fix: either have the translation check the implies-guard itself and refuse at the `option.value` node (`semantic_graph.nodes[N]`), or let AC-3 accept the `claim-N` clause error for this one case. | spec/functional/FR-022-datatype-package-translation.md:52-60, FR-022-AC-3 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-003 | fixed | FR-021 is now lazy in the guarded operand of implication, short-circuit `and` and short-circuit `or`, matching upstream `guard_facts` (expression.rs:3313-3316): `or` skips its right operand when the left is true. FR-021-AC-7 covers all three. |
+| FND-007 | fixed | FR-020's Unwrap bullet now lists every upstream guard (implication antecedent, short-circuit `and` left, short-circuit `or` left as the negated fact, `OptionSome`) and says total `and`/`or` establish none. |
+| FND-008 | fixed | The `record.project` row now says one operand plus the catalog `field` member, which matches `checked-operation-catalog-v1.json:175`, and FR-022-AC-1 writes `record.project(user)` with field `role`. |
