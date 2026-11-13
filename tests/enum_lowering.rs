@@ -15,7 +15,7 @@ use quire_analyze::{
     lower_boolean_statements, render_differential_report, validate_differential_report,
     validate_report_document, AdapterLimits, AnalysisRequest, AnalysisStatus, CancellationToken,
     DifferentialDisposition, ExplanationState, LoweringError, LoweringErrorCode, QueryBundle,
-    SolverConfig, SolverEngine, StatementInput, CAPABILITY_CONTRACT,
+    SolverConfig, SolverEngine, SolverOutcome, StatementInput, CAPABILITY_CONTRACT,
 };
 use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
@@ -180,6 +180,74 @@ fn try_statements(
         .map_err(|errors| format!("{errors:?}"))
 }
 
+/// Builds a typed clause under `build` declarations, then supplies `run` declarations to statement
+/// build, which re-checks the expression under them.
+fn statement_build_errors(
+    build: (Vec<TypeDeclaration>, Vec<ValueDeclaration>),
+    run: (Vec<TypeDeclaration>, Vec<ValueDeclaration>),
+    expression: Expression,
+) -> Vec<LoweringError> {
+    let package_id = PackageId::new("agent-ix/enum-test").expect("package");
+    let requirement_id = RequirementId::new("REQ-swap").expect("requirement");
+    let revision = RequirementRevision::new(1).expect("revision");
+    let owner = RequirementRef::new(package_id.clone(), requirement_id.clone(), revision);
+    let build_environment =
+        DeclarationEnvironment::new(owner.clone(), build.0, build.1, vec![]).expect("build env");
+    let run_environment =
+        DeclarationEnvironment::new(owner, run.0, run.1, vec![]).expect("run env");
+    let checked = build_environment
+        .check_expression(&expression, &ValueType::Boolean, &point(), true)
+        .expect("well-typed under the build environment");
+    let clause = Clause::new(
+        ClauseId::new("C-swap").expect("clause"),
+        ClauseKind::Assertion,
+        Some(point()),
+        span(),
+        checked,
+    )
+    .expect("clause");
+    let requirement = Requirement::<TypedExpression>::new(
+        &package_id,
+        requirement_id,
+        revision,
+        span(),
+        vec![clause],
+    )
+    .expect("requirement");
+    let package = ContractPackage::new(
+        package_id,
+        SchemaVersion::V1_1,
+        span().source().clone(),
+        vec![requirement],
+    )
+    .expect("package");
+    StatementInput::from_clause(
+        &package,
+        &package.requirements()[0],
+        &package.requirements()[0].clauses()[0],
+        run_environment,
+    )
+    .expect_err("statement build refuses")
+}
+
+/// The debug text of the diagnostics `check_expression` refuses an expression with.
+fn check_refusal(
+    types: Vec<TypeDeclaration>,
+    values: Vec<ValueDeclaration>,
+    expression: &Expression,
+) -> String {
+    let owner = RequirementRef::new(
+        PackageId::new("agent-ix/enum-test").expect("package"),
+        RequirementId::new("REQ-check").expect("requirement"),
+        RequirementRevision::new(1).expect("revision"),
+    );
+    let environment = DeclarationEnvironment::new(owner, types, values, vec![]).expect("env");
+    let diagnostics = environment
+        .check_expression(expression, &ValueType::Boolean, &point(), true)
+        .expect_err("refused");
+    format!("{diagnostics:?}")
+}
+
 fn role_statements(label: &str, expressions: Vec<Expression>) -> Vec<StatementInput> {
     try_statements(
         label,
@@ -294,7 +362,7 @@ fn membership_fixture_lowers_to_the_golden_query() {
     let variants: Vec<_> = sort
         .constructors
         .iter()
-        .map(|(name, _)| name.as_str())
+        .map(|constructor| constructor.variant.as_str())
         .collect();
     assert_eq!(variants, ["Admin", "Auditor", "Guest", "User"]);
 }
@@ -343,7 +411,7 @@ fn unsatisfiable_membership_agrees_and_reports_the_datatype_logic() {
 fn satisfiable_membership_is_decided_but_its_model_stays_unverified() {
     let query = lower(sat_fixture());
     let sort = &query.enum_sorts()[0];
-    let auditor = &sort.constructors[1].1;
+    let auditor = &sort.constructors[1].symbol;
     let variable = &query.variables()[0].symbol;
     let model = format!(
         "sat\n(model (define-fun {variable} () {} {auditor}))\n",
@@ -418,7 +486,7 @@ fn repeated_membership_literal_is_lowered_as_written() {
         vec![or(is("role", "Role", "Admin"), is("role", "Role", "Admin"))],
     );
     let query = lower_boolean_statements(&statements, &[]).expect("lower");
-    let admin = &query.enum_sorts()[0].constructors[0].1;
+    let admin = &query.enum_sorts()[0].constructors[0].symbol;
     let variable = &query.variables()[0].symbol;
     let equality = format!("(= {variable} {admin})");
     assert!(query
@@ -435,25 +503,50 @@ fn enum_inequality_lowers_to_distinct() {
         &[],
     )
     .expect("lower");
-    let guest = &query.enum_sorts()[0].constructors[2].1;
+    let guest = &query.enum_sorts()[0].constructors[2].symbol;
     assert!(query.query().contains("(distinct "));
     assert!(query.query().contains(guest));
 }
 
-/// FR-020-AC-2: an unresolved enumeration, variant or type name is refused before lowering.
+/// FR-020-AC-2: an unresolved variant or enumeration is refused at statement build as
+/// `InvalidStatement` before lowering, and an unresolved value type cannot form an environment.
 #[trace("TC-020", "FR-020-AC-2")]
 #[test]
 fn unresolved_names_are_refused_before_lowering() {
-    let types = || vec![enum_type("Role", ROLES)];
-    let values = || vec![enum_value("role", "Role")];
-    for expression in [is("role", "Role", "Root"), is("role", "Missing", "Admin")] {
-        assert!(try_statements("bad", types(), values(), vec![expression]).is_err());
-    }
-    assert!(try_statements(
-        "bad-type",
-        types(),
+    let with_root = vec![enum_type("Role", &["Admin", "Root"])];
+    let without_root = vec![enum_type("Role", &["Admin"])];
+    let errors = statement_build_errors(
+        (with_root, vec![enum_value("role", "Role")]),
+        (without_root, vec![enum_value("role", "Role")]),
+        is("role", "Role", "Root"),
+    );
+    assert!(errors.iter().all(|error| {
+        error.code() == LoweringErrorCode::InvalidStatement
+            && error.path() == "statement.expression"
+    }));
+    let errors = statement_build_errors(
+        (vec![enum_type("Missing", &["A"])], vec![]),
+        (vec![], vec![]),
+        compare(
+            ComparisonOperator::Equal,
+            variant("Missing", "A"),
+            variant("Missing", "A"),
+        ),
+    );
+    assert!(errors.iter().all(|error| {
+        error.code() == LoweringErrorCode::InvalidStatement
+            && error.path() == "statement.expression"
+    }));
+    let owner = RequirementRef::new(
+        PackageId::new("agent-ix/enum-test").expect("package"),
+        RequirementId::new("REQ-orphan").expect("requirement"),
+        RequirementRevision::new(1).expect("revision"),
+    );
+    assert!(DeclarationEnvironment::new(
+        owner,
+        vec![enum_type("Role", ROLES)],
         vec![enum_value("role", "Missing")],
-        vec![is("role", "Role", "Admin")]
+        vec![]
     )
     .is_err());
 }
@@ -478,25 +571,30 @@ fn unused_declarations_do_not_change_the_query() {
     assert_eq!(plain.query(), extra.query());
 }
 
-/// FR-020-AC-5: enum ordering and non-enum comparisons are Unsupported and yield no query.
+/// FR-020-AC-5: enum ordering and a mixed-sort comparison are refused as ill-typed by the
+/// statement-build check, and an unsupported sort is refused by lowering.
 #[trace("TC-020", "FR-020-AC-5")]
 #[test]
-fn ordering_and_unsupported_sorts_are_refused() {
-    match try_statements(
-        "order",
-        vec![enum_type("Role", ROLES)],
-        vec![enum_value("role", "Role")],
-        vec![compare(
-            ComparisonOperator::Less,
-            var("role"),
-            variant("Role", "Guest"),
-        )],
-    ) {
-        Err(_) => {}
-        Ok(statements) => {
-            let errors = lower_error(statements);
-            assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
-        }
+fn ordering_and_mixed_sorts_are_refused_at_statement_build() {
+    let types = || vec![enum_type("Role", ROLES)];
+    let values = || {
+        vec![
+            enum_value("role", "Role"),
+            input("flag", ValueType::Boolean),
+        ]
+    };
+    let ordering = compare(
+        ComparisonOperator::Less,
+        var("role"),
+        variant("Role", "Guest"),
+    );
+    let mixed = compare(
+        ComparisonOperator::Equal,
+        var("flag"),
+        variant("Role", "Guest"),
+    );
+    for expression in [&ordering, &mixed] {
+        assert!(check_refusal(types(), values(), expression).contains("IllTypedExpression"));
     }
     let statements = try_statements(
         "text",
@@ -545,7 +643,10 @@ fn permutation_preserves_bytes_and_equal_variants_stay_distinct() {
     let sorts = forward.enum_sorts();
     assert_eq!(sorts.len(), 2);
     assert_ne!(sorts[0].sort, sorts[1].sort);
-    assert_ne!(sorts[0].constructors[0].1, sorts[1].constructors[0].1);
+    assert_ne!(
+        sorts[0].constructors[0].symbol,
+        sorts[1].constructors[0].symbol
+    );
 }
 
 /// NFR-020-AC-1: 256 variants are accepted and 257 are refused as a resource limit.
@@ -601,15 +702,16 @@ fn real_z3_cvc5_decide_membership_fixtures() {
     let z3 = SolverConfig::new(SolverEngine::Z3, z3_path, AdapterLimits::default()).expect("z3");
     let cvc5 =
         SolverConfig::new(SolverEngine::Cvc5, cvc5_path, AdapterLimits::default()).expect("cvc5");
-    for (statements, expected) in [
-        (sat_fixture(), AnalysisStatus::Satisfied),
-        (unsat_fixture(), AnalysisStatus::Refuted),
-    ] {
-        let query = lower(statements);
-        let run =
-            quire_analyze::execute_differential(&query, &z3, &cvc5, &CancellationToken::default())
-                .expect("run");
-        assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
-        assert_eq!(run.agreed_status(), Some(expected));
+    let sat = lower(sat_fixture());
+    let token = CancellationToken::default();
+    for config in [&z3, &cvc5] {
+        let record = execute_solver(&sat, config, &token);
+        assert_eq!(record.outcome(), SolverOutcome::Sat);
     }
+    let run = quire_analyze::execute_differential(&sat, &z3, &cvc5, &token).expect("run");
+    assert!(!run.is_conclusive());
+    let unsat = lower(unsat_fixture());
+    let run = quire_analyze::execute_differential(&unsat, &z3, &cvc5, &token).expect("run");
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(run.agreed_status(), Some(AnalysisStatus::Refuted));
 }

@@ -365,12 +365,11 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             .and_then(Value::as_str)
             .ok_or_else(|| "query bytes are absent".to_owned())?,
     )?;
-    let required_logic = crate::smt::required_logic(&query_bytes);
-    let set_logic = format!("(set-logic {required_logic})\n");
-    if object.get("logic").and_then(Value::as_str) != Some(required_logic)
-        || !query_bytes
-            .windows(set_logic.len())
-            .any(|window| window == set_logic.as_bytes())
+    let logic = crate::smt::query_logic(&query_bytes).ok_or_else(|| {
+        "query does not declare exactly one logic before its declarations".to_owned()
+    })?;
+    if logic.declared != logic.required
+        || object.get("logic").and_then(Value::as_str) != Some(logic.required)
     {
         return Err(
             "report logic differs from the logic the query's feature set requires".to_owned(),

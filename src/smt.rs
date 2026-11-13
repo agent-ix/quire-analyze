@@ -514,8 +514,17 @@ pub struct EnumSortMap {
     pub package: String,
     /// The declared enum name.
     pub name: String,
-    /// Declared variant name and constructor symbol, in ascending variant-name order.
-    pub constructors: Vec<(String, String)>,
+    /// The constructors, in ascending variant-name order.
+    pub constructors: Vec<EnumConstructor>,
+}
+
+/// One enum variant and its encoded constructor symbol.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnumConstructor {
+    /// The declared variant name.
+    pub variant: String,
+    /// The SMT-LIB constructor symbol.
+    pub symbol: String,
 }
 
 /// The datatypes and datatype-sorted variables a query uses.
@@ -535,7 +544,7 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
-    /// An integer-valued term; integer witness replay is not performed, so it never evaluates.
+    /// A term with no witness replay (an integer or enum term), so it never evaluates.
     Unreplayed,
 }
 
@@ -783,12 +792,12 @@ fn lower_statement_specs(
         query.push_str("(declare-datatypes ((");
         query.push_str(&sort.sort);
         query.push_str(" 0)) ((");
-        for (index, (_, constructor)) in sort.constructors.iter().enumerate() {
+        for (index, constructor) in sort.constructors.iter().enumerate() {
             if index > 0 {
                 query.push(' ');
             }
             query.push('(');
-            query.push_str(constructor);
+            query.push_str(&constructor.symbol);
             query.push(')');
         }
         query.push_str(")))\n");
@@ -978,8 +987,8 @@ impl LowerState<'_> {
                 let constructor = sort
                     .constructors
                     .iter()
-                    .find(|(name, _)| name == variant.as_str())
-                    .map(|(_, symbol)| symbol.clone())
+                    .find(|constructor| constructor.variant == variant.as_str())
+                    .map(|constructor| constructor.symbol.clone())
                     .ok_or_else(|| {
                         LoweringError::new(
                             LoweringErrorCode::InvalidStatement,
@@ -1175,11 +1184,9 @@ impl LowerState<'_> {
             name: name.as_str().to_owned(),
             constructors: variants
                 .iter()
-                .map(|variant| {
-                    (
-                        (*variant).to_owned(),
-                        format!("c_{digest}_{}", hex(variant.as_bytes())),
-                    )
+                .map(|variant| EnumConstructor {
+                    variant: (*variant).to_owned(),
+                    symbol: format!("c_{digest}_{}", hex(variant.as_bytes())),
                 })
                 .collect(),
         };
@@ -1842,17 +1849,110 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
-/// The logic a query's feature set requires: datatypes need `QF_UFDTLIA`, otherwise `QF_LIA`.
-pub(crate) fn required_logic(query: &[u8]) -> &'static str {
-    const DECLARATION: &[u8] = b"(declare-datatypes ";
-    if query
-        .windows(DECLARATION.len())
-        .any(|window| window == DECLARATION)
-    {
-        SMTLIB2_DATATYPE_LOGIC
-    } else {
-        SMTLIB2_LOGIC
+/// The logic a query's feature set requires and the one it declares, read by scanning commands.
+pub(crate) struct QueryLogic {
+    pub(crate) required: &'static str,
+    pub(crate) declared: String,
+}
+
+/// Scans the top-level commands of a query, skipping comments, quoted symbols and string
+/// literals. Returns `None` unless there is exactly one `set-logic` that precedes every
+/// declaration. Datatypes need `QF_UFDTLIA`, otherwise `QF_LIA`.
+pub(crate) fn query_logic(query: &[u8]) -> Option<QueryLogic> {
+    let mut depth = 0_usize;
+    let mut cursor = 0;
+    let mut expect_head = false;
+    let mut declared: Option<String> = None;
+    let mut datatypes = false;
+    let mut seen_declaration = false;
+    let mut logic_argument = false;
+    while cursor < query.len() {
+        match query[cursor] {
+            b';' => {
+                while cursor < query.len() && query[cursor] != b'\n' {
+                    cursor += 1;
+                }
+            }
+            b'|' => {
+                cursor += 1;
+                while cursor < query.len() && query[cursor] != b'|' {
+                    cursor += 1;
+                }
+                cursor += 1;
+                expect_head = false;
+            }
+            b'"' => {
+                cursor += 1;
+                loop {
+                    match query.get(cursor) {
+                        None => return None,
+                        Some(b'"') if query.get(cursor + 1) == Some(&b'"') => cursor += 2,
+                        Some(b'"') => break,
+                        Some(_) => cursor += 1,
+                    }
+                }
+                cursor += 1;
+                expect_head = false;
+            }
+            b'(' => {
+                depth += 1;
+                expect_head = depth == 1;
+                cursor += 1;
+            }
+            b')' => {
+                depth = depth.checked_sub(1)?;
+                expect_head = false;
+                logic_argument = false;
+                cursor += 1;
+            }
+            byte if byte.is_ascii_whitespace() => cursor += 1,
+            _ => {
+                let start = cursor;
+                while cursor < query.len()
+                    && !query[cursor].is_ascii_whitespace()
+                    && !matches!(query[cursor], b'(' | b')' | b';' | b'|' | b'"')
+                {
+                    cursor += 1;
+                }
+                let atom = &query[start..cursor];
+                if expect_head {
+                    match atom {
+                        b"set-logic" => {
+                            if declared.is_some() || seen_declaration {
+                                return None;
+                            }
+                            logic_argument = true;
+                        }
+                        b"declare-datatypes"
+                        | b"declare-datatype"
+                        | b"declare-codatatypes"
+                        | b"declare-codatatype" => {
+                            datatypes = true;
+                            seen_declaration = true;
+                        }
+                        b"declare-fun" | b"declare-const" | b"declare-sort" | b"define-fun" => {
+                            seen_declaration = true;
+                        }
+                        _ => {}
+                    }
+                } else if logic_argument && depth == 1 && declared.is_none() {
+                    declared = Some(String::from_utf8_lossy(atom).into_owned());
+                }
+                expect_head = false;
+            }
+        }
     }
+    if depth != 0 {
+        return None;
+    }
+    Some(QueryLogic {
+        required: if datatypes {
+            SMTLIB2_DATATYPE_LOGIC
+        } else {
+            SMTLIB2_LOGIC
+        },
+        declared: declared?,
+    })
 }
 
 /// Re-derive a query digest from the two identities a report retains.
@@ -1971,5 +2071,139 @@ mod tests {
             fold(&exact).expect("in range").tree,
             IntegerTree::Constant(i128::MAX)
         );
+    }
+
+    fn logic_of(query: &str) -> Option<(&'static str, String)> {
+        query_logic(query.as_bytes()).map(|logic| (logic.required, logic.declared))
+    }
+
+    /// FR-020-AC-9: the logic derivation reads commands, so comments, quoted symbols and strings
+    /// cannot change it, singular datatype declarations count, and a repeated or late
+    /// `set-logic` is refused.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-9")]
+    #[test]
+    fn logic_derivation_scans_commands_not_text() {
+        let plain = "(set-logic QF_LIA)\n(declare-fun x () Bool)\n";
+        assert_eq!(logic_of(plain), Some(("QF_LIA", "QF_LIA".to_owned())));
+        for hidden in [
+            "; (declare-datatypes ((S 0)) (((a))))\n",
+            "(declare-fun |(declare-datatypes | () Bool)\n",
+            "(set-info :note \"(declare-datatype S ((a)))\")\n",
+        ] {
+            let query = format!("(set-logic QF_LIA)\n{hidden}");
+            assert_eq!(
+                logic_of(&query),
+                Some(("QF_LIA", "QF_LIA".to_owned())),
+                "{hidden}"
+            );
+        }
+        for command in [
+            "(declare-datatype S ((a)))",
+            "(declare-datatypes ((S 0)) (((a))))",
+        ] {
+            let query = format!("(set-logic QF_UFDTLIA)\n{command}\n");
+            assert_eq!(
+                logic_of(&query),
+                Some(("QF_UFDTLIA", "QF_UFDTLIA".to_owned())),
+                "{command}"
+            );
+        }
+        let comment_logic = "; (set-logic QF_UF)\n(set-logic QF_LIA)\n";
+        assert_eq!(
+            logic_of(comment_logic),
+            Some(("QF_LIA", "QF_LIA".to_owned()))
+        );
+        assert_eq!(logic_of("(set-logic QF_LIA)\n(set-logic QF_UF)\n"), None);
+        assert_eq!(
+            logic_of("(declare-fun x () Bool)\n(set-logic QF_LIA)\n"),
+            None
+        );
+        assert_eq!(logic_of("(declare-fun x () Bool)\n"), None);
+    }
+
+    fn unchecked_statement(
+        types: Vec<TypeDeclaration>,
+        values: Vec<quire_contract_model::ValueDeclaration>,
+        expression: Expression,
+    ) -> StatementInput {
+        let package = quire_contract_model::PackageId::new("agent-ix/unit").expect("package");
+        let requirement = quire_contract_model::RequirementId::new("REQ-U").expect("requirement");
+        let revision = quire_contract_model::RequirementRevision::new(1).expect("revision");
+        let owner = RequirementRef::new(package, requirement, revision);
+        StatementInput {
+            clause: ClauseRef::new(
+                owner.clone(),
+                quire_contract_model::ClauseId::new("C-U").expect("clause"),
+            ),
+            clause_digest: hash_fields("clause", &[b"unit"]),
+            execution_point: ExecutionPoint::Pre {
+                operation: quire_contract_model::AnchorName::new("check")
+                    .expect("anchor")
+                    .into(),
+            },
+            environment: DeclarationEnvironment::new(owner, types, values, vec![]).expect("env"),
+            expression,
+            source: span(),
+        }
+    }
+
+    fn enum_declaration() -> TypeDeclaration {
+        let variants = ["A", "B"]
+            .iter()
+            .map(|name| {
+                quire_contract_model::EnumVariantDeclaration::new(
+                    SymbolName::new(*name).expect("symbol"),
+                    span(),
+                )
+            })
+            .collect();
+        TypeDeclaration::Enum {
+            declaration: quire_contract_model::EnumDeclaration::new(
+                SymbolName::new("E").expect("symbol"),
+                span(),
+                variants,
+            )
+            .expect("enum"),
+        }
+    }
+
+    fn enum_literal(name: &str) -> Expression {
+        Expression::new(
+            ExpressionKind::EnumLiteral {
+                enumeration: SymbolName::new("E").expect("symbol"),
+                variant: SymbolName::new(name).expect("symbol"),
+            },
+            span(),
+        )
+    }
+
+    /// FR-020-AC-5: the lowering refuses an enum ordering or mixed-sort comparison itself, over an
+    /// expression that skipped statement-build validation.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-5")]
+    #[test]
+    fn lowering_refuses_unchecked_enum_ordering_and_mixed_sorts() {
+        let compare = |operator, left, right| {
+            Expression::new(
+                ExpressionKind::Compare {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span(),
+            )
+        };
+        let boolean = Expression::new(ExpressionKind::BooleanLiteral { value: true }, span());
+        for expression in [
+            compare(
+                ComparisonOperator::Less,
+                enum_literal("A"),
+                enum_literal("B"),
+            ),
+            compare(ComparisonOperator::Equal, boolean, enum_literal("A")),
+        ] {
+            let statement = unchecked_statement(vec![enum_declaration()], vec![], expression);
+            let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
+            assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
+        }
     }
 }
