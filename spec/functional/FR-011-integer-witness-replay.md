@@ -33,7 +33,8 @@ model, so a witness is never accepted on a solver's own word. This extends the B
 - **Complete and exact symbol set.** A verified model defines every declared integer and Boolean
   symbol of the query exactly once and defines no other symbol. The named-assertion aliases of the
   query that a solver may echo in a returned model are accepted and skipped, as the Boolean parser
-  does; they are not values and not symbols for this rule.
+  does; they are not values and not symbols for this rule. A model text that is not a sequence of
+  `define-fun` entries in the Z3 or cvc5 shape is `value_malformed` and names no symbol.
 - **Domain.** Each integer value must lie within the declared minimum and maximum of its symbol. The
   query's range constraints are unnamed assertions (FR-010), so this check, not an assertion
   replay, is the domain verdict.

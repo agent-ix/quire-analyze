@@ -497,6 +497,62 @@ pub struct VariableMap {
     pub binding_group: Option<String>,
 }
 
+/// A concrete model assignment: Boolean and integer values by query symbol.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ReplayAssignment {
+    pub(crate) booleans: BTreeMap<String, bool>,
+    pub(crate) integers: BTreeMap<String, i128>,
+}
+
+/// Why a replay expression produced no verdict.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ReplayFault {
+    /// An intermediate result left the 128-bit signed range.
+    Overflow,
+    /// A referenced symbol has no value in the assignment.
+    Unassigned,
+}
+
+/// An integer-valued replay term, evaluated with checked 128-bit signed arithmetic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ReplayTerm {
+    Constant(i128),
+    Variable(String),
+    Negate(Box<Self>),
+    Add(Box<Self>, Box<Self>),
+    Subtract(Box<Self>, Box<Self>),
+    Scale { factor: i128, term: Box<Self> },
+}
+
+impl ReplayTerm {
+    pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<i128, ReplayFault> {
+        match self {
+            Self::Constant(value) => Ok(*value),
+            Self::Variable(symbol) => values
+                .integers
+                .get(symbol)
+                .copied()
+                .ok_or(ReplayFault::Unassigned),
+            Self::Negate(operand) => operand
+                .evaluate(values)?
+                .checked_neg()
+                .ok_or(ReplayFault::Overflow),
+            Self::Add(left, right) => left
+                .evaluate(values)?
+                .checked_add(right.evaluate(values)?)
+                .ok_or(ReplayFault::Overflow),
+            Self::Subtract(left, right) => left
+                .evaluate(values)?
+                .checked_sub(right.evaluate(values)?)
+                .ok_or(ReplayFault::Overflow),
+            Self::Scale { factor, term } => term
+                .evaluate(values)?
+                .checked_mul(*factor)
+                .ok_or(ReplayFault::Overflow),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ReplayExpression {
     Literal(bool),
@@ -507,22 +563,46 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
-    /// An integer-valued term; integer witness replay is not performed, so it never evaluates.
-    Unreplayed,
+    /// A comparison of two integer terms.
+    Compare {
+        operator: ComparisonOperator,
+        left: ReplayTerm,
+        right: ReplayTerm,
+    },
 }
 
 impl ReplayExpression {
-    pub(crate) fn evaluate(&self, values: &BTreeMap<String, bool>) -> Option<bool> {
+    pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<bool, ReplayFault> {
         match self {
-            Self::Literal(value) => Some(*value),
-            Self::Variable(symbol) => values.get(symbol).copied(),
-            Self::Not(operand) => Some(!operand.evaluate(values)?),
-            Self::And(left, right) => Some(left.evaluate(values)? && right.evaluate(values)?),
-            Self::Or(left, right) => Some(left.evaluate(values)? || right.evaluate(values)?),
-            Self::Implies(left, right) => Some(!left.evaluate(values)? || right.evaluate(values)?),
-            Self::Equal(left, right) => Some(left.evaluate(values)? == right.evaluate(values)?),
-            Self::NotEqual(left, right) => Some(left.evaluate(values)? != right.evaluate(values)?),
-            Self::Unreplayed => None,
+            Self::Literal(value) => Ok(*value),
+            Self::Variable(symbol) => values
+                .booleans
+                .get(symbol)
+                .copied()
+                .ok_or(ReplayFault::Unassigned),
+            Self::Not(operand) => Ok(!operand.evaluate(values)?),
+            // A guard in the left operand may protect arithmetic in the right one, so the right
+            // operand is evaluated only when the left does not decide the result.
+            Self::And(left, right) => Ok(left.evaluate(values)? && right.evaluate(values)?),
+            Self::Or(left, right) => Ok(left.evaluate(values)? || right.evaluate(values)?),
+            Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
+            Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
+            Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
+            Self::Compare {
+                operator,
+                left,
+                right,
+            } => {
+                let (left, right) = (left.evaluate(values)?, right.evaluate(values)?);
+                Ok(match operator {
+                    ComparisonOperator::Equal => left == right,
+                    ComparisonOperator::NotEqual => left != right,
+                    ComparisonOperator::Less => left < right,
+                    ComparisonOperator::LessEqual => left <= right,
+                    ComparisonOperator::Greater => left > right,
+                    ComparisonOperator::GreaterEqual => left >= right,
+                })
+            }
         }
     }
 }
@@ -546,6 +626,7 @@ pub struct QueryBundle {
     assertions: Vec<AssertionMap>,
     variables: Vec<VariableMap>,
     replay_assertions: Vec<ReplayAssertion>,
+    integer_ranges: BTreeMap<String, (i128, i128)>,
 }
 
 impl QueryBundle {
@@ -559,6 +640,12 @@ impl QueryBundle {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// Replaces the query text, to show that replay never reads it.
+    #[cfg(test)]
+    pub(crate) fn set_query_text(&mut self, text: &str) {
+        self.query = text.to_owned();
     }
 
     pub const fn analysis_request_digest(&self) -> AnalysisDigest {
@@ -591,6 +678,11 @@ impl QueryBundle {
 
     pub(crate) fn replay_assertions(&self) -> &[ReplayAssertion] {
         &self.replay_assertions
+    }
+
+    /// The declared inclusive range of each integer symbol; Boolean symbols are absent.
+    pub(crate) const fn integer_ranges(&self) -> &BTreeMap<String, (i128, i128)> {
+        &self.integer_ranges
     }
 }
 
@@ -807,6 +899,7 @@ fn lower_statement_specs(
         assertions,
         variables: variables.into_values().collect(),
         replay_assertions,
+        integer_ranges: ranges,
     })
 }
 
@@ -1021,8 +1114,8 @@ impl LowerState<'_> {
             depth + 1,
             &mut self.nodes,
         )?;
-        let left = self.emit(&left.tree)?;
-        let right = self.emit(&right.tree)?;
+        let (left, left_term) = self.emit(&left.tree)?;
+        let (right, right_term) = self.emit(&right.tree)?;
         let name = match operator {
             ComparisonOperator::Equal => "=",
             ComparisonOperator::NotEqual => "distinct",
@@ -1033,23 +1126,50 @@ impl LowerState<'_> {
         };
         Ok(LoweredExpression {
             smt: format!("({name} {left} {right})"),
-            replay: ReplayExpression::Unreplayed,
+            replay: ReplayExpression::Compare {
+                operator,
+                left: left_term,
+                right: right_term,
+            },
         })
     }
 
-    fn emit(&mut self, tree: &IntegerTree) -> Result<String, LoweringError> {
+    fn emit(&mut self, tree: &IntegerTree) -> Result<(String, ReplayTerm), LoweringError> {
         Ok(match tree {
-            IntegerTree::Constant(value) => numeral(*value),
-            IntegerTree::Reference { name, observation } => self.reference(name, *observation)?,
-            IntegerTree::Negate(operand) => format!("(- {})", self.emit(operand)?),
+            IntegerTree::Constant(value) => (numeral(*value), ReplayTerm::Constant(*value)),
+            IntegerTree::Reference { name, observation } => {
+                let symbol = self.reference(name, *observation)?;
+                (symbol.clone(), ReplayTerm::Variable(symbol))
+            }
+            IntegerTree::Negate(operand) => {
+                let (smt, term) = self.emit(operand)?;
+                (format!("(- {smt})"), ReplayTerm::Negate(Box::new(term)))
+            }
             IntegerTree::Add(left, right) => {
-                format!("(+ {} {})", self.emit(left)?, self.emit(right)?)
+                let (left_smt, left) = self.emit(left)?;
+                let (right_smt, right) = self.emit(right)?;
+                (
+                    format!("(+ {left_smt} {right_smt})"),
+                    ReplayTerm::Add(Box::new(left), Box::new(right)),
+                )
             }
             IntegerTree::Subtract(left, right) => {
-                format!("(- {} {})", self.emit(left)?, self.emit(right)?)
+                let (left_smt, left) = self.emit(left)?;
+                let (right_smt, right) = self.emit(right)?;
+                (
+                    format!("(- {left_smt} {right_smt})"),
+                    ReplayTerm::Subtract(Box::new(left), Box::new(right)),
+                )
             }
             IntegerTree::Scale { factor, term } => {
-                format!("(* {} {})", numeral(*factor), self.emit(term)?)
+                let (smt, term) = self.emit(term)?;
+                (
+                    format!("(* {} {smt})", numeral(*factor)),
+                    ReplayTerm::Scale {
+                        factor: *factor,
+                        term: Box::new(term),
+                    },
+                )
             }
         })
     }
