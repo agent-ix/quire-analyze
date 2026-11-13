@@ -2,6 +2,8 @@
 
 #![cfg(target_os = "linux")]
 
+mod fake_script;
+
 use ix_trace_rs::trace;
 use std::{
     fs,
@@ -168,10 +170,7 @@ fn script_body(mode: &str, pid_file: Option<&Path>) -> String {
 
 fn make_script(directory: &Path, name: &str, mode: &str, pid_file: Option<&Path>) -> PathBuf {
     let path = directory.join(name);
-    fs::write(&path, script_body(mode, pid_file)).expect("write fake solver");
-    let mut permissions = fs::metadata(&path).expect("metadata").permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).expect("make fake solver executable");
+    fake_script::install(&path, &script_body(mode, pid_file));
     path
 }
 

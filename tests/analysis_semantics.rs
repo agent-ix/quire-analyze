@@ -2,10 +2,11 @@
 
 #![cfg(target_os = "linux")]
 
+mod fake_script;
+
 use ix_trace_rs::trace;
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -203,10 +204,7 @@ fn write_solver(directory: &Path, response: &str, slow: bool) -> PathBuf {
     let body = format!(
         "#!/bin/sh\nif [ \"$1\" = \"-version\" ] || [ \"$1\" = \"--version\" ]; then printf '{VERSION}\\n'; exit 0; fi\n{action}\n"
     );
-    fs::write(&path, body).expect("write solver");
-    let mut permissions = fs::metadata(&path).expect("metadata").permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).expect("executable");
+    fake_script::install(&path, &body);
     path
 }
 
