@@ -41,9 +41,12 @@ and that every unbounded quantifier and every exhausted limit is non-conclusive.
    the lowered query equals its golden query and the enumeration oracle of FR-033 yields the expected
    status; where Z3 and cvc5 are installed, both also answer the matching `sat`/`unsat`. The oracle
    and golden checks run everywhere, so the case can fail without installed solvers.
-4. Replay: one passing and one failing model per domain form and quantifier form, bounds exactly at
-   and one above the replay limit, and a model that satisfies the lowered query but fails one
-   original instance.
+4. Replay: one passing and one failing model per domain form and quantifier form; for an existential
+   with a holding second instance and later domain elements, assert replay visits exactly two
+   instances and skips all later elements. Verify that a complete replay of all assertions publishes
+   the returned model as `verified`; failed or incomplete replay does not. Also test bounds exactly at
+   and one above the replay limit, and a model that satisfies the lowered query but fails one original
+   instance.
 5. Resources: instance budget and replay limit at and one above their values, a 2^64-wide range,
    the nested width-100 fixture, a stalled solver and a solver answering `unknown` on a quantified
    query. Distinguish replay exhaustion from solver exhaustion.

@@ -33,7 +33,9 @@ quantifier's bound, so that a model is `verified` only when the assertion holds 
 - A universal quantifier holds when every instance holds; replay stops at, and reports, the first
   failing instance with its element and the quantifier's source identity, and enumerates the whole
   domain only when no instance fails. An existential quantifier holds when at least one instance
-  holds; when none holds, replay reports that no instance held and the number enumerated.
+  holds; replay stops at, and reports, the first holding instance with its element and the
+  quantifier's source identity, and evaluates no later element. When no instance holds, replay
+  evaluates the whole domain and reports that no instance held and the number enumerated.
 - Replay evaluates the original quantifier, not the lowered expansion, and does not trust the
   solver's quantifier instantiation.
 - For a range with declared bounds, replay takes the bound values from the model. A bound symbol that
@@ -49,8 +51,9 @@ quantifier's bound, so that a model is `verified` only when the assertion holds 
   would exceed the remaining limit, replay yields `incomplete` with reason `replay_limit_exceeded`;
   the over-limit instance is not evaluated and the model is never `verified`. Checked-count overflow
   is treated as exceeding the limit.
-- A failed or incomplete replay never publishes the model as verified. The logical solver response
-  and the replay outcome are retained separately.
+- A completed replay that finds every assertion holds publishes the solver-returned model as
+  `verified`. A failed or incomplete replay never publishes the model as verified. The logical
+  solver response and the replay outcome are retained separately.
 - Enumeration oracle: for a fixture with a small finite input space, the evaluator run over every
   assignment of the inputs yields the fixture's `sat`/`unsat` status independently of any solver.
   Tests use it as the expected-status check of [TC-030](../test/TC-030-bounded-quantifiers.md).
@@ -60,13 +63,14 @@ quantifier's bound, so that a model is `verified` only when the assertion holds 
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-033-AC-1 | For a failing universal model, replay evaluates the domain elements in order up to the first failing element, reports that element and the source identity, and evaluates no later element; for a passing universal model it evaluates exactly as many instances as the domain has elements. | Test (TC-030) |
-| FR-033-AC-2 | Replay of an existential quantifier succeeds when one instance holds and reports no holding instance and the count enumerated when none does. | Test (TC-030) |
+| FR-033-AC-2 | Replay of an existential quantifier stops at and reports its first holding instance with its element and source identity, does not evaluate later elements, and completes the assertion successfully; when none holds, it reports no holding instance and the count enumerated. | Test (TC-030) |
 | FR-033-AC-3 | A bound whose next instance would exceed the limit in NFR-031 yields `incomplete` with reason `replay_limit_exceeded`; that instance is not evaluated and the model is never `verified`. | Test (TC-030) |
 | FR-033-AC-4 | For each of an enum domain, a finite collection and an integer range, and for each of universal and existential, one passing model and one failing model are replayed to the expected outcome. | Test (TC-030) |
 | FR-033-AC-5 | A solver model that satisfies the lowered query but fails one instance of the original quantifier is not published as verified. | Test (TC-030) |
 | FR-033-AC-6 | A declared range bound that is missing from the model, repeated, malformed or outside its declared type yields `incomplete` with reason `bound_undecodable`; a model with lower bound above upper bound replays as an empty range. | Test (TC-030) |
 | FR-033-AC-7 | A body whose evaluation overflows yields `incomplete` with reason `evaluation_overflow`, never a wrapped value. | Test (TC-030) |
 | FR-033-AC-8 | Where Z3 and cvc5 are installed, each satisfiable quantified fixture in TC-030 is decided `sat` by both solvers with agreement, and each returned model is published as `verified` only after replay passes. | Test (TC-030, real solvers) |
+| FR-033-AC-9 | When replay evaluates every assertion for a returned model and each holds, the model is published as `verified`; if an assertion fails or replay is incomplete, it is not. | Test (TC-030) |
 
 ## Dependencies
 
