@@ -1328,7 +1328,7 @@ impl LowerState<'_> {
         depth: usize,
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        let built = self.record_sort(record, 1, &format!("type.{}", record.as_str()))?;
+        let built = self.record_sort(record, 1, "")?;
         let map = self.datatypes.records[&built.sort].clone();
         if fields.len() != map.fields.len() {
             return Err(LoweringError::new(
@@ -1373,7 +1373,8 @@ impl LowerState<'_> {
                 "field access requires a record-typed base",
             ));
         };
-        let built = self.record_sort(&name, 1, &format!("type.{}", name.as_str()))?;
+        let base = self.lower(base, depth + 1, &path.child("base"))?;
+        let built = self.record_sort(&name, 1, "")?;
         let selector = self.datatypes.records[&built.sort]
             .fields
             .iter()
@@ -1386,7 +1387,6 @@ impl LowerState<'_> {
                     "validated record field no longer resolves",
                 )
             })?;
-        let base = self.lower(base, depth + 1, &path.child("base"))?;
         Ok(LoweredExpression {
             smt: format!("({selector} {})", base.smt),
             replay: ReplayExpression::DatatypeUnreplayed,
@@ -1434,8 +1434,8 @@ impl LowerState<'_> {
                 "option access requires an option-typed operand",
             ));
         };
-        let map = self.option_map(&option_type, "expression.option")?;
         let operand = self.lower(option, depth + 1, &path.child("option"))?;
+        let map = self.option_map(&option_type, "expression.option")?;
         let smt = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
             format!("((_ is {}) {})", map.some, operand.smt)
         } else {
@@ -1547,7 +1547,7 @@ impl LowerState<'_> {
                 datatype @ (ValueType::Enum { .. }
                 | ValueType::Record { .. }
                 | ValueType::Option { .. }),
-            ) => Some(self.sort_of(datatype, 1, "type")?.sort),
+            ) => Some(self.sort_of(datatype, 1, "")?.sort),
             _ => None,
         })
     }
@@ -1685,6 +1685,11 @@ impl LowerState<'_> {
         if level > MAX_DATATYPE_DEPTH {
             return Err(depth_limit());
         }
+        let path = if path.is_empty() {
+            format!("type.{}", name.as_str())
+        } else {
+            path.to_owned()
+        };
         let statement = self.statement;
         let environment = &statement.environment;
         let declaration = record_declaration(environment, name).ok_or_else(|| {
@@ -1762,6 +1767,7 @@ impl LowerState<'_> {
         if level > MAX_DATATYPE_DEPTH {
             return Err(depth_limit());
         }
+        let path = if path.is_empty() { "type.option" } else { path };
         let payload = self.sort_of(payload, level + 1, &format!("{path}.some"))?;
         let height = payload.height + 1;
         if height > MAX_DATATYPE_DEPTH {
@@ -1802,7 +1808,7 @@ impl LowerState<'_> {
                 "validated option type no longer names an option",
             ));
         }
-        let built = self.sort_of(value_type, 1, "type.option")?;
+        let built = self.sort_of(value_type, 1, "")?;
         Ok(self.datatypes.options[&built.sort].clone())
     }
 
@@ -1830,7 +1836,7 @@ impl LowerState<'_> {
                 numeral(value.maximum())
             )),
             ValueType::Record { name } => {
-                let built = self.record_sort(name, 1, "type.range")?;
+                let built = self.record_sort(name, 1, "")?;
                 let map = self.datatypes.records[&built.sort].clone();
                 let statement = self.statement;
                 let declaration = record_declaration(&statement.environment, name);
@@ -1986,8 +1992,7 @@ impl LowerState<'_> {
             datatype @ (ValueType::Enum { .. }
             | ValueType::Record { .. }
             | ValueType::Option { .. }) => {
-                let path = format!("type.{}", name.as_str());
-                datatype_sort = Some(self.sort_of(datatype, 1, &path)?.sort);
+                datatype_sort = Some(self.sort_of(datatype, 1, "")?.sort);
                 datatype_value = Some(datatype);
                 None
             }
@@ -2243,7 +2248,7 @@ enum IntegerTree {
     },
     /// An integer read out of a datatype, lowered when the tree is emitted.
     Datatype {
-        expression: Expression,
+        expression: Box<Expression>,
         depth: usize,
         path: String,
     },
@@ -2391,7 +2396,7 @@ fn fold_integer(
             })?;
             Ok(FoldedInteger {
                 tree: IntegerTree::Datatype {
-                    expression: expression.clone(),
+                    expression: Box::new(expression.clone()),
                     depth,
                     path: path.render(),
                 },
@@ -3053,6 +3058,116 @@ mod tests {
             compare(ComparisonOperator::Equal, boolean, enum_literal("A")),
         ] {
             let statement = unchecked_statement(vec![enum_declaration()], vec![], expression);
+            let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
+            assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
+        }
+    }
+
+    fn record_declaration_with(name: &str, fields: &[(&str, ValueType)]) -> TypeDeclaration {
+        let fields = fields
+            .iter()
+            .map(|(field, value_type)| {
+                quire_contract_model::RecordFieldDeclaration::new(
+                    SymbolName::new(*field).expect("symbol"),
+                    value_type.clone(),
+                    span(),
+                )
+            })
+            .collect();
+        TypeDeclaration::Record {
+            declaration: RecordDeclaration::new(
+                SymbolName::new(name).expect("symbol"),
+                span(),
+                fields,
+            )
+            .expect("record"),
+        }
+    }
+
+    fn reference(name: &str) -> Expression {
+        Expression::new(
+            ExpressionKind::ValueReference {
+                name: SymbolName::new(name).expect("symbol"),
+                observation: StateObservation::Current,
+            },
+            span(),
+        )
+    }
+
+    fn input(name: &str, value_type: ValueType) -> quire_contract_model::ValueDeclaration {
+        quire_contract_model::ValueDeclaration::new(
+            SymbolName::new(name).expect("symbol"),
+            quire_contract_model::ValueDeclarationKind::Input,
+            value_type,
+            span(),
+        )
+    }
+
+    /// FR-020-AC-4: the lowering adds no presence check of its own, so an `Unwrap` that skipped the
+    /// upstream check lowers to the selector.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-4")]
+    #[test]
+    fn lowering_adds_no_presence_check_over_an_unchecked_unwrap() {
+        let option = ValueType::option(ValueType::Boolean);
+        let unwrap = Expression::new(
+            ExpressionKind::Unwrap {
+                option: Box::new(reference("flag")),
+            },
+            span(),
+        );
+        let statement = unchecked_statement(vec![], vec![input("flag", option)], unwrap);
+        let query = lower_boolean_statements(&[statement], &[]).expect("lowers");
+        let selector = &query.option_sorts()[0].selector;
+        assert!(query.query().contains(&format!("({selector} v_s_")));
+    }
+
+    /// FR-020-AC-5: the lowering refuses a record or option ordering comparison and a mixed-sort
+    /// comparison itself, over an expression that skipped statement-build validation.
+    #[ix_trace_rs::trace("TC-020", "FR-020-AC-5")]
+    #[test]
+    fn lowering_refuses_unchecked_record_and_option_comparisons() {
+        let compare = |operator, left, right| {
+            Expression::new(
+                ExpressionKind::Compare {
+                    operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span(),
+            )
+        };
+        let types = || {
+            vec![
+                record_declaration_with("A", &[("on", ValueType::Boolean)]),
+                record_declaration_with("B", &[("on", ValueType::Boolean)]),
+            ]
+        };
+        let values = || {
+            vec![
+                input(
+                    "a",
+                    ValueType::Record {
+                        name: SymbolName::new("A").expect("symbol"),
+                    },
+                ),
+                input(
+                    "b",
+                    ValueType::Record {
+                        name: SymbolName::new("B").expect("symbol"),
+                    },
+                ),
+                input("o", ValueType::option(ValueType::Boolean)),
+                input("flag", ValueType::Boolean),
+            ]
+        };
+        for expression in [
+            compare(ComparisonOperator::Less, reference("a"), reference("a")),
+            compare(ComparisonOperator::Less, reference("o"), reference("o")),
+            compare(ComparisonOperator::Equal, reference("a"), reference("b")),
+            compare(ComparisonOperator::Equal, reference("a"), reference("o")),
+            compare(ComparisonOperator::Equal, reference("flag"), reference("o")),
+        ] {
+            let statement = unchecked_statement(types(), values(), expression);
             let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
             assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
         }
