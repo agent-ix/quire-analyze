@@ -5,6 +5,8 @@ type: FR
 relationships:
   - target: ix://agent-ix/quire-analyze/FR-002
     type: depends_on
+  - target: ix://agent-ix/quire-analyze/FR-010
+    type: depends_on
   - target: ix://agent-ix/quire-analyze/interface_001
     type: implements
 ---
@@ -24,11 +26,19 @@ unsupported.
 
 - Every enum, record and option sort in a query is derived from the `DeclarationEnvironment` of the
   statements being lowered. The lowering shall not invent an enum variant, a record field or a type
-  name. An `EnumLiteral` whose enumeration or variant, a `RecordLiteral` or `FieldAccess` whose record
-  or field, or a value declaration whose type name does not resolve in the environment is refused with
-  a stable `InvalidBinding` or `UnsupportedConstruct` diagnostic before any solver runs.
+  name.
 - Only types reachable from a value declaration or expression of a selected statement are declared in
   the query, so an unused environment declaration does not change the query.
+- Refusal codes (`LoweringErrorCode` of `src/smt.rs`) are fixed by case:
+
+| Case | Code | Raised by |
+|---|---|---|
+| An `EnumLiteral`, `RecordLiteral`, `FieldAccess` or `Unwrap` whose enumeration, variant, record, field or presence proof does not hold | `InvalidStatement`, path `statement.expression` | `check_expression` at statement build, before lowering |
+| A value declaration or binding whose type name does not resolve in the environment | `InvalidBinding`, path `binding.type` | binding validation |
+| A construct outside the exact list (collection, text, rational, enum ordering) | `UnsupportedConstruct` | expression lowering |
+| A declared type that nests a collection or text | `UnsupportedType` | type lowering |
+| A bound of NFR-020 exceeded | `ResourceLimit` | type lowering |
+| A record type that contains itself | refused by `DeclarationEnvironment::new` as `RecursiveType`, so no environment and no statement exists | environment build |
 
 ### Encoding
 
@@ -36,77 +46,94 @@ unsupported.
   the same variant names are distinct sorts.
 - A record lowers to one datatype with one constructor and one selector per declared field. A field
   type is Boolean, an enum, a record or an option over a permitted type, and an integer only when the
-  selected capability contract lists integers as exact. A field of any other type (text, rational,
-  collection) makes the record Unsupported.
+  selected profile lists integers as exact. A field of any other type (text, rational, collection)
+  makes the record Unsupported.
 - An option over payload type `T` lowers to one datatype with a nullary `none` constructor and a
   `some` constructor with one selector. There is one option datatype per distinct payload sort, and
   two options over the same payload share it.
 - Sort, constructor and selector symbols encode the complete semantic identity of the owning type
   and, for a constructor or selector, the variant or field name, injectively and independently of host
-  maps and paths. A user-chosen name equal to an SMT-LIB reserved word or to a name used by another
-  encoded symbol cannot collide.
+  maps and paths. The encoded symbols are recorded in the query's symbol map, which
+  [FR-021](./FR-021-datatype-witness-replay.md) uses to read models. A user-chosen name equal to an
+  SMT-LIB reserved word or to a name used by another encoded symbol cannot collide.
 - Datatype declarations appear before every use, in dependency order with ties broken by the encoded
   symbol, and variants and fields are emitted in ascending name order. Order of declaration in the
   environment does not change the query bytes.
-- The query logic is the one the capability contract declares for the datatypes the query uses
-  (`QF_DT` when only datatypes and Boolean structure occur). The logic is never chosen from a solver
-  or host.
+
+### Logic
+
+[FR-010](./FR-010-lia-lowering.md) fixes one logic per capability profile. This requirement adds
+profiles on the same rule: a query carries exactly one profile, and `CapabilityContract.logic` of that
+profile is the query logic. The logic is never chosen from a solver or host.
+
+| Query uses | Logic |
+|---|---|
+| Boolean structure only (`quire.smtlib2/v1`, unchanged) | `QF_UF` |
+| Datatypes (enum, record, option) and Boolean structure, no integer | `QF_DT` |
+| Datatypes and integer record fields or integer comparisons | `QF_UFDTLIA` |
+
+The profile is selected from the constructs the selected statements use, deterministically: any
+datatype sort or datatype expression selects at least the datatype profile, and any integer construct
+selects the integer-with-datatype profile. The integer-only logic remains the one FR-010 declares.
 
 ### Expressions
 
 - `EnumLiteral` lowers to its constructor. Enum equality and inequality (`Compare` with `Equal` or
   `NotEqual`) lower to `=` and `distinct` over the enum sort. Ordering comparison of enums is
   Unsupported.
-- Membership of an enum-typed term in a set of literals ("role is one of the permitted roles") lowers
-  to the total disjunction of equalities of the term with each literal, in ascending variant order.
-  An empty set lowers to `false`. A set that repeats a literal lowers as the set, so repetition does
-  not change the query.
+- There is no membership construct in `ExpressionKind`. "Role is one of the permitted roles" is
+  authored, and lowered, as the total disjunction of enum equalities of the term with each permitted
+  literal. The disjunction is built from the exact Boolean `or` and enum equality constructs, and no
+  separate membership encoding exists. Membership over a collection or set value
+  (`quire.op.collection.contains` over `quire.op.collection.set`) and membership through a quantifier
+  stay Unsupported here, and the quantifier forms are owned by the quantification requirements.
 - `RecordLiteral` lowers to the constructor applied to the field values in declared field order, and
   `FieldAccess` lowers to the selector. Record equality and inequality lower to `=` and `distinct`.
 - `OptionNone` lowers to the `none` constructor of the payload sort, `OptionSome` to `some`, and
   `IsPresent` to the `some` tester. Option equality and inequality lower to `=` and `distinct`.
 - `Unwrap` lowers to the `some` selector and is defined only where its presence proof holds. The
   upstream check (`check_expression`) admits `Unwrap` only under a presence proof (an `IsPresent`
-  fact or an `OptionSome` operand). A statement that reaches lowering with an `Unwrap` that carries no
-  presence proof is refused as `UnsupportedConstruct` naming the unwrap, and is never given a value
-  for the absent case. The selector's value on `none` is unconstrained and unobservable under the
-  proof.
+  fact established by the antecedent of an implication, or an `OptionSome` operand). An `Unwrap`
+  without that proof is refused by `check_expression` at statement build as `InvalidStatement`
+  (path `statement.expression`), and the lowering adds no separate check. The selector's value on
+  `none` is unconstrained and unobservable under the proof, and is never given meaning.
 - A `Compare` whose operands are not both Boolean, both of the same enum, both of the same record, or
-  both of the same option sort is refused. A mixed-sort comparison is never coerced.
+  both of the same option sort is refused as `UnsupportedConstruct`. A mixed-sort comparison is never
+  coerced.
 
 ### Capability contract
 
-- `CAPABILITY_CONTRACT` shall list `enum_literal`, `enum_equality`, `enum_membership`, `record`,
-  `record_equality`, `field_access`, `option`, `option_equality`, `option_presence` and `option_access`
-  as exact constructs, and shall remove `enum`, `record`, `option`, `field_access` and `option_access`
-  from its unsupported list. `collection`, `collection_access` and `text` remain unsupported.
+- `CAPABILITY_CONTRACT` shall list `enum_literal`, `enum_equality`, `record`, `record_equality`,
+  `field_access`, `option`, `option_equality`, `option_presence` and `option_access` as exact
+  constructs, and shall remove `enum`, `record`, `option`, `field_access` and `option_access` from its
+  unsupported list. `collection`, `collection_access` and `text` remain unsupported.
 - The exhaustive `ExpressionKind` match keeps an upstream variant addition a compile-time review
   point. Every construct not listed exact returns `unsupported` with no approximate query.
 
 ### Refusals
 
-- A record or option that nests a collection or text at any depth is Unsupported, naming the
+- A record or option that nests a collection or text at any depth is `UnsupportedType`, naming the
   declaration and the nested field path, and the whole request returns `unsupported`. It is never
   weakened by dropping the field or by abstracting it to an uninterpreted sort.
-- A record type that contains itself, directly or through options or other records, is Unsupported,
-  because the bounded encoding is non-recursive.
-- A datatype bound of NFR-010 that is exceeded is refused as a limit breach and never produces a
-  conclusive result.
+- A datatype bound of [NFR-020](../nonfunctional/NFR-020-datatype-bounds.md) that is exceeded is a
+  `ResourceLimit` and never produces a conclusive result.
 
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-020-AC-1 | A satisfiable and an unsatisfiable enum-membership fixture ("role is one of the permitted roles") each lower to a query that both Z3 and cvc5 decide correctly (`sat`/`unsat`). | Test (TC-020; real solvers where installed) |
-| FR-020-AC-2 | Every enum variant, record field and type name in a query traces to a declaration in the environment, and an unresolved enum, variant, record, field or type name is refused before solver execution. | Test (TC-020) |
-| FR-020-AC-3 | A record-field constraint fixture and an option-access fixture (`IsPresent` guard then `Unwrap`) each lower and are decided correctly by both solvers. | Test (TC-020; real solvers where installed) |
-| FR-020-AC-4 | An `Unwrap` with no presence proof is refused as `UnsupportedConstruct`, and an `Unwrap` under `IsPresent` is lowered to the selector. | Test (TC-020) |
-| FR-020-AC-5 | A record or option nesting a collection or text, a self-containing record, an ordering comparison of enums, and a mixed-sort comparison each return `unsupported` before solver execution, with no query. | Test (TC-020) |
-| FR-020-AC-6 | `CAPABILITY_CONTRACT` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test (TC-020) |
-| FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test (TC-020) |
-| FR-020-AC-8 | Enum membership over a set with a repeated literal yields the same query as the set without the repeat, and membership over an empty set yields `false`. | Test (TC-020) |
+| FR-020-AC-1 | A satisfiable and an unsatisfiable role-membership fixture, each written as a disjunction of enum equalities (`or` of `role = Admin` and `role = Auditor`, with and without a further `role = Guest`), lower to queries that both Z3 and cvc5 decide `sat` and `unsat` respectively. | Test (real solvers where installed) |
+| FR-020-AC-2 | Every enum variant, record field and type name in a query traces to a declaration in the environment, and each unresolved name is refused with the code of the case table before solver execution. | Test |
+| FR-020-AC-3 | A record-field constraint fixture and an option-access fixture (`IsPresent` in the antecedent of an implication, `Unwrap` in the consequent) each lower and are decided correctly by both solvers. | Test (real solvers where installed) |
+| FR-020-AC-4 | An `Unwrap` with no presence proof is refused by `check_expression` as `InvalidStatement` at statement build and nothing is lowered; an `Unwrap` under the proof lowers to the selector. | Test |
+| FR-020-AC-5 | A record or option nesting a collection or text returns `UnsupportedType`, an enum ordering comparison and a mixed-sort comparison return `UnsupportedConstruct`, and a self-containing record fails at `DeclarationEnvironment::new` with `RecursiveType`. None yields a query. | Test |
+| FR-020-AC-6 | `CAPABILITY_CONTRACT` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test |
+| FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test |
+| FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and `quire.op.collection.contains` over `quire.op.collection.set` returns `UnsupportedConstruct`. | Test |
+| FR-020-AC-9 | The query logic is `QF_UF` for a Boolean-only query, `QF_DT` for a datatype query without integers, and `QF_UFDTLIA` for a datatype query with an integer field, each emitted in `(set-logic ...)` and equal to the profile's `CapabilityContract.logic`. | Test |
 
 ## Dependencies
 
-FR-002 and the integer capability contract change that lands first. Encoded integer fields are
-exact only where that contract lists integers as exact.
+FR-002 and FR-010 (the single-logic-per-profile rule and the integer capability contract). Integer
+record fields are exact only where the selected profile lists integers as exact. Quantification and
+collection membership are owned by other requirements and stay Unsupported here.

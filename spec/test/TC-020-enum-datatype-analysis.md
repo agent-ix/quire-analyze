@@ -9,7 +9,7 @@ relationships:
     type: verifies
   - target: ix://agent-ix/quire-analyze/FR-022
     type: verifies
-  - target: ix://agent-ix/quire-analyze/NFR-010
+  - target: ix://agent-ix/quire-analyze/NFR-020
     type: verifies
 ---
 # TC-020: Verify enum, record and option analysis
@@ -27,7 +27,7 @@ an option-access constraint under an `IsPresent` guard; run each on both solvers
 installed. Parse hand-written model text in the spelling of each solver for every datatype kind and
 for invalid values (unknown constructor, wrong arity, wrong sort, abstract element, malformed
 text), and replay them. Permute environment, variant, field and statement order. Exceed each
-NFR-010 bound by one. Build contract-package fixtures at test time for an enum-membership claim, a
+NFR-020 bound by one. Build contract-package fixtures at test time for an enum-membership claim, a
 record-field claim, and each refused term, and run `run-package` as a child process.
 
 ## Expected Results
