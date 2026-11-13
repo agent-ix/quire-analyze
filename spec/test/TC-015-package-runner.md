@@ -60,9 +60,12 @@ with real or stub solvers. Cases:
     parameter declarations and shared symbols (AC-22), spans (AC-24), and determinism over two runs
     (AC-26). For the refusals the unit test shows that the translation returns a refusal naming
     `semantic_graph.nodes[N]` (AC-23: each construct, the cycle, the depth of 128 against 129, the node
-    count of 10,000 against 10,001 and the 61-node shared-subterm chain, which returns within the time of
-    a normal run) or `claim-N`, the path and the message (AC-25).
-20. The exit status `2` and the absence of a report for the refusals of case 19 (AC-23, AC-24, AC-25), by
+    count of 10,000 against 10,001, the total count over claims sharing one tree and the 61-node
+    shared-subterm chain, which returns within the time of a normal run; AC-24: a node with empty
+    occurrences). The `integer_range`-typed parameter as a claim body is refused as a non-Boolean claim
+    naming the claim node; an integer-typed parameter operand is made by byte-level mutation of a built
+    package.
+20. The exit status `2` and the absence of a report for the refusals of case 19 (AC-23, AC-24), by
     spawning the binary over the same built packages, including the 61-node shared-subterm chain, which
     exits `2` without hanging.
 21. Inspect the tests directory: no committed contract-package document (AC-27).

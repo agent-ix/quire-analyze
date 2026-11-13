@@ -114,8 +114,8 @@ exits `2` as the Input section states. For every other term:
 | `Application` of `quire.op.boolean.eq` | `ExpressionKind::Compare` with `ComparisonOperator::Equal` |
 | `Application` of `quire.op.boolean.ne` | `ExpressionKind::Compare` with `ComparisonOperator::NotEqual` |
 
-The operation identity is `CheckedApplicationOperation::read().identity`, an entry of
-`quire.checked-operation-catalog/v1` of `quire-verification-contracts`, and the arguments of an
+The operation identity is `CheckedApplicationOperation::identity()`, an entry of
+`quire.checked-operation-catalog/v1` of `quire-verification-contracts` (`CheckedApplicationOperation::read()` returns `NotAdmitted` for a package read by `ContractPackageWireV1::read`, which installs no admitted operation views; an application with no identity is one the translation cannot lower), and the arguments of an
 application are translated in order as left and right (the one argument of `not` as the operand).
 This subset is exactly the `exact_constructs` of `CAPABILITY_CONTRACT` in `src/smt.rs`. `and` and `or`
 become the total operators because this subset has no partial operation, so evaluation order carries no
@@ -136,7 +136,12 @@ target and so a node shared by several references expands once per reference: a 
   `quire-contract-model` (smaller than `MAX_EXPRESSION_NODES` (100,000) of `src/smt.rs`). The translation
   shall do work proportional to this bound, never to the size of the expansion it refuses. The runner
   shall exit `2` naming the node `semantic_graph.nodes[N]` whose translation produced the 10,001st
-  `Expression`.
+  `Expression`. `Expression` nodes are counted in pre-order, an application before its operands, and a
+  `ValueReference` or `BooleanLiteral` is produced by the node whose body holds the reference or literal.
+  The count shall also be kept across all claims of the package, without reset between claims, and the
+  translation shall stop at the first total above 100,000 and exit `2` naming the node
+  `semantic_graph.nodes[N]` whose translation produced that `Expression`, so that many claims sharing
+  one large tree cost no more than 100,000 `Expression` nodes.
 - **Depth bound.** The depth of the translated tree shall be the nesting depth of its `Expression` nodes,
   with the root `Expression` of a clause body at depth `1`, each operand one level deeper than its
   application, and a `Reference` adding no level of its own. A tree deeper than 128 (`MAX_EXPRESSION_DEPTH`
@@ -310,9 +315,9 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
 | FR-009-AC-20 | For a package with analysis claims at nodes `i` and `j`, the statements the translation builds have `ClauseRef` (`source.name`, `analysis`, `1`) with clause ids `claim-i` and `claim-j` in node order, one `RequirementRef` for both, and the execution point `Handler` named `analysis`; `from_clause` accepts both. A `source.name` that `PackageId::new` refuses exits `2` naming the package name. | Test |
 | FR-009-AC-21 | Each of `quire.op.boolean.not`, `and`, `or`, `implies`, `eq` and `ne`, applied to Boolean parameters, translates to the `ExpressionKind` and operator of the Terms table, and a Boolean `Literal` to `BooleanLiteral`; a claim that is a `Reference` to an expression node translates to the body of that node. | Test |
 | FR-009-AC-22 | Two claims that reference the same Boolean `value/parameter` node `N` yield one `ValueDeclaration` named `nN` of kind `Input` and type Boolean, referenced with observation `Current`, and the lowered query holds one variable symbol for it; two distinct parameter nodes yield two declarations. | Test |
-| FR-009-AC-23 | Each of an integer-typed reference, an `integer_range`-typed parameter, a `quire.op.integer.add` application, a `quire.op.integer.lt` application, a reference to a node that is neither an expression, a literal nor a parameter, a reference cycle, a tree deeper than 128 (a chain of 129 nested applications is refused, one of 128 is not) and a shared-subterm chain `x1 = and(p, p)`, `xk = and(x(k-1), x(k-1))` of 61 nodes (about 2^61 expanded `Expression` nodes; a tree of 10,000 `Expression` nodes is not refused for size and one of 10,001 is) each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report. The shared-subterm run finishes within the time of a normal run. | Test |
+| FR-009-AC-23 | Each of an `integer_range`-typed parameter, an integer-typed parameter operand of a Boolean operation, a `quire.op.integer.lt` application, a reference to a node that is neither an expression, a literal nor a parameter, a reference cycle, a tree deeper than 128 (128 nested `not` applications over a Boolean parameter, depth 129, are refused; 127, depth 128, are not) and a shared-subterm chain `x1 = and(p, p)`, `xk = and(x(k-1), x(k-1))` of 61 nodes (about 2^61 expanded `Expression` nodes; a tree of 10,000 `Expression` nodes is not refused for size and one of 10,001 is) and claims sharing one 10,000-node tree (the 11th, whose first `Expression` is the 100,001st in total, is refused) each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report. The shared-subterm run finishes within the time of a normal run. | Test |
 | FR-009-AC-24 | The `SourceSpan` of a claim is built from `source_map.nodes[N].occurrences[0].regions[0]` of its node: line `1`, column `1`, byte offsets the region start and end, document `contract-package`, revision `1`. A claim node whose `source_map.nodes[N].occurrences` is empty exits `2` naming the node. | Test |
-| FR-009-AC-25 | An error from `check_expression`, `from_clause` or `lower_boolean_statements` for a clause exits `2` naming `claim-N`, the path and the message, with no report. | Test |
+| FR-009-AC-25 | By inspection, an error from `check_expression`, `from_clause` or `lower_boolean_statements` for a clause maps to exit `2` naming `claim-N`, the path and the message, with no report; no admitted package reaches these errors, because the translation bounds are tighter. | Inspection |
 | FR-009-AC-26 | Two translations of the same package bytes yield equal clause order, ids, declarations and spans. | Test |
 | FR-009-AC-27 | Every contract-package document that a test of `run-package` reads is built at test time through the public APIs of the `quire-contract-*` dependencies and the QSL crates (a `quire.checked-package/v2` document built in test code, read with `CheckedPackageV2::read`, lowered with `CheckedPackageV2::lower`, and the canonical bytes of the resulting `CompleteContractPackageV2`), or by byte-level mutation of such a built document (malformed, oversized, at-limit); no contract-package document or copy of another repository's file is committed to this repository. | Inspection |
 | FR-009-AC-15 | Every request the runner logs validates against the request schema published by `producer-execute --schema request`, and the budget it carries has `maxStdoutBytes` and `maxStderrBytes` at most 8,388,608, `maxOutputArtifacts` and `maxOutputBytes` `0`, `maxDescendants` `16` and `maxConcurrency` `1`. | Test |
