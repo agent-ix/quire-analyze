@@ -32,9 +32,14 @@ universal and by disjunction for an existential quantifier.
 - Each instance substitutes the element for the bound variable. The substitution is capture-avoiding:
   an element never binds a free variable of the body, and an inner quantifier that reuses the bound
   variable's name shadows it.
-- Instances appear in domain order (enum declaration order; canonical member order for a
-  collection). Assertion names, symbol names and metadata are stable and independent of host maps
-  and paths.
+- Instances appear in domain order. An enum domain uses declaration order. For a collection, a
+  `quire.op.collection.set` and a `quire.op.collection.bag` are enumerated in ascending canonical
+  element order (false before true, enum declaration order, ascending integer), and a
+  `quire.op.collection.ordered_set` and a `quire.op.collection.sequence` in written order. In a
+  `set` and an `ordered_set` a repeated literal collapses to its first occurrence; in a `bag` and a
+  `sequence` every occurrence is an instance. The instance count is the number of elements after this
+  rule, and an empty collection is an empty domain.
+- Assertion names, symbol names and metadata are stable and independent of host maps and paths.
 - Each instance retains the quantifier's source identity and the element, so a counterexample maps
   back to the instance that failed.
 - Expansion consumes the instance budget defined in
@@ -47,7 +52,7 @@ universal and by disjunction for an existential quantifier.
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-031-AC-1 | For a universal and an existential fixture over an enum domain, the lowered query equals its golden query, and the status derived by the enumeration oracle of [FR-033](./FR-033-quantified-assertion-replay.md) equals the fixture's recorded expected status. Where Z3 and cvc5 are installed, both also answer the matching `sat`/`unsat`. | Test (TC-030; real solvers where installed) |
-| FR-031-AC-2 | The same holds for a universal and an existential fixture over a finite collection. | Test (TC-030; real solvers where installed) |
+| FR-031-AC-2 | The same holds for a universal and an existential fixture over a finite collection literal; a `set` with a repeated literal yields the same query as the `set` without the repeat, a `sequence` with a repeated literal yields one instance per occurrence, and each of `set`, `ordered_set`, `sequence` and `bag` enumerates in the order stated above. | Test (TC-030; real solvers where installed) |
 | FR-031-AC-3 | The query for a quantified fixture contains no `forall` or `exists` token and one body instance per domain element, in domain order. | Test (TC-030) |
 | FR-031-AC-4 | Lowering the same quantified package twice, in separate processes, yields byte-identical SMT-LIB2 output. | Test (TC-030) |
 | FR-031-AC-5 | A counterexample for a failed universal quantifier names the failing element and the quantifier's source identity. | Test (TC-030) |

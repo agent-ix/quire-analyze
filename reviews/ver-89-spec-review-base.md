@@ -24,3 +24,12 @@ FR-030, FR-031, FR-032, FR-033, FR-034, NFR-030, NFR-030-AC-1, NFR-030-AC-2, FR-
 ## Verdict
 
 FAIL on FND-001 (high). Checked and clean: unbounded quantification returns `unsupported` and is never approximated (FR-030 Behavior bullets 2-4); exhaustion is inconclusive (NFR-030-AC-3); replay is over the original quantifier, not the expansion (FR-033). No paywalled standard text, no roadmap or delivery-order content, no hash/SHA/version-tracking records (byte-identical lowering is a functional determinism property), and no compatibility layer. Numbering: FR-030..FR-034 / NFR-030 / TC-030 leaves the FR-010..FR-029 gap free for sibling milestones (VER-84, PR #88, uses FR-020 / TC-020) and is internally consistent; no defect. Sibling PR #88 uses NFR-010 rather than NFR-020, so the NFR block convention differs between the two PRs; that is PR #88's choice and is not a defect here.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in eb95c03 |
+| FND-002 | fixed | verified in eb95c03 |
+| FND-003 | fixed | verified in eb95c03 |
+| FND-004 | fixed | verified in eb95c03 |

@@ -30,9 +30,11 @@ and that every unbounded quantifier and every exhausted limit is non-conclusive.
 
 ## Test Procedure
 
-1. Admission and refusal: universal and existential fixtures over each admitted domain, an empty
-   domain, and refused fixtures (unbounded integer, text, unfixed collection, non-finite bound,
-   nested refused quantifier).
+1. Admission and refusal: universal and existential fixtures over each admitted domain (enum, each
+   collection constructor, integer range), an empty domain, and refused fixtures (unbounded integer,
+   text, rational, unfixed collection, collection with an unencodable element, non-finite bound,
+   nested refused quantifier, and an enum or collection expansion one above the budget refused as
+   `expansion-ceiling`).
 2. Lowering: expand enum and collection fixtures, check for no `forall` or `exists` token, lower
    range fixtures at and above the expansion ceiling, and lower each twice in separate processes.
 3. Decision: each decidable fixture carries a hand-derived expected status. "Decided correctly" means

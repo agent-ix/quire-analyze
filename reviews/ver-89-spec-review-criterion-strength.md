@@ -23,3 +23,11 @@ FR-030-AC-1, FR-030-AC-2, FR-030-AC-3, FR-030-AC-4, FR-031-AC-1, FR-031-AC-2, FR
 ## Verdict
 
 Jev client unavailable in this environment (the quoin skill states no client exists), so this pass is a manual judgement over the AC text, not a calibrated Jev run. FR-033-AC-5 (lowered-satisfying model that fails the original quantifier), NFR-030-AC-1/AC-2 (at and one above each limit) and NFR-030-AC-3 are strong adverse-case ACs.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in eb95c03 |
+| FND-002 | fixed | verified in eb95c03 |
+| FND-003 | fixed | verified in eb95c03 |

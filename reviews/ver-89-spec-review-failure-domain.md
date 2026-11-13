@@ -24,3 +24,12 @@ FR-030, FR-031, FR-032, FR-033, NFR-030-AC-2. Context only: FR-009.
 ## Verdict
 
 FAIL on two medium edge cases (overflow in width and instance counts; model-dependent replay domain). The empty-domain rule, nested refusal, refusal before solver invocation, and exhaustion-as-inconclusive are covered.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in eb95c03 |
+| FND-002 | fixed | verified in eb95c03 |
+| FND-003 | fixed | verified in eb95c03 |
+| FND-004 | fixed | verified in eb95c03 |

@@ -23,3 +23,11 @@ FR-030, FR-031, FR-032, FR-033, FR-034, NFR-030. Context only: none.
 ## Verdict
 
 PASS with low findings only. FR-031, FR-033 and FR-034 Description statements are well-formed ubiquitous `The analyzer shall ...` statements; the FR-030 refusal clause is a conforming unwanted-behaviour response.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in eb95c03 |
+| FND-002 | fixed | verified in eb95c03 |
+| FND-003 | fixed | verified in eb95c03 |

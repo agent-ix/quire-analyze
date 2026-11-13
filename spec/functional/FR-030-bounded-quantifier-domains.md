@@ -26,8 +26,13 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   unsupported, under the same profile `quire.smtlib2/v2`):
   - an enum domain: every declared member of the enum, in declaration order. Enum sorts are those of
     [FR-020](./FR-020-datatype-lowering.md);
-  - a finite collection: a collection whose member set is fixed by the analysis model, with its
-    members in canonical order;
+  - a finite collection: a collection literal whose elements are literals fixed at translation time
+    (the catalog constructors `quire.op.collection.set`, `quire.op.collection.ordered_set`,
+    `quire.op.collection.sequence` and `quire.op.collection.bag`), with element sorts limited to
+    Boolean, enum and bounded integer. It has no SMT collection sort and is consumed only as a
+    quantifier domain. Its members are the elements in the order and with the duplicate rule of
+    [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md). A collection that is a reference to
+    a parameter, has a non-literal element, or has any other element sort is not a finite collection;
   - a bounded integer range: an inclusive range whose lower and upper bounds are integer literals or
     declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). When
     the lower bound exceeds the upper bound the range is empty.
@@ -47,6 +52,9 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   domain is false.
 - Nested admitted quantifiers are admitted; one refused quantifier at any depth refuses the whole
   request.
+- The collection domain is the only admitted use of a collection. The collection refusals of
+  [FR-020](./FR-020-datatype-lowering.md) and [FR-022](./FR-022-datatype-package-translation.md)
+  (including FR-022-AC-3) hold unchanged for every other use of a collection term.
 - Admission is decided from the analysis model alone, before any solver is invoked.
 
 ## Acceptance Criteria
