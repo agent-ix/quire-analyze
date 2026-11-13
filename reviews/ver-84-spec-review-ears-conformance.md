@@ -24,3 +24,9 @@ response. The Behavior bullets use the declarative style of FR-009, which this r
 PASS with one low finding. The statements are atomic enough for this repo's convention, use
 "shall", and name a single responsible component. The Behavior bullets state their triggers
 (unresolved name, nested text or collection, bound breach) explicitly.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-020 now has a case table that maps each refusal to one `LoweringErrorCode`, and every code it names exists in `src/smt.rs:93-100`. |

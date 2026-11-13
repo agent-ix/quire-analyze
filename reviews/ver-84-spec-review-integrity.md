@@ -37,3 +37,22 @@ contract. The new ids do not collide with #87, #89 or #90. `spec/index.md` and
 `spec/test-matrix.md` correctly do not enumerate the new ids. No hash, SHA, pin or version
 tracking, no compatibility layer, no roadmap content and no paywalled standard text appear in
 the diff.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | high | FR-022 states that "the catalog has no identity for … unwrap", so every option read exits `2`. The locked `quire-verification-contracts` catalog (rev 1bf72e6, `contracts/checked-operation-catalog-v1.json:180`) defines `quire.op.option.value`, with operator `value`, one `option` operand and result `inner:0`. That is the unwrap. FR-022 therefore drops the option access that VER-84 scopes, on a false premise. SR-17038 FND-003 searched only quire-contract-ir and was wrong on this point. Fix: add `quire.op.option.value` → `ExpressionKind::Unwrap` to the term table, under the implies-guard rule, and drop the "if a later catalog adds an unwrap" clause. | spec/functional/FR-022-datatype-package-translation.md:45-56 |
+| FND-007 | low | FR-020 links `./FR-010-lia-lowering.md`, but #90 names the file `FR-010-linear-integer-arithmetic.md`. That link will dangle even after #90 lands. `quire validate --okf` reports it as one of the three FR-010 dangling references, and it is the only one of the three that #90 landing will not clear. Fix: point the link at `./FR-010-linear-integer-arithmetic.md`. | spec/functional/FR-020-datatype-lowering.md:65 |
+| FND-008 | low | FR-020-AC-8 requires `quire.op.collection.contains` over `quire.op.collection.set` to return `UnsupportedConstruct`. Those are package catalog identities that FR-020's lowering never sees: FR-022 refuses them at translation with exit `2`. The analysis-algebra counterpart is `CollectionLiteral`. Fix: state the clause on `CollectionLiteral` in FR-020, and keep the catalog-identity case in FR-022-AC-3. | FR-020-AC-8 |
+| FND-009 | low | The fix extends the hand-maintained id inventory in `spec/index.md` (Requirements Architecture) with FR-020..022, NFR-020 and TC-020. That prose is a manual inventory of ids, which is ceremony. `quire validate --okf` does not require it and does not flag its absence. Fix: revert the added sentence. | spec/index.md:54 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | Membership is now authored and lowered as a disjunction of enum equalities. `enum_membership` is no longer in the exact list, and `collection.contains` stays unsupported. |
+| FND-002 | still-open | `QF_UFDTLIA` is a valid logic name: it is an SMT-COMP division, z3 5.4.1 and cvc5 1.4.2 both accept it, and both reject a bogus name. But FR-020 still conflicts with #90 at head f1ad0f5. #90's FR-002 says v2 replaces v1, every query (including Boolean-only) declares `QF_LIA`, and v1 is not selectable. #90's FR-005-AC-6 requires reports to carry `quire.smtlib2/v2` and `QF_LIA`, and refuses `QF_UF`. FR-020 instead keeps v1/`QF_UF` for Boolean-only queries, selects profiles per query, and does not amend the report schema or validator for `QF_DT` and `QF_UFDTLIA`. FR-020-AC-6 also still names one `CAPABILITY_CONTRACT` across several profiles. |
+| FND-003 | fixed | FR-022 now has an identity-keyed term table, and the `none` literal maps to `OptionNone`. The false unwrap claim the fix relied on is recorded as new FND-006. |
+| FND-004 | fixed | The Verification cells now read `Test`, the TC-015 citation is gone, and the dangling-trace-reference warnings are cleared. |
+| FND-005 | fixed | Renamed NFR-020, and TC-020 now verifies NFR-020. |

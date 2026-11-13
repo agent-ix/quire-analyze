@@ -29,3 +29,15 @@ FAIL overall, on the integrity and failure-domain findings (two high and six med
 SR-17038 and SR-17040). This checklist adds one low finding. The ACs are otherwise concrete and
 falsifiable. The real-solver cases are scoped "where installed", which matches repo convention
 (TC-010, TC-015). TC-020 covers each FR and NFR it declares.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-002 | low | FR-020-AC-1 says "`or` of `role = Admin` and `role = Auditor`, with and without a further `role = Guest`". This does not say whether `role = Guest` is a further disjunct, which keeps the formula sat, or a conjoined assertion, which makes it unsat. Only "respectively" implies the second reading. Fix: say "with and without a further assertion `role = Guest`", as FR-022-AC-1 does. | FR-020-AC-1 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-022-AC-1 now fixes an exit per fixture: 0 for the sat membership claim, 1 for the membership claim with Guest, 0 for the record claim and 1 for the record claim with Guest. These match FR-009 (sat→0, unsat→1). |

@@ -37,3 +37,21 @@ unobservable under the guard. FND-001, FND-002, FND-003, FND-004 and FND-006 are
 implementer would trip on, and FND-005 is a redundant AC case. The symbol-injectivity rule,
 dependency-ordered declarations, the refusal of text and collection nesting, and the
 no-approximation rule are well defined.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-007 | medium | FR-020's Unwrap bullet now limits the presence proof to "an `IsPresent` fact established by the antecedent of an implication, or an `OptionSome` operand". Upstream `check_expression` also establishes the fact from the left operand of `ShortCircuitAnd` and the negated left operand of `ShortCircuitOr` (quire-contract-model `expression.rs:3313-3316`), and the analysis API admits such statements directly. The bullet misstates which statements reach lowering. Fix: cite the upstream rule as it is (short-circuit and, short-circuit or, implication). | spec/functional/FR-020-datatype-lowering.md:93-98 |
+| FND-008 | low | The `quire.op.record.project` row does not say where the field name comes from. The catalog entry has one operand (`field_owner`) and a `field` member (`checked-operation-catalog-v1.json:175`), but FR-022-AC-1 writes it as two arguments (`record.project(user, role)`). An implementer following the AC would expect arity 2. Fix: state that the field is the operation's `field` member, with one argument. | spec/functional/FR-022-datatype-package-translation.md:42 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-020-AC-4 now expects `InvalidStatement` from `check_expression` at statement build. |
+| FND-002 | fixed | FR-021 now states the spellings generically, as encoded symbols from the query symbol map, and the parametric `(Option T)` form is gone. |
+| FND-003 | still-open | FR-021 makes only implication lazy. A statement guarded by `ShortCircuitAnd` or `ShortCircuitOr`, for example `IsPresent(x) and-then Unwrap(x) = A` with `x` absent, is a valid model that the evaluator would reject by evaluating `Unwrap` on `none`. The laziness rule must cover every guard form upstream admits (see new FND-007). |
+| FND-004 | fixed | FR-022 now admits a guard only inside the consequent of `quire.op.boolean.implies` and explains why `and`/`or` cannot carry one. The missing `option.value` translation is recorded as SR-17038 FND-006. |
+| FND-005 | fixed | FR-020-AC-5 now expects `RecursiveType` at `DeclarationEnvironment::new`, with no query. |
+| FND-006 | fixed | NFR-020 now defines nesting depth (outermost datatype is depth 1, with a worked example) and the count of datatypes per query (each option payload counts once). It adds a rationale: 256×256×64 B ≈ 4 MiB, under the 16 MiB query limit, and depth 8 sits well inside expression depth 128. |
