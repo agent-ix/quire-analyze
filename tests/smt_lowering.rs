@@ -237,9 +237,9 @@ fn golden_query_is_order_independent_and_source_mapped() {
     assert_eq!(forward.query_digest(), reverse.query_digest());
     assert_eq!(forward.binding_set_digest(), reverse.binding_set_digest());
     assert_eq!(forward.assertions(), reverse.assertions());
-    assert_eq!(forward.query(), include_str!("golden/boolean-v1.smt2"));
+    assert_eq!(forward.query(), include_str!("golden/boolean-v2.smt2"));
     assert_eq!(forward.profile(), SMTLIB2_PROFILE);
-    assert_eq!(forward.logic(), "QF_UF");
+    assert_eq!(forward.logic(), "QF_LIA");
     assert_eq!(forward.assertions().len(), 2);
     assert!(forward
         .assertions()
@@ -835,12 +835,12 @@ fn statement_resource_bound_is_enforced() {
 #[trace("TC-010", "FR-002-AC-2", "FR-002-AC-4", "FR-002-AC-5")]
 #[test]
 fn capability_contract_is_explicit() {
-    assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v1");
+    assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v2");
     assert!(CAPABILITY_CONTRACT
         .exact_constructs
         .contains(&"boolean_value_reference"));
     for unsupported in [
-        "arithmetic",
+        "non_linear_arithmetic",
         "quantification",
         "record",
         "collection",

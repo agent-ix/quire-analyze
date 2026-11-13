@@ -335,8 +335,8 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
         }
         for (field, expected) in [
             ("analysisModelProfile", "quire.analysis-model/v1"),
-            ("encodingProfile", "quire.smtlib2/v1"),
-            ("logic", "QF_UF"),
+            ("encodingProfile", "quire.smtlib2/v2"),
+            ("logic", "QF_LIA"),
         ] {
             if object.get(field).and_then(Value::as_str) != Some(expected) {
                 return Err(format!("report {field} is absent or unsupported"));

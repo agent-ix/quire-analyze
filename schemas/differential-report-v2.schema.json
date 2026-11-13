@@ -50,14 +50,14 @@
         "disposition": { "enum": ["agreement", "disagreement", "unavailable", "inconclusive"] }
       }
     },
-    "encodingProfile": { "const": "quire.smtlib2/v1" },
+    "encodingProfile": { "const": "quire.smtlib2/v2" },
     "engines": {
       "type": "array",
       "minItems": 2,
       "maxItems": 2,
       "items": { "$ref": "#/definitions/engine" }
     },
-    "logic": { "const": "QF_UF" },
+    "logic": { "const": "QF_LIA" },
     "pgm01Envelope": {
       "type": "object",
       "additionalProperties": false,
