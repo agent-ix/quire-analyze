@@ -1056,6 +1056,21 @@ mod tests {
         assert!(!publication.parent_synced);
     }
 
+    /// FR-009-AC-10: the runner maps the post-rename `published-durability-unknown` publication
+    /// error, injected through the TC-008 seam, to exit 4 and names that state.
+    #[test]
+    fn runner_maps_published_durability_unknown_to_exit_four() {
+        let mut publication = FakePublicationIo::with_fault(InjectedFault::DirectorySync, None);
+        let error = publish_report_with(Path::new("report.json"), b"new", &mut publication)
+            .expect_err("directory sync failure");
+        let failure = crate::package_runner::publication_failure(&error);
+        assert_eq!(failure.class(), 4);
+        assert!(
+            failure.message().contains("published-durability-unknown"),
+            "{failure}"
+        );
+    }
+
     /// TC-008: an unknown stale staging path is never deleted or mistaken for this attempt's file.
     #[test]
     fn publication_refuses_stale_staging_without_claiming_ownership() {

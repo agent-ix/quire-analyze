@@ -2,6 +2,7 @@
 
 mod analysis;
 mod hybrid_synthesis;
+mod package_runner;
 mod package_translation;
 mod producer_evidence;
 mod report;
@@ -10,6 +11,7 @@ mod solver;
 
 pub use analysis::*;
 pub use hybrid_synthesis::*;
+pub use package_runner::*;
 pub use package_translation::*;
 pub use producer_evidence::*;
 pub use report::*;
