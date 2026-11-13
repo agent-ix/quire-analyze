@@ -17,6 +17,7 @@ use quire_contract_model::{
 use serde_json::json;
 
 mod common;
+mod fake_script;
 
 use common::*;
 
@@ -139,7 +140,6 @@ fn the_same_package_translates_to_the_same_clauses_declarations_and_query() {
 
 #[trace("FR-022-AC-1", "FR-022-AC-2", "TC-020")]
 #[test]
-#[ignore = "needs VER-86 record/option lowering"]
 fn a_record_field_claim_translates_to_a_field_access() {
     let (document, claims) = record_field(true);
     let (package, translation) = translate(&document, &labels(&claims));
@@ -163,7 +163,6 @@ fn a_record_field_claim_translates_to_a_field_access() {
 
 #[trace("FR-022-AC-1", "TC-020")]
 #[test]
-#[ignore = "needs VER-86 record/option lowering"]
 fn a_guarded_option_value_translates_to_an_unwrap_under_the_presence_guard() {
     let (document, claims, _) = option_value(true);
     let (package, translation) = translate(&document, &labels(&claims));
@@ -175,7 +174,18 @@ fn a_guarded_option_value_translates_to_an_unwrap_under_the_presence_guard() {
     else {
         panic!("not an implication");
     };
-    let o = value_reference(&package, "value/parameter/2");
+    let label = document
+        .nodes
+        .iter()
+        .find(|node| node["semantic_form"] == "parameter")
+        .map(|node| {
+            node["node_id"]["path"][0]
+                .as_str()
+                .expect("label")
+                .to_owned()
+        })
+        .expect("parameter");
+    let o = value_reference(&package, &label);
     let ExpressionKind::IsPresent { option } = kind_of(left) else {
         panic!("not a presence test");
     };
@@ -189,7 +199,6 @@ fn a_guarded_option_value_translates_to_an_unwrap_under_the_presence_guard() {
 
 #[trace("FR-022-AC-1", "TC-020")]
 #[test]
-#[ignore = "needs VER-86 record/option lowering"]
 fn a_none_literal_translates_to_option_none() {
     let mut document = Document::new();
     let role = document.enum_type("Role", &["Admin", "Guest"]);
@@ -521,7 +530,6 @@ fn a_record_chain_nested_past_the_depth_bound_is_refused_at_a_type_node() {
 #[test]
 fn a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable() {
     use quire_analyze::{classify_analysis, execute_solver, ExplanationState, ReplayFailureReason};
-    use std::os::unix::fs::PermissionsExt;
 
     let (document, claims) = membership(false);
     let (_, translation) = translate(&document, &labels(&claims));
@@ -537,8 +545,7 @@ fn a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable() 
     let script = format!(
         "#!/bin/sh\nif [ \"$1\" = \"-version\" ] || [ \"$1\" = \"--version\" ]; then printf 'fake 1.0\\n'; exit 0; fi\n/bin/cat >/dev/null; printf '%s' '{model}'\n"
     );
-    std::fs::write(&path, script).expect("solver");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).expect("mode");
+    fake_script::install(&path, &script);
     let config = SolverConfig::new(SolverEngine::Z3, &path, AdapterLimits::default())
         .expect("configuration");
     let record = execute_solver(&query, &config, &CancellationToken::default());

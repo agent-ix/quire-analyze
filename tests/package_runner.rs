@@ -1636,7 +1636,6 @@ fn an_unguarded_option_value_exits_two_naming_the_clause_through_the_runner() {
 /// FR-022-AC-1 fixtures 3 to 5 need the record and option lowering.
 #[trace("FR-022-AC-1", "TC-020")]
 #[test]
-#[ignore = "needs VER-86 record/option lowering"]
 fn record_and_option_fixtures_have_their_fixed_exits_through_the_runner() {
     let satisfiable = "sat\n(model)\n";
     let cases: [(Vec<u8>, &str, i32); 3] = [
