@@ -803,7 +803,7 @@ fn capability_contract_is_explicit() {
     for unsupported in [
         "non_linear_arithmetic",
         "quantification",
-        "record",
+        "text",
         "collection",
         "pure_function_call",
     ] {
