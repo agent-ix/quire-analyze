@@ -186,7 +186,7 @@ fn expected_query_digest(request_digest: &str, query: &[u8]) -> String {
         .collect::<Vec<_>>();
     let mut hasher = Sha256::new();
     hasher.update(b"quire-analyze\0query\0");
-    for field in [b"quire.smtlib2/v1".as_slice(), request.as_slice(), query] {
+    for field in [b"quire.smtlib2/v2".as_slice(), request.as_slice(), query] {
         hasher.update((field.len() as u64).to_be_bytes());
         hasher.update(field);
     }
@@ -357,7 +357,15 @@ struct TruthCase {
 }
 
 /// FR-001-AC-1 and FR-004-AC-1/5: all ten classifications match independent finite evaluation.
-#[trace("TC-001", "TC-005", "FR-001-AC-1", "FR-004-AC-1", "FR-004-AC-5")]
+#[trace(
+    "TC-001",
+    "TC-005",
+    "TC-016",
+    "FR-001-AC-1",
+    "FR-004-AC-1",
+    "FR-004-AC-5",
+    "FR-010-AC-9"
+)]
 #[test]
 fn all_ten_truth_table_cells_match_independent_finite_models() {
     let cases = vec![
@@ -551,8 +559,8 @@ fn model_decode_mapping_and_replay_are_fail_closed() {
         conclusion.analysis_model_profile(),
         "quire.analysis-model/v1"
     );
-    assert_eq!(conclusion.encoding_profile(), "quire.smtlib2/v1");
-    assert_eq!(conclusion.logic(), "QF_UF");
+    assert_eq!(conclusion.encoding_profile(), "quire.smtlib2/v2");
+    assert_eq!(conclusion.logic(), "QF_LIA");
     assert_eq!(
         conclusion.solver().query_digest(),
         query.query_digest().to_string()

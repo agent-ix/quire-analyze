@@ -212,6 +212,7 @@ fn implication(left: &str, right: &str) -> Expression {
     "FR-002-AC-1",
     "FR-002-AC-3",
     "FR-002-AC-5",
+    "FR-010-AC-9",
     "NFR-001-AC-1"
 )]
 #[test]
@@ -237,9 +238,9 @@ fn golden_query_is_order_independent_and_source_mapped() {
     assert_eq!(forward.query_digest(), reverse.query_digest());
     assert_eq!(forward.binding_set_digest(), reverse.binding_set_digest());
     assert_eq!(forward.assertions(), reverse.assertions());
-    assert_eq!(forward.query(), include_str!("golden/boolean-v1.smt2"));
+    assert_eq!(forward.query(), include_str!("golden/boolean-v2.smt2"));
     assert_eq!(forward.profile(), SMTLIB2_PROFILE);
-    assert_eq!(forward.logic(), "QF_UF");
+    assert_eq!(forward.logic(), "QF_LIA");
     assert_eq!(forward.assertions().len(), 2);
     assert!(forward
         .assertions()
@@ -389,46 +390,6 @@ fn every_supported_boolean_operator_has_an_exact_encoding() {
         let bundle = lower_boolean_statements(&[statement], &[]).expect("lower comparison");
         assert!(bundle.query().contains(expected));
     }
-}
-
-/// FR-002-AC-2/4 and TC-003: unsupported arithmetic fails before solver execution.
-#[trace("TC-003", "TC-010", "FR-002-AC-2", "FR-002-AC-4")]
-#[test]
-fn arithmetic_is_explicitly_unsupported() {
-    let integer = IntegerType::new(IntegerDomain::Signed, 0, 10, OverflowPolicy::Reject)
-        .expect("integer type");
-    let environment = DeclarationEnvironment::new(
-        owner("REQ-int", 1),
-        vec![],
-        vec![ValueDeclaration::new(
-            SymbolName::new("count").expect("symbol"),
-            ValueDeclarationKind::Input,
-            ValueType::integer(integer.clone()),
-            span(),
-        )],
-        vec![],
-    )
-    .expect("environment");
-    let expression = Expression::new(
-        ExpressionKind::Compare {
-            operator: ComparisonOperator::Greater,
-            left: Box::new(value("count")),
-            right: Box::new(Expression::new(
-                ExpressionKind::IntegerLiteral {
-                    value: 0,
-                    value_type: integer,
-                },
-                span(),
-            )),
-        },
-        span(),
-    );
-    let statement = statement_from_parts("C-int", environment, expression, 0x33);
-
-    let errors = lower_boolean_statements(&[statement], &[]).expect_err("unsupported");
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
-    assert!(errors[0].message().contains("comparison"));
 }
 
 /// FR-002-AC-2/4 and TC-003: quantification and non-Boolean data fail explicitly.
@@ -835,12 +796,12 @@ fn statement_resource_bound_is_enforced() {
 #[trace("TC-010", "FR-002-AC-2", "FR-002-AC-4", "FR-002-AC-5")]
 #[test]
 fn capability_contract_is_explicit() {
-    assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v1");
+    assert_eq!(CAPABILITY_CONTRACT.profile, "quire.smtlib2/v2");
     assert!(CAPABILITY_CONTRACT
         .exact_constructs
         .contains(&"boolean_value_reference"));
     for unsupported in [
-        "arithmetic",
+        "non_linear_arithmetic",
         "quantification",
         "record",
         "collection",

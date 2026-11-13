@@ -31,7 +31,7 @@ solver and no decision procedure of its own.
 - **Profile.** The capability contract of `src/smt.rs` ([FR-002](./FR-002-smt-lowering.md)) gains an
   integer profile, `quire.smtlib2/v2`, with SMT-LIB version 2.6. Its logic is determined by the feature set of the query: `QF_LIA` for a query
   without datatype declarations, including a Boolean-only query; a query that declares datatypes declares
-  the logic FR-020 specifies. It replaces the
+  the logic FR-020 specifies; a query that holds a bounded solver quantifier ([FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md)) declares `LIA` without datatypes and `UFDTLIA` with them. It replaces the
   Boolean-only `quire.smtlib2/v1`; every Boolean construct of FR-002 keeps its exact encoding under
   it, and a Boolean-only query declares `QF_LIA`. No query is emitted under two profiles
   and no fallback to the Boolean-only profile exists. Reports name `quire.smtlib2/v2` and the logic of the query
@@ -89,15 +89,15 @@ solver and no decision procedure of its own.
 | FR-010-AC-1 | `CAPABILITY_CONTRACT` declares profile `quire.smtlib2/v2`, logic `QF_LIA` for queries without datatypes, and lists each construct of the exact-constructs bullet as exact; no construct appears in both the exact and unsupported lists. | Test (TC-016) |
 | FR-010-AC-2 | A satisfiable fixture (for example `x >= 1` and `x + y = 10` and `y <= 4` over declared integers) lowers to a golden query that declares each symbol with sort `Int`, asserts each declared range as an unnamed assertion in the fixed block, and uses only the exact constructs; the assertion map holds the clause assertions only; the golden is byte-identical to production output. | Test (TC-016) |
 | FR-010-AC-3 | Each of the six comparisons, negation, addition, subtraction, and multiplication by a constant factor on either side lowers to the stated SMT-LIB form, and a negative literal is emitted as a negation of its magnitude. | Test (TC-016) |
-| FR-010-AC-4 | A product of two terms that each contain a value reference, a divide, a remainder, and a saturating-policy result each return `UnsupportedConstruct` naming the class and path; the status is `unsupported`; no query bytes are produced. | Test (TC-016) |
+| FR-010-AC-4 | A product of two terms that each contain a value reference, a divide, a remainder, and a saturating-policy result each return `UnsupportedConstruct` naming the class and path; the lowering returns that error, which is the `unsupported` outcome, and no query bytes are produced. | Test (TC-016) |
 | FR-010-AC-11 | A unit test over an unchecked expression (constructed directly, not an admitted fixture) whose constant fold exceeds the 128-bit signed range returns `UnsupportedConstruct` of class `constant_overflow` and produces no query. | Test (TC-016) |
 | FR-010-AC-5 | `2 * 3 * x`, `x * 6` and `(1 + 2) * x` with `x` a value reference each emit exactly `(* 6 x)`, `(* 6 x)` and `(* 3 x)`; `1 + (x + 2)` keeps its shape and folds no constant across the variable. | Test (TC-016) |
 | FR-010-AC-6 | Lowering the same model twice, and lowering it with statement and declaration order permuted, yields byte-identical queries and maps. | Test (TC-016) |
-| FR-010-AC-7 | With real solvers, a satisfiable fixture is decided `sat` and an unsatisfiable fixture (for example `x > 5` and `x < 3`) is decided `unsat` by Z3 and by cvc5, and the differential comparison reports agreement with the expected agreed status. | Test (TC-016, real solvers) |
+| FR-010-AC-7 | With real solvers, an unsatisfiable fixture (for example `x > 5` and `x < 3`) is decided `unsat` by Z3 and by cvc5 and the differential comparison reports agreement with the agreed status `refuted`; the satisfiable fixture is decided `sat` by both, its integer model stays unverified until replay exists ([FR-011](./FR-011-integer-witness-replay.md)), and the comparison is not an agreement. Agreement on the satisfiable fixture is [FR-011-AC-11](./FR-011-integer-witness-replay.md). | Test (TC-016, real solvers) |
 | FR-010-AC-8 | With controlled solver responses, `sat` against `unsat` for an integer fixture is classified as disagreement, not as a conclusion. | Test (TC-016) |
 | FR-010-AC-9 | Each Boolean fixture of TC-010 lowers to a query under `quire.smtlib2/v2` that decides the same status as before, and no Boolean-only query is emitted under `quire.smtlib2/v1`. | Test (TC-010, TC-016) |
 | FR-010-AC-10 | A declared integer range and literals at the minimum and maximum of the 128-bit signed range lower to the exact numerals with no wrap or clamp; the report for such a run names `quire.smtlib2/v2` and `QF_LIA` (no datatypes), and a report naming `quire.smtlib2/v1` or `QF_UF` is refused by validation. | Test (TC-016, TC-007) |
 
 ## Dependencies
 
-FR-002, FR-003, FR-005 and [FR-004](./FR-004-conclusions.md).
+FR-002, FR-003, FR-005, [FR-004](./FR-004-conclusions.md) and, for agreement on a satisfiable integer fixture, [FR-011](./FR-011-integer-witness-replay.md).

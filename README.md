@@ -15,7 +15,7 @@ as their own states.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
-  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans, runs a configured solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
+  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans and linear integers, runs a configured solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
 </picture>
 
 > **Status: public prerelease.** The crate is at 0.1.0, its API is not stable
@@ -45,19 +45,23 @@ a negation, so `unsat` means satisfied and `sat` is a counterexample.
 
 ## Supported constructs
 
-Queries are in SMT-LIB 2.6, logic `QF_UF`, over Boolean variables. Lowering
-accepts Boolean literals, value references, `not`, `and`, `or` (both short-circuit
-and total forms), implication, and Boolean equality and inequality. Any other
-construct is refused when the request is lowered, with a typed error naming it:
-integers, rationals, text, enums,
-records, options, collections, field access, arithmetic, ordering, quantifiers,
+Queries are in SMT-LIB 2.6, logic `QF_LIA`, under profile `quire.smtlib2/v2`.
+Lowering accepts Boolean literals, value references, `not`, `and`, `or` (both
+short-circuit and total forms), implication, and Boolean equality and inequality,
+plus linear integer arithmetic: integer literals and references, negation,
+addition, subtraction, multiplication by a constant, and the six comparisons.
+Declared integer ranges are asserted as unnamed assertions after the declarations.
+Any other construct is refused when the request is lowered, with a typed error
+naming it: non-linear products, integer division and remainder, saturating
+arithmetic, rationals, text, enums,
+records, options, collections, field access, quantifiers,
 pure function calls and local references. (The authoritative list is
 `CAPABILITY_CONTRACT` in [`src/smt.rs`](src/smt.rs).)
 
 Lowering is deterministic. The same clauses in a different order produce the
 same query bytes and the same digests, and every assertion in the query carries
 a name that maps back to the package, requirement, revision and clause it came
-from. A sample is in [`tests/golden/boolean-v1.smt2`](tests/golden/boolean-v1.smt2).
+from. A sample is in [`tests/golden/boolean-v2.smt2`](tests/golden/boolean-v2.smt2).
 
 ## Outcomes
 
@@ -66,7 +70,7 @@ Every analysis ends in one `AnalysisStatus`. Only `satisfied` and `refuted` are 
 | Status | Meaning |
 | --- | --- |
 | `satisfied` | The property holds (consistent, or the implication is valid). |
-| `refuted` | The property fails; a verified witness model is attached when the solver produced one. |
+| `refuted` | The property fails; a verified witness model is attached when the solver produced one. A satisfiable query over integers keeps its model unverified (explanation `Incomplete`) until integer witness replay exists. |
 | `unknown` | The solver answered `unknown`. |
 | `timeout` | The wall-clock limit was reached, or the run was cancelled. |
 | `unsupported` | The platform cannot run the solver adapter. |
