@@ -19,7 +19,10 @@ use std::{
     process::{Command, Stdio},
 };
 
-use common::{cycle_document, id, not_chain, Document, Sized, TempDir, AND, NOT};
+use common::{
+    cycle_document, id, integer_cycle_document, not_chain, product_document, with_identity,
+    Document, Sized, TempDir, AND, NOT,
+};
 use ix_trace_rs::trace;
 use quire_analyze::{
     lower_analysis_request, translate_analysis_claims, validate_report_document,
@@ -1025,9 +1028,19 @@ fn untranslatable() -> (Vec<u8>, String) {
     let range = document.range();
     let a = document.parameter_of(&range);
     let b = document.parameter_of(&range);
-    let less = document.application("quire.op.integer.lt", &[&a, &b], "scalar_type/boolean");
+    let quotient = document.application("quire.op.integer.add", &[&a, &b], &range);
+    let less = document.application(
+        "quire.op.integer.lt",
+        &[&quotient, &b],
+        "scalar_type/boolean",
+    );
     let claim = document.claim(&less);
-    (document.bytes(&[&claim]), less)
+    let bytes = with_identity(
+        &document.bytes(&[&claim]),
+        &quotient,
+        "quire.op.integer.div",
+    );
+    (bytes, quotient)
 }
 
 fn node_index(bytes: &[u8], label: &str) -> usize {
@@ -1349,4 +1362,131 @@ fn real_executor_and_real_solvers_give_a_conclusive_report() {
     );
     let bytes = fs::read(fixture.output()).expect("report");
     validate_report_document(&bytes).expect("valid report");
+}
+
+/// A dose bounded by a maximum, and the maximum by a weight, with the model that satisfies it;
+/// with `contradiction` the dose is also asserted to exceed the maximum. The weight product is
+/// by `1`, the form the IR admits under the reject policy (FR-012).
+fn dose_package(contradiction: bool) -> Built {
+    let boolean = "scalar_type/boolean";
+    let mut document = Document::new();
+    let range = document.range();
+    let dose = document.parameter_of(&range);
+    let max = document.parameter_of(&range);
+    let weight = document.parameter_of(&range);
+    let one = document.int_literal(&range, 1);
+    let scaled = document.int_op("quire.op.integer.mul", &[&one, &weight], &range);
+    let within = document.int_op("quire.op.integer.le", &[&dose, &max], boolean);
+    let bounded = document.int_op("quire.op.integer.le", &[&max, &scaled], boolean);
+    let mut claims = vec![document.claim(&within), document.claim(&bounded)];
+    if contradiction {
+        let above = document.int_op("quire.op.integer.gt", &[&dose, &max], boolean);
+        claims.push(document.claim(&above));
+    }
+    let labels = claims.iter().map(String::as_str).collect::<Vec<_>>();
+    let bytes = document.bytes(&labels);
+    let package = match ContractPackageWireV1::read(
+        &bytes,
+        CheckedPackageReadLimits::bounded(),
+        &Default::default(),
+    ) {
+        ContractPackageReadResult::Admitted(package) => *package,
+        other => panic!("fixture refused: {other:?}"),
+    };
+    let translation = translate_analysis_claims(&package).expect("translation");
+    let definitions = translation
+        .environment()
+        .values()
+        .iter()
+        .map(|declaration| format!("(define-fun {} () Int 0)", declaration.name().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Built {
+        model: format!("sat\n(model {definitions})\n"),
+        bytes,
+    }
+}
+
+#[trace("FR-012-AC-1")]
+#[ignore = "needs VER-82 integer witness replay"]
+#[test]
+fn a_dose_bounded_by_a_maximum_runs_end_to_end() {
+    let built = dose_package(false);
+    let fixture = Fixture::new(&built.bytes);
+    fixture.both(&built.model, &built.model);
+    let run = fixture.run();
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    let bytes = fs::read(fixture.output()).expect("report");
+    validate_report_document(&bytes).expect("report validates");
+}
+
+#[trace("FR-012-AC-2")]
+#[test]
+fn contradictory_dose_claims_are_refuted() {
+    let built = dose_package(true);
+    let fixture = Fixture::new(&built.bytes);
+    fixture.both("unsat\n", "unsat\n");
+    let run = fixture.run();
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    assert_eq!(fixture.report()["differential"]["agreedStatus"], "refuted");
+}
+
+/// FR-012-AC-8: the dose fixtures with the real executor and real Z3 and cvc5.
+#[trace("FR-012-AC-8")]
+#[ignore = "needs VER-82 integer witness replay"]
+#[test]
+fn real_solvers_agree_with_the_controlled_run_on_the_dose_fixtures() {
+    let (Some(executable), Some(z3), Some(cvc5)) = (
+        real_producer_execute(),
+        find_executable("z3"),
+        find_executable("cvc5"),
+    ) else {
+        eprintln!("skipped: engineering-assurance, z3 and cvc5 must all be on PATH");
+        return;
+    };
+    for (contradiction, code, status) in [(false, 0, "satisfied"), (true, 1, "refuted")] {
+        let built = dose_package(contradiction);
+        let fixture = Fixture::new(&built.bytes);
+        let mut arguments = fixture.with("--producer-execute", executable.clone());
+        for (option, value) in [("--z3", z3.clone()), ("--cvc5", cvc5.clone())] {
+            let position = arguments.iter().position(|a| a == option).expect("option");
+            arguments[position + 1] = value.into();
+        }
+        let run = fixture.run_with(&arguments);
+        assert_eq!(run.code, Some(code), "{}", run.stderr);
+        assert_eq!(fixture.report()["differential"]["agreedStatus"], status);
+    }
+}
+
+/// FR-012-AC-3: the non-linear, division and cycle refusals through the spawned runner.
+#[trace("FR-012-AC-3")]
+#[test]
+fn integer_refusals_exit_two_naming_the_node_through_the_runner() {
+    let mut cases: Vec<(Vec<u8>, String)> = Vec::new();
+
+    let (document, claim, product) = product_document();
+    cases.push((document.bytes(&[&claim]), product));
+
+    for name in ["div", "rem", "mod"] {
+        let (bytes, node) = untranslatable();
+        let bytes = with_identity(&bytes, &node, &format!("quire.op.integer.{name}"));
+        cases.push((bytes, node));
+    }
+
+    let (document, claim, [_, second]) = integer_cycle_document();
+    cases.push((document.bytes(&[&claim]), second));
+
+    for (bytes, label) in cases {
+        let fixture = Fixture::new(&bytes);
+        let run = fixture.run();
+        assert_eq!(run.code, Some(2), "{label}: {}", run.stderr);
+        let node = format!("semantic_graph.nodes[{}]", node_index(&bytes, &label));
+        assert!(
+            run.stderr.contains(&node),
+            "{label}: {node}: {}",
+            run.stderr
+        );
+        assert!(fixture.requests().is_empty());
+        fixture.assert_no_report();
+    }
 }
