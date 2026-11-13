@@ -615,7 +615,7 @@ dependencies = [
 [[package]]
 name = "ix-trace-rs"
 version = "0.1.2"
-source = "git+https://github.com/agent-ix/ix-trace-rs?branch=main#e29cc07f70394ff018884d12406c1e150bded5f4"
+source = "git+https://github.com/agent-ix/ix-trace-rs?branch=main#3cd3285055e32e4c08fb124d76e489b9dd412b6b"
 
 [[package]]
 name = "js-sys"
@@ -1008,7 +1008,7 @@ version = "0.1.0"
 [[package]]
 name = "quire-canonical"
 version = "0.3.0"
-source = "git+https://github.com/agent-ix/quire-canonical?branch=main#35987f1dea33edf13bdf8e6a39153a802503f5a0"
+source = "git+https://github.com/agent-ix/quire-canonical?branch=main#7d2f8389d01fcbf318e658746015b85a31526cc9"
 dependencies = [
  "quire-canonical-derive",
  "ryu-js",
@@ -1021,7 +1021,7 @@ dependencies = [
 [[package]]
 name = "quire-canonical-derive"
 version = "0.3.0"
-source = "git+https://github.com/agent-ix/quire-canonical?branch=main#35987f1dea33edf13bdf8e6a39153a802503f5a0"
+source = "git+https://github.com/agent-ix/quire-canonical?branch=main#7d2f8389d01fcbf318e658746015b85a31526cc9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1031,7 +1031,7 @@ dependencies = [
 [[package]]
 name = "quire-contract-model"
 version = "0.1.0"
-source = "git+https://github.com/agent-ix/quire-contract-ir?branch=main#4e4845ae0f05e92d7162a4659c236b9a98274a8a"
+source = "git+https://github.com/agent-ix/quire-contract-ir?branch=main#270410bb9dc572ebe2c45590ee41571dc0d8c6e2"
 dependencies = [
  "ix-trace-rs",
  "jsonschema 0.17.1",
@@ -1057,7 +1057,7 @@ dependencies = [
 [[package]]
 name = "quire-exact"
 version = "0.1.0"
-source = "git+https://github.com/agent-ix/quire-exact?branch=main#87fefede2a81d74abbd6a5a79e01d9ca7394d1ea"
+source = "git+https://github.com/agent-ix/quire-exact?branch=main#19f533e38f9a4e859b2b831606cbef348efc4816"
 dependencies = [
  "allocator-api2",
  "arrayvec",
@@ -1074,7 +1074,7 @@ dependencies = [
 [[package]]
 name = "quire-semantic-value"
 version = "0.1.0"
-source = "git+https://github.com/agent-ix/quire-semantic-value?branch=main#30c2493163cf35dd00d6dcaad63a7cbe9b2f5290"
+source = "git+https://github.com/agent-ix/quire-semantic-value?branch=main#3c4616dafd4f739573c86af049661646f24dc293"
 dependencies = [
  "quire-canonical",
  "quire-exact",
@@ -1084,7 +1084,7 @@ dependencies = [
 [[package]]
 name = "quire-verification-contracts"
 version = "0.1.0"
-source = "git+https://github.com/agent-ix/quire-verification-contracts?branch=main#5070338df68b896d4e26051123133e2cb93f4ec9"
+source = "git+https://github.com/agent-ix/quire-verification-contracts?branch=main#1bf72e68d425aa0233235883d0b6ed1139ff6cb1"
 dependencies = [
  "chrono",
  "jsonschema 0.55.1",
@@ -1101,7 +1101,7 @@ dependencies = [
 [[package]]
 name = "quire-walk"
 version = "0.1.0"
-source = "git+https://github.com/agent-ix/quire-walk?branch=main#b38a3c9b4341ece401ad1b1e2ae109f4c82bd80e"
+source = "git+https://github.com/agent-ix/quire-walk?branch=main#b48d991914a964fcd39c2fe6d67b322f2498e3c9"
 
 [[package]]
 name = "quote"
