@@ -14,19 +14,19 @@ use std::{
 };
 
 use quire_analyze::{
-    classify_analysis, compare_solver_records, execute_solver, lower_analysis_request,
-    AdapterLimits, AnalysisConclusion, AnalysisRequest, AnalysisStatus, CancellationToken,
-    DifferentialDisposition, ExplanationState, LoweringError, QueryBundle, ReplayFailureReason,
-    SolverConfig, SolverEngine, SolverOutcome, StatementInput, WitnessValue,
+    classify_analysis, compare_solver_records, execute_differential, execute_solver,
+    lower_analysis_request, AdapterLimits, AnalysisConclusion, AnalysisRequest, AnalysisStatus,
+    CancellationToken, DifferentialDisposition, ExplanationState, LoweringError, QueryBundle,
+    ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome, StatementInput, WitnessValue,
 };
 use quire_contract_model::{
-    AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator,
-    ContractPackage, DeclarationEnvironment, EnumDeclaration, EnumVariantDeclaration,
-    ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType, OverflowPolicy,
-    PackageId, RecordDeclaration, RecordFieldDeclaration, Requirement, RequirementId,
-    RequirementRef, RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity,
-    SourceLocation, SourceRevision, SourceSpan, StateObservation, SymbolName, TypeDeclaration,
-    TypedExpression, ValueDeclaration, ValueDeclarationKind, ValueType,
+    AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
+    DeclarationEnvironment, EnumDeclaration, EnumVariantDeclaration, ExecutionPoint, Expression,
+    ExpressionKind, IntegerDomain, IntegerType, OverflowPolicy, PackageId, RecordDeclaration,
+    RecordFieldDeclaration, RecordLiteralField, Requirement, RequirementId, RequirementRef,
+    RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity, SourceLocation,
+    SourceRevision, SourceSpan, StateObservation, SymbolName, TypeDeclaration, TypedExpression,
+    ValueDeclaration, ValueDeclarationKind, ValueType,
 };
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -102,27 +102,6 @@ fn field(base: Expression, name: &str) -> Expression {
     node(ExpressionKind::FieldAccess {
         base: Box::new(base),
         field: symbol(name),
-    })
-}
-
-fn record(name: &str, fields: Vec<(&str, Expression)>) -> Expression {
-    node(ExpressionKind::RecordLiteral {
-        record: symbol(name),
-        fields: fields
-            .into_iter()
-            .map(|(field, value)| RecordLiteralField::new(symbol(field), value))
-            .collect(),
-    })
-}
-
-fn none(option: ValueType) -> Expression {
-    node(ExpressionKind::OptionNone { value_type: option })
-}
-
-fn some(option: ValueType, value: Expression) -> Expression {
-    node(ExpressionKind::OptionSome {
-        value_type: option,
-        value: Box::new(value),
     })
 }
 
@@ -311,14 +290,6 @@ fn response_record_with(
     execute_solver(query, &config, &CancellationToken::default())
 }
 
-/// Both fake engines answer `response`; the run and report are checked for agreement.
-fn decide(query: &QueryBundle, response: &str) -> quire_analyze::DifferentialRun {
-    let z3 = response_record(query, response, SolverEngine::Z3);
-    let cvc5 = response_record(query, response, SolverEngine::Cvc5);
-    compare_solver_records(query, &z3, &cvc5)
-}
-
-
 fn not(operand: Expression) -> Expression {
     node(ExpressionKind::BooleanNot {
         operand: Box::new(operand),
@@ -402,7 +373,10 @@ impl Account {
 
     /// A Z3-spelled model binding the account variable to `value` under the sort `sort`.
     fn z3(&self, sort: &str, value: &str) -> String {
-        format!("sat\n(model (define-fun {} () {sort} {value}))\n", self.variable)
+        format!(
+            "sat\n(model (define-fun {} () {sort} {value}))\n",
+            self.variable
+        )
     }
 
     /// A cvc5-spelled model.
@@ -423,7 +397,10 @@ impl Account {
         assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
         assert!(conclusion.verified_model().is_none(), "{model}");
         assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
-        conclusion.replay_failure().expect("replay failure").reason()
+        conclusion
+            .replay_failure()
+            .expect("replay failure")
+            .reason()
     }
 }
 
@@ -440,20 +417,36 @@ fn nested_record_replays_from_both_spellings() {
     let cases = [
         (&present, "{active: true, limit: present(5), role: Admin}"),
         (&absent_plain, "{active: true, limit: absent, role: Admin}"),
-        (&absent_qualified, "{active: true, limit: absent, role: Admin}"),
-        (&absent_parametric, "{active: true, limit: absent, role: Admin}"),
+        (
+            &absent_qualified,
+            "{active: true, limit: absent, role: Admin}",
+        ),
+        (
+            &absent_parametric,
+            "{active: true, limit: absent, role: Admin}",
+        ),
     ];
     for (limit, expected) in cases {
         let value = account.record("true", limit, &account.admin);
         let z3 = account.conclude(&account.z3(&account.sort, &value), SolverEngine::Z3);
         let qualified = format!("(as {} {})", account.admin, account.role_sort);
         let cvc5_value = account.record("true", limit, &qualified);
-        let cvc5 = account.conclude(&account.cvc5(&account.sort, &cvc5_value), SolverEngine::Cvc5);
+        let cvc5 = account.conclude(
+            &account.cvc5(&account.sort, &cvc5_value),
+            SolverEngine::Cvc5,
+        );
         for conclusion in [&z3, &cvc5] {
-            assert_eq!(conclusion.explanation(), ExplanationState::Verified, "{limit}");
+            assert_eq!(
+                conclusion.explanation(),
+                ExplanationState::Verified,
+                "{limit}"
+            );
             let model = conclusion.verified_model().expect("verified");
             assert_eq!(model.datatype_values()[0].value().to_string(), expected);
-            assert_eq!(model.datatype_values()[0].origins(), account.query.variables()[0].origins);
+            assert_eq!(
+                model.datatype_values()[0].origins(),
+                account.query.variables()[0].origins
+            );
         }
         assert_eq!(
             z3.verified_model().expect("z3").datatype_values(),
@@ -464,12 +457,18 @@ fn nested_record_replays_from_both_spellings() {
         &account.query,
         &response_record(
             &account.query,
-            &account.z3(&account.sort, &account.record("true", &account.none, &account.admin)),
+            &account.z3(
+                &account.sort,
+                &account.record("true", &account.none, &account.admin),
+            ),
             SolverEngine::Z3,
         ),
         &response_record(
             &account.query,
-            &account.cvc5(&account.sort, &account.record("true", &account.none, &account.admin)),
+            &account.cvc5(
+                &account.sort,
+                &account.record("true", &account.none, &account.admin),
+            ),
             SolverEngine::Cvc5,
         ),
     );
@@ -484,9 +483,16 @@ fn enum_and_option_kinds_replay_alone() {
     let statements = statements(
         "kinds",
         vec![enum_type("Role", ROLES)],
-        vec![input("role", enum_ref("Role")), input("limit", option_of_integer())],
         vec![
-            compare(ComparisonOperator::Equal, var("role"), variant("Role", "Guest")),
+            input("role", enum_ref("Role")),
+            input("limit", option_of_integer()),
+        ],
+        vec![
+            compare(
+                ComparisonOperator::Equal,
+                var("role"),
+                variant("Role", "Guest"),
+            ),
             present(var("limit")),
         ],
     );
@@ -495,7 +501,10 @@ fn enum_and_option_kinds_replay_alone() {
     let enum_sort = &query.enum_sorts()[0].sort;
     let option = &query.option_sorts()[0];
     let symbols: Vec<_> = query.variables().iter().map(|v| v.symbol.clone()).collect();
-    let (role, limit) = if query.query().contains(&format!("(declare-fun {} () {enum_sort})", symbols[0])) {
+    let (role, limit) = if query
+        .query()
+        .contains(&format!("(declare-fun {} () {enum_sort})", symbols[0]))
+    {
         (&symbols[0], &symbols[1])
     } else {
         (&symbols[1], &symbols[0])
@@ -506,12 +515,18 @@ fn enum_and_option_kinds_replay_alone() {
     );
     let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
     let verified = conclusion.verified_model().expect("verified");
-    let values: Vec<_> = verified.datatype_values().iter().map(|v| v.value().clone()).collect();
+    let values: Vec<_> = verified
+        .datatype_values()
+        .iter()
+        .map(|v| v.value().clone())
+        .collect();
     assert!(values.contains(&WitnessValue::Enum {
         enumeration: "Role".to_owned(),
         variant: "Guest".to_owned()
     }));
-    assert!(values.contains(&WitnessValue::Option(Some(Box::new(WitnessValue::Integer(7))))));
+    assert!(values.contains(&WitnessValue::Option(Some(Box::new(
+        WitnessValue::Integer(7)
+    )))));
 }
 
 /// FR-021-AC-2: every kind of value that does not match its declared datatype fails replay.
@@ -538,13 +553,19 @@ fn values_that_do_not_match_the_declared_datatype_fail_replay() {
         ),
         // Wrong arity: one field too few, one too many, and an argument on a nullary constructor.
         (
-            account.z3(&account.sort, &format!("({} true {some})", account.constructor)),
+            account.z3(
+                &account.sort,
+                &format!("({} true {some})", account.constructor),
+            ),
             ReplayFailureReason::SortMismatch,
         ),
         (
             account.z3(
                 &account.sort,
-                &format!("({} true {some} {} {})", account.constructor, account.admin, account.admin),
+                &format!(
+                    "({} true {some} {} {})",
+                    account.constructor, account.admin, account.admin
+                ),
             ),
             ReplayFailureReason::SortMismatch,
         ),
@@ -557,9 +578,15 @@ fn values_that_do_not_match_the_declared_datatype_fail_replay() {
             ReplayFailureReason::SortMismatch,
         ),
         // The record bound under another sort, or qualified with another sort.
-        (account.z3("Int", &good(&some)), ReplayFailureReason::SortMismatch),
         (
-            account.z3(&account.sort, &account.record("true", &some, &format!("(as {} Int)", account.admin))),
+            account.z3("Int", &good(&some)),
+            ReplayFailureReason::SortMismatch,
+        ),
+        (
+            account.z3(
+                &account.sort,
+                &account.record("true", &some, &format!("(as {} Int)", account.admin)),
+            ),
             ReplayFailureReason::SortMismatch,
         ),
         // Scalars of the wrong sort inside the record.
@@ -568,24 +595,30 @@ fn values_that_do_not_match_the_declared_datatype_fail_replay() {
             ReplayFailureReason::SortMismatch,
         ),
         (
-            account.z3(&account.sort, &account.record("true", "(m_x true)", &account.admin)),
+            account.z3(
+                &account.sort,
+                &account.record("true", "(m_x true)", &account.admin),
+            ),
             ReplayFailureReason::ValueMalformed,
         ),
         (
-            account.z3(&account.sort, &account.record("true", &format!("({} true)", account.some), &account.admin)),
+            account.z3(
+                &account.sort,
+                &account.record("true", &format!("({} true)", account.some), &account.admin),
+            ),
             ReplayFailureReason::SortMismatch,
         ),
-        // Malformed text: a bad numeral, a nested non-constructor term and an unclosed term.
+        // Malformed text: a bad numeral and a nested non-constructor term. An unbalanced
+        // model never reaches replay: the adapter refuses it as malformed output.
         (
-            account.z3(&account.sort, &account.record("true", &format!("({} 05)", account.some), &account.admin)),
+            account.z3(
+                &account.sort,
+                &account.record("true", &format!("({} 05)", account.some), &account.admin),
+            ),
             ReplayFailureReason::ValueMalformed,
         ),
         (
             account.z3(&account.sort, &account.record("true", &some, "(())")),
-            ReplayFailureReason::ValueMalformed,
-        ),
-        (
-            account.z3(&account.sort, &format!("({} true {some} {}", account.constructor, account.admin)),
             ReplayFailureReason::ValueMalformed,
         ),
     ];
@@ -603,21 +636,46 @@ fn values_that_do_not_match_the_declared_datatype_fail_replay() {
 fn a_model_that_violates_an_assertion_is_rejected() {
     let account = Account::new();
     let some = |value: u32| format!("({} {value})", account.some);
-    let wrong_role = account.z3(&account.sort, &account.record("true", &some(5), &account.auditor));
-    let inactive = account.z3(&account.sort, &account.record("false", &some(5), &account.admin));
-    let over_limit = account.z3(&account.sort, &account.record("true", &some(11), &account.admin));
+    let wrong_role = account.z3(
+        &account.sort,
+        &account.record("true", &some(5), &account.auditor),
+    );
+    let inactive = account.z3(
+        &account.sort,
+        &account.record("false", &some(5), &account.admin),
+    );
+    let over_limit = account.z3(
+        &account.sort,
+        &account.record("true", &some(11), &account.admin),
+    );
     for model in [&wrong_role, &inactive, &over_limit] {
-        assert_eq!(account.reason(model), ReplayFailureReason::AssertionFalse, "{model}");
+        assert_eq!(
+            account.reason(model),
+            ReplayFailureReason::AssertionFalse,
+            "{model}"
+        );
     }
     let record = response_record(&account.query, &wrong_role, SolverEngine::Z3);
     let run = compare_solver_records(&account.query, &record, &record);
     assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
     // An integer part outside its declared range is out of domain even when every named
     // assertion holds.
-    let out_of_range = account.z3(&account.sort, &account.record("true", &format!("({} 101)", account.some), &account.admin));
-    assert_eq!(account.reason(&out_of_range), ReplayFailureReason::ValueOutOfDomain);
-    let negative = account.z3(&account.sort, &account.record("true", &format!("({} (- 1))", account.some), &account.admin));
-    assert_eq!(account.reason(&negative), ReplayFailureReason::ValueOutOfDomain);
+    let out_of_range = account.z3(
+        &account.sort,
+        &account.record("true", &format!("({} 101)", account.some), &account.admin),
+    );
+    assert_eq!(
+        account.reason(&out_of_range),
+        ReplayFailureReason::ValueOutOfDomain
+    );
+    let negative = account.z3(
+        &account.sort,
+        &account.record("true", &format!("({} (- 1))", account.some), &account.admin),
+    );
+    assert_eq!(
+        account.reason(&negative),
+        ReplayFailureReason::ValueOutOfDomain
+    );
 }
 
 /// FR-021-AC-5: a model that omits the datatype symbol, defines an unknown symbol, or defines the
@@ -630,17 +688,29 @@ fn omitted_unknown_and_repeated_symbols_are_not_verified() {
     let define = |symbol: &str| format!("(define-fun {symbol} () {} {value})", account.sort);
     let own = define(&account.variable);
     let wrap = |bodies: &[&str]| format!("sat\n(model {})\n", bodies.join(" "));
-    assert_eq!(account.reason(&wrap(&[])), ReplayFailureReason::SymbolMissing);
+    assert_eq!(
+        account.reason(&wrap(&[])),
+        ReplayFailureReason::SymbolMissing
+    );
     assert_eq!(
         account.reason(&wrap(&[&own, &define("not_in_the_query")])),
         ReplayFailureReason::SymbolUnknown
     );
-    assert_eq!(account.reason(&wrap(&[&own, &own])), ReplayFailureReason::SymbolRepeated);
-    assert!(account.conclude(&wrap(&[&own]), SolverEngine::Z3).verified_model().is_some());
+    assert_eq!(
+        account.reason(&wrap(&[&own, &own])),
+        ReplayFailureReason::SymbolRepeated
+    );
+    assert!(account
+        .conclude(&wrap(&[&own]), SolverEngine::Z3)
+        .verified_model()
+        .is_some());
 }
 
 /// A query with one option variable and one assertion of the given shape.
-fn guarded_query(label: &str, assertion: impl Fn(&dyn Fn() -> Expression) -> Expression) -> QueryBundle {
+fn guarded_query(
+    label: &str,
+    assertion: impl Fn(&dyn Fn() -> Expression) -> Expression,
+) -> QueryBundle {
     let limit = || var("limit");
     lower(statements(
         label,
@@ -660,9 +730,7 @@ fn guarded_unwrap_of_an_absent_option_replays_lazily() {
     let at_most_ten = |limit: &dyn Fn() -> Expression| {
         compare(ComparisonOperator::LessEqual, unwrap(limit()), number(10))
     };
-    let implication = guarded_query("imp", |limit| {
-        implies(present(limit()), at_most_ten(limit))
-    });
+    let implication = guarded_query("imp", |limit| implies(present(limit()), at_most_ten(limit)));
     let and_right = guarded_query("and", |limit| {
         not(boolean(
             BooleanOperator::ShortCircuitAnd,
@@ -685,7 +753,10 @@ fn guarded_unwrap_of_an_absent_option_replays_lazily() {
         let option = &query.option_sorts()[0];
         let variable = &query.variables()[0].symbol;
         let model = |value: String| {
-            format!("sat\n(model (define-fun {variable} () {} {value}))\n", option.sort)
+            format!(
+                "sat\n(model (define-fun {variable} () {} {value}))\n",
+                option.sort
+            )
         };
         for (value, verifies) in [
             (option.none.clone(), absent_ok),
@@ -713,15 +784,69 @@ fn over_deep_and_over_large_models_are_rejected() {
     }
     nested.push('5');
     nested.push_str(&")".repeat(depth));
-    let model = account.z3(&account.sort, &account.record("true", &nested, &account.admin));
-    assert_eq!(account.reason(&model), ReplayFailureReason::SortMismatch);
+    let model = account.z3(
+        &account.sort,
+        &account.record("true", &nested, &account.admin),
+    );
+    assert_eq!(account.reason(&model), ReplayFailureReason::ValueMalformed);
 
     let value = account.record("true", &account.none, &account.admin);
     let model = account.z3(&account.sort, &value);
-    let limits = AdapterLimits { model_bytes: 16, ..AdapterLimits::default() };
+    let limits = AdapterLimits {
+        model_bytes: 16,
+        ..AdapterLimits::default()
+    };
     let record = response_record_with(&account.query, &model, SolverEngine::Z3, limits);
     assert_eq!(record.outcome(), SolverOutcome::ModelLimit);
     let conclusion = classify_analysis(&account.query, &record);
     assert!(!conclusion.is_conclusive());
     assert!(conclusion.verified_model().is_none());
+}
+
+/// FR-021-AC-1: the models real Z3 and cvc5 print for the account, enum and option queries parse
+/// into verified typed values; run only where the solvers are installed.
+#[trace("TC-020", "FR-021-AC-1", "FR-021-AC-3")]
+#[test]
+#[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
+fn real_z3_cvc5_models_replay() {
+    let z3_path = PathBuf::from(std::env::var_os("QUIRE_Z3").expect("QUIRE_Z3 is required"));
+    let cvc5_path = PathBuf::from(std::env::var_os("QUIRE_CVC5").expect("QUIRE_CVC5 is required"));
+    let z3 = SolverConfig::new(SolverEngine::Z3, z3_path, AdapterLimits::default()).expect("z3");
+    let cvc5 =
+        SolverConfig::new(SolverEngine::Cvc5, cvc5_path, AdapterLimits::default()).expect("cvc5");
+    let token = CancellationToken::default();
+    let absent_option = lower(statements(
+        "absent",
+        vec![enum_type("Role", ROLES)],
+        vec![
+            input("role", enum_ref("Role")),
+            input("limit", option_of_integer()),
+        ],
+        vec![
+            compare(
+                ComparisonOperator::NotEqual,
+                var("role"),
+                variant("Role", "Admin"),
+            ),
+            not(present(var("limit"))),
+        ],
+    ));
+    let queries = [account_query(), absent_option];
+    for query in &queries {
+        let run = execute_differential(query, &z3, &cvc5, &token).expect("run");
+        for conclusion in [run.z3(), run.cvc5()] {
+            let failure = conclusion.replay_failure().map(ToString::to_string);
+            assert_eq!(
+                conclusion.explanation(),
+                ExplanationState::Verified,
+                "{failure:?}"
+            );
+            assert!(!conclusion
+                .verified_model()
+                .expect("model")
+                .datatype_values()
+                .is_empty());
+        }
+        assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    }
 }

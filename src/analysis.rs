@@ -894,6 +894,8 @@ pub(crate) enum ModelScalar {
 enum ModelValue {
     Scalar(ModelScalar),
     Datatype(ReplayValue),
+    /// A datatype value of a symbol the query does not declare; never read.
+    Opaque,
     /// A datatype value that fails against its declared type.
     Defect(ValueDefect),
 }
@@ -932,6 +934,10 @@ fn parse_model(
             let value = match datatypes.shape(&symbol) {
                 Some(shape) if declared.contains_key(symbol.as_str()) => {
                     take_datatype_value(&tokens, &mut cursor, shape, datatypes)?
+                }
+                None if datatypes.is_sort(&sort) => {
+                    shape(skip_model_term(&tokens, &mut cursor))?;
+                    ModelValue::Opaque
                 }
                 _ => take_model_value(&tokens, &mut cursor)?,
             };

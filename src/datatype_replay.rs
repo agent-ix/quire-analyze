@@ -220,6 +220,17 @@ impl<'a> DatatypeContext<'a> {
         }
     }
 
+    #[cfg(test)]
+    fn empty(shapes: &'a BTreeMap<String, ReplayShape>) -> Self {
+        Self {
+            shapes,
+            enums: BTreeMap::new(),
+            records: BTreeMap::new(),
+            options: BTreeMap::new(),
+            constructors: BTreeSet::new(),
+        }
+    }
+
     pub(crate) fn shape(&self, symbol: &str) -> Option<&'a ReplayShape> {
         self.shapes.get(symbol)
     }
@@ -508,5 +519,80 @@ impl DatatypeContext<'_> {
             }
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ix_trace_rs::trace;
+
+    use super::*;
+
+    fn absent_option(symbol: &str) -> ReplayAssignment {
+        let mut values = ReplayAssignment::default();
+        values
+            .datums
+            .insert(symbol.to_owned(), ReplayValue::Option(None));
+        values
+    }
+
+    fn unwrap_is_true(symbol: &str) -> ReplayExpression {
+        ReplayExpression::Datum(Box::new(ReplayDatum::Unwrap(Box::new(
+            ReplayDatum::Variable(symbol.to_owned()),
+        ))))
+    }
+
+    fn boxed(expression: ReplayExpression) -> Box<ReplayExpression> {
+        Box::new(expression)
+    }
+
+    /// FR-021-AC-7: the guarded operand of an implication, a short-circuit `and` and a
+    /// short-circuit `or` is not evaluated when the guard decides, and an `Unwrap` that is
+    /// evaluated on an absent option is a replay failure rather than a default.
+    #[trace("TC-020", "FR-021-AC-7")]
+    #[test]
+    fn unwrap_of_an_absent_option_fails_only_when_evaluated() {
+        let values = absent_option("o");
+        let unwrap = || boxed(unwrap_is_true("o"));
+        let literal = |value| boxed(ReplayExpression::Literal(value));
+        assert_eq!(
+            ReplayExpression::Implies(literal(false), unwrap()).evaluate(&values),
+            Ok(true)
+        );
+        assert_eq!(
+            ReplayExpression::And(literal(false), unwrap()).evaluate(&values),
+            Ok(false)
+        );
+        assert_eq!(
+            ReplayExpression::Or(literal(true), unwrap()).evaluate(&values),
+            Ok(true)
+        );
+        for expression in [
+            ReplayExpression::Implies(literal(true), unwrap()),
+            ReplayExpression::And(literal(true), unwrap()),
+            ReplayExpression::Or(literal(false), unwrap()),
+            *unwrap(),
+        ] {
+            assert_eq!(expression.evaluate(&values), Err(ReplayFault::AbsentOption));
+        }
+    }
+
+    /// FR-021-AC-6 and NFR-020-AC-3: a value deeper than the datatype nesting bound is rejected at
+    /// the bound, before any symbol lookup or further descent.
+    #[trace("TC-020", "FR-021-AC-6", "NFR-020-AC-3")]
+    #[test]
+    fn nesting_beyond_the_datatype_bound_is_rejected() {
+        let shapes = BTreeMap::new();
+        let context = DatatypeContext::empty(&shapes);
+        let shape = ReplayShape::Enum {
+            sort: "s".to_owned(),
+        };
+        let tokens = [ModelToken::Atom("c".to_owned())];
+        let mut cursor = 0;
+        assert_eq!(
+            context.parse_datatype(&tokens, &mut cursor, &shape, MAX_DATATYPE_DEPTH + 1),
+            Err(ValueDefect::OutOfDomain)
+        );
+        assert_eq!(cursor, 0);
     }
 }
