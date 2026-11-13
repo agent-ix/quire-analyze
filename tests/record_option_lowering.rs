@@ -695,7 +695,8 @@ fn options_with_different_integer_ranges_keep_their_own_predicates() {
         .collect();
     assert_eq!(predicates.len(), 2);
     let name = |line: &str| {
-        line.split_whitespace()
+        line.trim_start_matches("(assert (")
+            .split_whitespace()
             .next()
             .expect("predicate")
             .to_owned()
