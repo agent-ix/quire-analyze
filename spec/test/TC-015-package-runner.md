@@ -63,8 +63,9 @@ with real or stub solvers. Cases:
     count of 10,000 against 10,001, the total count over claims sharing one tree and the 61-node
     shared-subterm chain, which returns within the time of a normal run; AC-24: a node with empty
     occurrences). The `integer_range`-typed parameter as a claim body is refused as a non-Boolean claim
-    naming the claim node; an integer-typed parameter operand is made by byte-level mutation of a built
-    package.
+    naming the claim node, and an integer-typed operand of a Boolean operation is refused naming the
+    node; both are made by byte-level mutation of a built package. Integer claims are verified by
+    TC-018.
 20. The exit status `2` and the absence of a report for the refusals of case 19 (AC-23, AC-24), by
     spawning the binary over the same built packages, including the 61-node shared-subterm chain, which
     exits `2` without hanging.
