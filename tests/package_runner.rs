@@ -1408,7 +1408,7 @@ fn dose_package(contradiction: bool) -> Built {
 }
 
 #[trace("FR-012-AC-1")]
-#[ignore = "needs VER-71 lowering (PR #92) and VER-82 integer witness replay"]
+#[ignore = "needs VER-82 integer witness replay"]
 #[test]
 fn a_dose_bounded_by_a_maximum_runs_end_to_end() {
     let built = dose_package(false);
@@ -1421,7 +1421,6 @@ fn a_dose_bounded_by_a_maximum_runs_end_to_end() {
 }
 
 #[trace("FR-012-AC-2")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn contradictory_dose_claims_are_refuted() {
     let built = dose_package(true);
@@ -1434,7 +1433,7 @@ fn contradictory_dose_claims_are_refuted() {
 
 /// FR-012-AC-8: the dose fixtures with the real executor and real Z3 and cvc5.
 #[trace("FR-012-AC-8")]
-#[ignore = "needs VER-71 lowering (PR #92) and VER-82 integer witness replay"]
+#[ignore = "needs VER-82 integer witness replay"]
 #[test]
 fn real_solvers_agree_with_the_controlled_run_on_the_dose_fixtures() {
     let (Some(executable), Some(z3), Some(cvc5)) = (

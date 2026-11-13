@@ -64,7 +64,6 @@ fn operands(expression: &Expression) -> (&Expression, &Expression) {
 }
 
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn each_integer_operation_translates_to_its_expression_kind() {
     // Under the reject policy the IR admits an operation only when its result interval lies in
@@ -149,7 +148,6 @@ fn an_addition_over_a_wider_range_is_refused_by_the_ir_naming_the_claim() {
 }
 
 #[trace("FR-012-AC-9")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn a_literal_of_the_bare_integer_type_has_the_signed_128_bit_range() {
     let mut document = Document::new();
@@ -189,7 +187,6 @@ const COMPARISONS: [(&str, ComparisonOperator); 6] = [
 ];
 
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn each_integer_comparison_translates_to_its_operator() {
     for (name, expected) in COMPARISONS {
@@ -216,7 +213,6 @@ fn each_integer_comparison_translates_to_its_operator() {
 }
 
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn a_comparison_nests_under_a_boolean_operation() {
     let mut document = Document::new();
@@ -313,7 +309,6 @@ fn a_product_of_two_parameters_is_refused_at_the_product() {
 }
 
 #[trace("FR-012-AC-3")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn a_product_with_a_constant_operand_is_linear() {
     let mut document = Document::new();
@@ -358,7 +353,6 @@ fn an_integer_reference_cycle_is_refused() {
 }
 
 #[trace("FR-012-AC-5")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn integer_parameters_are_declared_once_with_their_bounds() {
     let mut document = Document::new();
@@ -397,7 +391,6 @@ fn integer_parameters_are_declared_once_with_their_bounds() {
 }
 
 #[trace("FR-012-AC-6")]
-#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn two_translations_of_the_same_integer_bytes_agree() {
     let mut document = Document::new();
