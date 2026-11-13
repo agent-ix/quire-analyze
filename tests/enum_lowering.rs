@@ -405,7 +405,7 @@ fn unsatisfiable_membership_agrees_and_reports_the_datatype_logic() {
 
 /// FR-020-AC-1 and FR-021-AC-1: a satisfiable enum model is decided sat and its model verifies
 /// in both engines' spellings; a model that violates an assertion stays unverified.
-#[trace("TC-020", "FR-020-AC-1", "FR-021-AC-1", "FR-021-AC-4")]
+#[trace("TC-020", "FR-020-AC-1", "FR-020-AC-10", "FR-021-AC-1", "FR-021-AC-4")]
 #[test]
 fn satisfiable_membership_model_is_replayed() {
     let query = lower(sat_fixture());
@@ -744,7 +744,7 @@ fn real_z3_cvc5_decide_membership_fixtures() {
 /// FR-021-AC-1: a query that declares an enum but holds only enum literals replays its Boolean
 /// variable and the literal comparison; a false model and a model without the variable do not
 /// verify.
-#[trace("TC-020", "FR-021-AC-1", "FR-021-AC-5")]
+#[trace("TC-020", "FR-020-AC-10", "FR-021-AC-1", "FR-021-AC-5")]
 #[test]
 fn literal_only_enum_query_is_replayed() {
     let statements = try_statements(

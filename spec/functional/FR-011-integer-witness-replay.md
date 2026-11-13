@@ -54,9 +54,8 @@ model, so a witness is never accepted on a solver's own word. This extends the B
   gap.
 - **Published values.** A verified integer value preserves every complete origin identity and explicit
   binding group of its symbol from the variable map, as Boolean values do.
-- **Datatype-sorted symbols.** Queries declaring datatype-sorted symbols are governed by
-  [FR-020](./FR-020-datatype-lowering.md) until FR-021 replay exists; this requirement's eight reasons
-  apply to Bool and Int symbols.
+- **Datatype-sorted symbols.** Enum, record and option symbols are replayed by
+  [FR-021](./FR-021-datatype-witness-replay.md), whose failures use this requirement's eight reasons.
 - **No in-house proving.** Replay checks one concrete assignment. It does not search for, repair or
   derive a model.
 

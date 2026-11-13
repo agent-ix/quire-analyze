@@ -45,6 +45,12 @@ untrusted external engine.
   `or` (a true left operand makes it true), without evaluating the guarded operand. An `Unwrap` that is
   evaluated on an absent option is a replay failure and the model is invalid. The evaluator never reads
   the solver's value of the `some` selector on `none`, and never substitutes a default.
+- A datatype failure is one of the eight reasons of [FR-011](./FR-011-integer-witness-replay.md):
+  `value_malformed` for text that is not a value or names a constructor no declared datatype has (an
+  abstract element included); `sort_mismatch` for a constructor of another datatype, a wrong arity or
+  a wrong qualifying or declared sort; `value_out_of_domain` for an integer part outside its declared
+  range, an integer beyond 128 bits, or a value nested beyond the datatype depth bound; and
+  `assertion_false` for a failed assertion, including an `Unwrap` evaluated on an absent option.
 - An invalid or incomplete model keeps the logical response and marks the requested counterexample
   evidence incomplete; it never fabricates a source value, never repairs a mismatched value, and
   never makes the result conclusive on the strength of a model that failed replay. The exact adapter

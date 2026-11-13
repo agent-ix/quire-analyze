@@ -521,7 +521,7 @@ fn record_fixtures_are_decided_and_reported_under_the_datatype_logic() {
 
 /// FR-020-AC-3 and FR-021-AC-1: a satisfiable record model is decided sat and replays, in both
 /// engines, to the same typed record.
-#[trace("TC-020", "FR-020-AC-3", "FR-021-AC-1")]
+#[trace("TC-020", "FR-020-AC-3", "FR-020-AC-10", "FR-021-AC-1")]
 #[test]
 fn satisfiable_record_model_is_decided_and_replayed() {
     let query = lower(record_sat_fixture());
@@ -547,7 +547,7 @@ fn satisfiable_record_model_is_decided_and_replayed() {
 
 /// FR-020-AC-3 and FR-021-AC-1: the option fixtures are decided, and a satisfiable option model
 /// replays.
-#[trace("TC-020", "FR-020-AC-3", "FR-021-AC-1")]
+#[trace("TC-020", "FR-020-AC-3", "FR-020-AC-10", "FR-021-AC-1")]
 #[test]
 fn option_fixtures_are_decided_and_models_replay() {
     let query = lower(option_unsat_fixture());
@@ -588,7 +588,7 @@ fn option_fixtures_are_decided_and_models_replay() {
 
 /// FR-021-AC-1: a query holding only record or option literals replays its Boolean variable
 /// through the literals.
-#[trace("TC-020", "FR-021-AC-1")]
+#[trace("TC-020", "FR-020-AC-10", "FR-021-AC-1")]
 #[test]
 fn literal_only_record_and_option_queries_are_replayed() {
     let option = option_of_integer();

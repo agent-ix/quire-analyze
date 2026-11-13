@@ -23,10 +23,10 @@ use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
     DeclarationEnvironment, EnumDeclaration, EnumVariantDeclaration, ExecutionPoint, Expression,
     ExpressionKind, IntegerDomain, IntegerType, OverflowPolicy, PackageId, RecordDeclaration,
-    RecordFieldDeclaration, RecordLiteralField, Requirement, RequirementId, RequirementRef,
-    RequirementRevision, SchemaVersion, SourceDocumentId, SourceIdentity, SourceLocation,
-    SourceRevision, SourceSpan, StateObservation, SymbolName, TypeDeclaration, TypedExpression,
-    ValueDeclaration, ValueDeclarationKind, ValueType,
+    RecordFieldDeclaration, Requirement, RequirementId, RequirementRef, RequirementRevision,
+    SchemaVersion, SourceDocumentId, SourceIdentity, SourceLocation, SourceRevision, SourceSpan,
+    StateObservation, SymbolName, TypeDeclaration, TypedExpression, ValueDeclaration,
+    ValueDeclarationKind, ValueType,
 };
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -848,5 +848,30 @@ fn real_z3_cvc5_models_replay() {
                 .is_empty());
         }
         assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    }
+}
+
+/// FR-021-AC-1: model text as real Z3 prints it (no `model` keyword, one definition split over
+/// lines) and as real cvc5 prints it replays to the same typed value.
+#[trace("TC-020", "FR-021-AC-1")]
+#[test]
+fn recorded_real_solver_layouts_replay() {
+    let account = Account::new();
+    let value = account.record("true", &format!("({} 2)", account.some), &account.admin);
+    let z3 = format!(
+        "sat\n(\n  (define-fun {} () {}\n    {value})\n)\n",
+        account.variable, account.sort
+    );
+    let cvc5 = format!(
+        "sat\n(\n(define-fun {} () {} {value})\n)\n",
+        account.variable, account.sort
+    );
+    for (model, engine) in [(z3, SolverEngine::Z3), (cvc5, SolverEngine::Cvc5)] {
+        let conclusion = account.conclude(&model, engine);
+        assert_eq!(
+            conclusion.explanation(),
+            ExplanationState::Verified,
+            "{model}"
+        );
     }
 }
