@@ -11,10 +11,11 @@ use std::{
 };
 
 use quire_analyze::{
-    compare_solver_records, execute_solver, lower_analysis_request, lower_boolean_statements,
-    render_differential_report, validate_differential_report, validate_report_document,
-    AdapterLimits, AnalysisRequest, CancellationToken, DifferentialDisposition, LoweringErrorCode,
-    QueryBundle, SolverConfig, SolverEngine, StatementInput, UnsupportedClass, CAPABILITY_CONTRACT,
+    classify_analysis, compare_solver_records, execute_solver, lower_analysis_request,
+    lower_boolean_statements, render_differential_report, validate_differential_report,
+    validate_report_document, AdapterLimits, AnalysisRequest, AnalysisStatus, CancellationToken,
+    DifferentialDisposition, ExplanationState, LoweringErrorCode, QueryBundle, ReplayFailureReason,
+    SolverConfig, SolverEngine, StatementInput, UnsupportedClass, CAPABILITY_CONTRACT,
     SMTLIB2_PROFILE,
 };
 use quire_contract_model::{
@@ -142,6 +143,16 @@ fn try_statement(
     variables: &[(&str, IntegerType)],
     expression: Expression,
 ) -> Result<StatementInput, String> {
+    try_mixed_statement(label, variables, &[], expression)
+}
+
+/// Like `try_statement`, with additional Boolean inputs.
+fn try_mixed_statement(
+    label: &str,
+    variables: &[(&str, IntegerType)],
+    booleans: &[&str],
+    expression: Expression,
+) -> Result<StatementInput, String> {
     let package_id = PackageId::new("agent-ix/integer-test").expect("package");
     let requirement_id = RequirementId::new(format!("REQ-{label}")).expect("requirement");
     let revision = RequirementRevision::new(1).expect("revision");
@@ -158,6 +169,14 @@ fn try_statement(
                 span(),
             )
         })
+        .chain(booleans.iter().map(|name| {
+            ValueDeclaration::new(
+                SymbolName::new(*name).expect("symbol"),
+                ValueDeclarationKind::Input,
+                ValueType::Boolean,
+                span(),
+            )
+        }))
         .collect();
     let environment =
         DeclarationEnvironment::new(owner, vec![], declarations, vec![]).expect("environment");
@@ -286,6 +305,15 @@ fn response_record(
     response: &str,
     engine: SolverEngine,
 ) -> quire_analyze::SolverRecord {
+    response_record_with(query, response, engine, AdapterLimits::default())
+}
+
+fn response_record_with(
+    query: &QueryBundle,
+    response: &str,
+    engine: SolverEngine,
+    limits: AdapterLimits,
+) -> quire_analyze::SolverRecord {
     let directory = TempDirectory::new("response");
     let path = directory.path().join("solver");
     let body = format!(
@@ -295,7 +323,7 @@ fn response_record(
     let mut permissions = fs::metadata(&path).expect("metadata").permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&path, permissions).expect("executable");
-    let config = SolverConfig::new(engine, &path, AdapterLimits::default()).expect("config");
+    let config = SolverConfig::new(engine, &path, limits).expect("config");
     execute_solver(query, &config, &CancellationToken::default())
 }
 
@@ -642,7 +670,7 @@ fn sat_against_unsat_is_a_disagreement() {
 }
 
 /// FR-010-AC-10 (controlled responses): an unsat integer run agrees and its report names the
-/// integer profile and logic; a satisfiable integer model is never verified before FR-011 replay.
+/// integer profile and logic; a satisfiable integer model that fails replay stays unverified.
 #[trace("TC-016", "FR-010-AC-10")]
 #[test]
 fn unsat_fixture_agrees_and_integer_models_stay_unverified() {
@@ -701,8 +729,9 @@ fn reports_naming_the_boolean_only_profile_are_refused() {
     }
 }
 
-/// FR-010-AC-7: real solvers agree on the unsat fixture and both answer sat on the sat fixture.
-#[trace("TC-016", "FR-010-AC-7")]
+/// FR-010-AC-7 and FR-011-AC-1/11: real solvers agree on the unsat fixture, both answer sat on
+/// the sat fixture, and each returned model replay-verifies.
+#[trace("TC-016", "TC-017", "FR-010-AC-7", "FR-011-AC-1", "FR-011-AC-11")]
 #[test]
 #[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
 fn real_z3_cvc5_decide_integer_fixtures_identically() {
@@ -728,8 +757,7 @@ fn real_z3_cvc5_decide_integer_fixtures_identically() {
     let report = render_differential_report(&query, &run).expect("report");
     validate_differential_report(&report, &query, &run).expect("valid");
 
-    // Both engines answer sat, but integer models are not replayed until FR-011, so the
-    // models stay unverified and the comparison is not an agreement.
+    // Both engines answer sat and each returned model replays against every assertion.
     let (_, run) = run_for(sat_fixture());
     for conclusion in [run.z3(), run.cvc5()] {
         assert_eq!(
@@ -738,10 +766,432 @@ fn real_z3_cvc5_decide_integer_fixtures_identically() {
         );
         assert_eq!(
             conclusion.explanation(),
-            quire_analyze::ExplanationState::Incomplete
+            quire_analyze::ExplanationState::Verified
         );
-        assert!(conclusion.verified_model().is_none());
+        assert_eq!(
+            conclusion
+                .verified_model()
+                .expect("model")
+                .integer_values()
+                .len(),
+            2
+        );
     }
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(
+        run.agreed_status(),
+        Some(quire_analyze::AnalysisStatus::Satisfied)
+    );
+}
+
+/// The query symbol declared for the value named `name`; origins end in `|name|point|digest`.
+fn symbol_of(query: &QueryBundle, name: &str) -> String {
+    query
+        .variables()
+        .iter()
+        .find(|variable| variable.origins[0].split('|').nth(5) == Some(name))
+        .expect("declared variable")
+        .symbol
+        .clone()
+}
+
+/// A fixture whose only constraint is `x >= -5`, over `x` declared in `[-5, 5]`.
+fn bounded_query() -> QueryBundle {
+    let ty = integer_type(-5, 5, OverflowPolicy::Reject);
+    let bounded = statement(
+        "bounded",
+        &[("x", ty.clone())],
+        compare(ComparisonOperator::GreaterEqual, var("x"), lit(-5, &ty)),
+    );
+    let request = AnalysisRequest::consistency(vec![], vec![bounded], vec![]).expect("request");
+    lower_analysis_request(&request).expect("lower")
+}
+
+fn z3_model(definitions: &[String]) -> String {
+    format!("sat\n(model {})\n", definitions.join(" "))
+}
+
+fn cvc5_model(definitions: &[String]) -> String {
+    format!("sat\n({})\n", definitions.join(" "))
+}
+
+fn define(symbol: &str, sort: &str, value: &str) -> String {
+    format!("(define-fun {symbol} () {sort} {value})")
+}
+
+/// Classifies a `sat` response and asserts the FR-011-AC-8 contract: the logical status and
+/// adapter outcome stay `sat`/`satisfied` and the evidence is incomplete, never verified.
+fn assert_replay_fails(
+    query: &QueryBundle,
+    response: &str,
+    reason: ReplayFailureReason,
+    subject: Option<&str>,
+) {
+    let record = response_record(query, response, SolverEngine::Z3);
+    assert_eq!(record.outcome(), quire_analyze::SolverOutcome::Sat);
+    let conclusion = classify_analysis(query, &record);
+    assert_eq!(conclusion.status(), AnalysisStatus::Satisfied, "{response}");
+    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+    assert!(conclusion.verified_model().is_none());
+    let failure = conclusion.replay_failure().expect("typed failure");
+    assert_eq!(failure.reason(), reason, "{response}");
+    assert_eq!(failure.subject(), subject, "{response}");
+    assert!(conclusion
+        .diagnostic()
+        .expect("diagnostic")
+        .starts_with(reason.as_str()));
+}
+
+fn assert_replay_verifies(query: &QueryBundle, response: &str, engine: SolverEngine) {
+    let record = response_record(query, response, engine);
+    let conclusion = classify_analysis(query, &record);
+    assert_eq!(
+        conclusion.explanation(),
+        ExplanationState::Verified,
+        "{response}"
+    );
+    assert!(conclusion.replay_failure().is_none());
+}
+
+/// FR-011-AC-1 and AC-2 (recorded model texts): each solver's spelling, negative values and echoed
+/// aliases verify, and the published witness lists every integer value with its origins.
+#[trace("TC-017", "FR-011-AC-1", "FR-011-AC-2")]
+#[test]
+fn recorded_models_in_both_formats_verify_and_publish_values() {
+    let request = AnalysisRequest::consistency(vec![], sat_fixture(), vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, y) = (symbol_of(&query, "x"), symbol_of(&query, "y"));
+    let alias = query.assertions()[0].name.clone();
+    for (engine, response, expected) in [
+        (
+            SolverEngine::Z3,
+            z3_model(&[
+                define(&x, "Int", "7"),
+                define(&y, "Int", "3"),
+                define(&alias, "Bool", "true"),
+            ]),
+            (7, 3),
+        ),
+        (
+            SolverEngine::Cvc5,
+            cvc5_model(&[define(&x, "Int", "14"), define(&y, "Int", "(- 4)")]),
+            (14, -4),
+        ),
+    ] {
+        let record = response_record(&query, &response, engine);
+        let conclusion = classify_analysis(&query, &record);
+        assert_eq!(
+            conclusion.explanation(),
+            ExplanationState::Verified,
+            "{response}"
+        );
+        let model = conclusion.verified_model().expect("verified model");
+        assert_eq!(model.replayed_assertions().len(), 1);
+        let published: Vec<_> = model
+            .integer_values()
+            .iter()
+            .map(|value| (value.symbol().to_owned(), value.value()))
+            .collect();
+        let mut expected_values = vec![(x.clone(), expected.0), (y.clone(), expected.1)];
+        expected_values.sort();
+        assert_eq!(published, expected_values);
+        assert!(model.values().is_empty());
+        assert!(model
+            .integer_values()
+            .iter()
+            .all(|value| value.origins().len() == 1));
+    }
+}
+
+/// FR-011-AC-2: Boolean and integer symbols mix in one model; each keeps its own sort.
+#[trace("TC-017", "FR-011-AC-2")]
+#[test]
+fn boolean_and_integer_symbols_mix_in_one_model() {
+    let ty = narrow();
+    let request = AnalysisRequest::consistency(
+        vec![],
+        vec![try_mixed_statement(
+            "mixed",
+            &[("x", ty.clone())],
+            &["flag"],
+            and(
+                var("flag"),
+                compare(ComparisonOperator::GreaterEqual, var("x"), lit(0, &ty)),
+            ),
+        )
+        .expect("statement")],
+        vec![],
+    )
+    .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, flag) = (symbol_of(&query, "x"), symbol_of(&query, "flag"));
+    let ok = [define(&x, "Int", "4"), define(&flag, "Bool", "true")];
+    let record = response_record(&query, &z3_model(&ok), SolverEngine::Z3);
+    let conclusion = classify_analysis(&query, &record);
+    let model = conclusion.verified_model().expect("verified model");
+    assert_eq!(model.integer_values()[0].value(), 4);
+    assert!(model.values()[0].value());
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "4"), define(&flag, "Bool", "false")]),
+        ReplayFailureReason::AssertionFalse,
+        Some(&query.assertions()[0].name),
+    );
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "4"), define(&flag, "Int", "1")]),
+        ReplayFailureReason::SortMismatch,
+        Some(&flag),
+    );
+}
+
+/// FR-011-AC-3: a model that falsifies the assertion is incomplete, naming that assertion.
+#[trace("TC-017", "FR-011-AC-3", "FR-011-AC-8")]
+#[test]
+fn a_false_assertion_is_reported_incomplete() {
+    let request = AnalysisRequest::consistency(vec![], sat_fixture(), vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, y) = (symbol_of(&query, "x"), symbol_of(&query, "y"));
+    let name = query.assertions()[0].name.clone();
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "1"), define(&y, "Int", "1")]),
+        ReplayFailureReason::AssertionFalse,
+        Some(&name),
+    );
+}
+
+/// FR-011-AC-4 and AC-8: missing, unknown, repeated and mis-sorted symbols.
+#[trace("TC-017", "FR-011-AC-4", "FR-011-AC-8")]
+#[test]
+fn symbol_set_defects_have_their_reasons() {
+    let request = AnalysisRequest::consistency(vec![], sat_fixture(), vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, y) = (symbol_of(&query, "x"), symbol_of(&query, "y"));
+    let ok = [define(&x, "Int", "7"), define(&y, "Int", "3")];
+    assert_replay_fails(
+        &query,
+        &z3_model(&ok[..1]),
+        ReplayFailureReason::SymbolMissing,
+        Some(&y),
+    );
+    let mut unknown = ok.to_vec();
+    unknown.push(define("extra", "Int", "1"));
+    assert_replay_fails(
+        &query,
+        &z3_model(&unknown),
+        ReplayFailureReason::SymbolUnknown,
+        Some("extra"),
+    );
+    let mut repeated = ok.to_vec();
+    repeated.push(define(&x, "Int", "7"));
+    assert_replay_fails(
+        &query,
+        &z3_model(&repeated),
+        ReplayFailureReason::SymbolRepeated,
+        Some(&x),
+    );
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Bool", "true"), define(&y, "Int", "3")]),
+        ReplayFailureReason::SortMismatch,
+        Some(&x),
+    );
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "true"), define(&y, "Int", "3")]),
+        ReplayFailureReason::SortMismatch,
+        Some(&x),
+    );
+    assert_replay_verifies(&query, &z3_model(&ok), SolverEngine::Z3);
+}
+
+/// FR-011-AC-5: one outside each bound fails; each bound itself verifies.
+#[trace("TC-017", "FR-011-AC-5", "FR-011-AC-8")]
+#[test]
+fn declared_bounds_are_checked_directly() {
+    let query = bounded_query();
+    let x = only_symbol(&query).to_owned();
+    for (value, reason) in [
+        ("6", Some(ReplayFailureReason::ValueOutOfDomain)),
+        ("(- 6)", Some(ReplayFailureReason::ValueOutOfDomain)),
+        ("5", None),
+        ("(- 5)", None),
+    ] {
+        let response = z3_model(&[define(&x, "Int", value)]);
+        match reason {
+            Some(reason) => assert_replay_fails(&query, &response, reason, Some(&x)),
+            None => assert_replay_verifies(&query, &response, SolverEngine::Z3),
+        }
+    }
+}
+
+/// FR-011-AC-6: malformed numerals and the numeral boundary, without a panic.
+#[trace("TC-017", "FR-011-AC-6", "FR-011-AC-8")]
+#[test]
+fn malformed_and_oversized_numerals_are_typed_failures() {
+    let query = bounded_query();
+    let x = only_symbol(&query).to_owned();
+    let long = "1".repeat(1025);
+    for (sort, value) in [
+        ("Int", "1.5"),
+        ("Real", "1.0"),
+        ("Int", "1e3"),
+        ("Int", long.as_str()),
+    ] {
+        assert_replay_fails(
+            &query,
+            &z3_model(&[define(&x, sort, value)]),
+            ReplayFailureReason::ValueMalformed,
+            Some(&x),
+        );
+    }
+    let at_limit = format!("1{}", "0".repeat(1023));
+    let two_127 = (1u128 << 127).to_string();
+    for value in [at_limit.as_str(), two_127.as_str()] {
+        assert_replay_fails(
+            &query,
+            &z3_model(&[define(&x, "Int", value)]),
+            ReplayFailureReason::ValueOutOfDomain,
+            Some(&x),
+        );
+    }
+}
+
+/// FR-011-AC-10: the reason precedence over combined defects.
+#[trace("TC-017", "FR-011-AC-10")]
+#[test]
+fn combined_defects_report_the_first_reason() {
+    let request = AnalysisRequest::consistency(vec![], sat_fixture(), vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, y) = (symbol_of(&query, "x"), symbol_of(&query, "y"));
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "1.5")]),
+        ReplayFailureReason::ValueMalformed,
+        Some(&x),
+    );
+    // out of domain and a false assertion
+    assert_replay_fails(
+        &query,
+        &z3_model(&[define(&x, "Int", "1001"), define(&y, "Int", "1")]),
+        ReplayFailureReason::ValueOutOfDomain,
+        Some(&x),
+    );
+}
+
+/// FR-011-AC-11 (recorded models): both engines' replay-verified models agree, status satisfied.
+#[trace("TC-017", "FR-011-AC-11")]
+#[test]
+fn replay_verified_models_agree() {
+    let request = AnalysisRequest::consistency(vec![], sat_fixture(), vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let (x, y) = (symbol_of(&query, "x"), symbol_of(&query, "y"));
+    let z3 = response_record(
+        &query,
+        &z3_model(&[define(&x, "Int", "7"), define(&y, "Int", "3")]),
+        SolverEngine::Z3,
+    );
+    let cvc5 = response_record(
+        &query,
+        &cvc5_model(&[define(&x, "Int", "14"), define(&y, "Int", "(- 4)")]),
+        SolverEngine::Cvc5,
+    );
+    let run = compare_solver_records(&query, &z3, &cvc5);
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(run.agreed_status(), Some(AnalysisStatus::Satisfied));
+    let report = render_differential_report(&query, &run).expect("report");
+    validate_differential_report(&report, &query, &run).expect("valid");
+
+    let bad = response_record(
+        &query,
+        &cvc5_model(&[define(&x, "Int", "1"), define(&y, "Int", "1")]),
+        SolverEngine::Cvc5,
+    );
+    let run = compare_solver_records(&query, &z3, &bad);
     assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
-    assert_eq!(run.agreed_status(), None);
+}
+
+/// FR-011-AC-7 (no admitted fixture overflows): a guard in the left operand of an implication
+/// protects `x + 1`, so the correct model `x = MAX` verifies instead of overflowing.
+#[trace("TC-017", "FR-011-AC-7", "NFR-004-AC-2")]
+#[test]
+fn guarded_arithmetic_at_the_extreme_replays_without_overflow() {
+    let full = integer_type(i128::MIN, i128::MAX, OverflowPolicy::Reject);
+    let guarded_statement = statement(
+        "guarded",
+        &[("x", full.clone())],
+        node(ExpressionKind::Boolean {
+            operator: BooleanOperator::Implication,
+            left: Box::new(compare(
+                ComparisonOperator::Less,
+                var("x"),
+                lit(i128::MAX, &full),
+            )),
+            right: Box::new(compare(
+                ComparisonOperator::Greater,
+                add(var("x"), lit(1, &full)),
+                var("x"),
+            )),
+        }),
+    );
+    let request =
+        AnalysisRequest::consistency(vec![], vec![guarded_statement], vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let x = only_symbol(&query).to_owned();
+    assert_replay_verifies(
+        &query,
+        &z3_model(&[define(&x, "Int", &i128::MAX.to_string())]),
+        SolverEngine::Z3,
+    );
+    assert_replay_verifies(
+        &query,
+        &cvc5_model(&[define(&x, "Int", &format!("(- {})", 1u128 << 127))]),
+        SolverEngine::Cvc5,
+    );
+}
+
+/// FR-011 (model shape): a text that is not a sequence of `define-fun` entries is
+/// `value_malformed` and names no symbol.
+#[trace("TC-017", "FR-011-AC-6", "FR-011-AC-8")]
+#[test]
+fn an_unreadable_model_text_is_malformed_and_names_no_symbol() {
+    let query = bounded_query();
+    for response in [
+        "sat\n(model (assert true))\n",
+        "sat\n(model (define-fun x))\n",
+    ] {
+        assert_replay_fails(&query, response, ReplayFailureReason::ValueMalformed, None);
+    }
+}
+
+/// NFR-004-AC-3: an integer model above the parsed-model ceiling is a non-conclusive adapter
+/// outcome, never a verified witness.
+#[trace("TC-017", "NFR-004-AC-3")]
+#[test]
+fn an_integer_model_above_the_model_ceiling_is_not_conclusive() {
+    let query = bounded_query();
+    let x = only_symbol(&query).to_owned();
+    let response = z3_model(&[define(&x, "Int", "5")]);
+    let limits = AdapterLimits {
+        model_bytes: 64,
+        ..AdapterLimits::default()
+    };
+    assert!(response.len() > 64);
+    let record = response_record_with(&query, &response, SolverEngine::Z3, limits);
+    assert_eq!(record.outcome(), quire_analyze::SolverOutcome::ModelLimit);
+    let conclusion = classify_analysis(&query, &record);
+    assert!(!conclusion.is_conclusive());
+    assert_eq!(conclusion.status(), AnalysisStatus::ToolError);
+    assert!(conclusion.verified_model().is_none());
+    let within = response_record_with(
+        &query,
+        &response,
+        SolverEngine::Z3,
+        AdapterLimits {
+            model_bytes: 4096,
+            ..AdapterLimits::default()
+        },
+    );
+    assert_eq!(within.outcome(), quire_analyze::SolverOutcome::Sat);
 }

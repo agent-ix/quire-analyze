@@ -15,7 +15,8 @@ use quire_analyze::{
     lower_boolean_statements, render_differential_report, validate_differential_report,
     validate_report_document, AdapterLimits, AnalysisRequest, AnalysisStatus, CancellationToken,
     DifferentialDisposition, ExplanationState, LoweringError, LoweringErrorCode, QueryBundle,
-    SolverConfig, SolverEngine, SolverOutcome, StatementInput, CAPABILITY_CONTRACT,
+    ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome, StatementInput,
+    CAPABILITY_CONTRACT,
 };
 use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
@@ -426,6 +427,9 @@ fn satisfiable_membership_is_decided_but_its_model_stays_unverified() {
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
     assert!(conclusion.verified_model().is_none());
     assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+    let failure = conclusion.replay_failure().expect("replay failure");
+    assert_eq!(failure.reason(), ReplayFailureReason::SortNotReplayable);
+    assert_eq!(failure.subject(), Some(variable.as_str()));
 }
 
 /// FR-020-AC-9: a report naming v1, `QF_UF`, or a logic the feature set does not require is
