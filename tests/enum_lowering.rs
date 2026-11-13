@@ -407,7 +407,7 @@ fn unsatisfiable_membership_agrees_and_reports_the_datatype_logic() {
 
 /// FR-020-AC-1 and FR-021: a satisfiable enum model is decided sat but stays unverified until
 /// enum witness replay exists.
-#[trace("TC-020", "FR-020-AC-1")]
+#[trace("TC-020", "FR-020-AC-1", "FR-020-AC-10")]
 #[test]
 fn satisfiable_membership_is_decided_but_its_model_stays_unverified() {
     let query = lower(sat_fixture());
