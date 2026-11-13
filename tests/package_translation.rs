@@ -302,22 +302,6 @@ fn an_integer_operation_is_refused_at_its_node() {
     assert_refused_at(&package, &error, TranslationErrorKind::CannotLower, &less);
 }
 
-/// `not` applied `depth` times over a Boolean parameter; returns the claim and the
-/// innermost `not`, whose `ValueReference` operand sits at tree depth `depth + 1`.
-fn not_chain(document: &mut Document, depth: usize) -> (String, String) {
-    let p = document.parameter();
-    let mut innermost = document.op(NOT, &[&p]);
-    let mut top = innermost.clone();
-    for _ in 1..depth {
-        top = document.op(NOT, &[&top]);
-    }
-    if depth == 0 {
-        innermost = p.clone();
-        top = p;
-    }
-    (document.claim(&top), innermost)
-}
-
 #[trace("FR-009-AC-23")]
 #[test]
 fn the_depth_bound_is_128_against_129() {
@@ -334,45 +318,6 @@ fn the_depth_bound_is_128_against_129() {
         TranslationErrorKind::ExpressionDepthBound,
         &innermost,
     );
-}
-
-/// Shared `and` chains: `chains[k]` expands to `2^(k+1) - 1` `Expression` nodes.
-struct Sized {
-    parameter: String,
-    chains: Vec<String>,
-}
-
-impl Sized {
-    fn new(document: &mut Document) -> Self {
-        let parameter = document.parameter();
-        Self {
-            chains: vec![parameter.clone()],
-            parameter,
-        }
-    }
-
-    /// A node whose translation has exactly `size` `Expression` nodes.
-    fn node(&mut self, document: &mut Document, size: usize) -> String {
-        if size == 1 {
-            return self.parameter.clone();
-        }
-        if size.is_multiple_of(2) {
-            let inner = self.node(document, size - 1);
-            return document.op(NOT, &[&inner]);
-        }
-        let mut level = 0;
-        while (1_usize << (level + 2)) - 1 < size {
-            level += 1;
-        }
-        while self.chains.len() <= level {
-            let last = self.chains[self.chains.len() - 1].clone();
-            self.chains.push(document.op(AND, &[&last, &last]));
-        }
-        let largest = (1_usize << (level + 1)) - 1;
-        let rest = self.node(document, size - 1 - largest);
-        let chain = self.chains[level].clone();
-        document.op(AND, &[&chain, &rest])
-    }
 }
 
 #[trace("FR-009-AC-23")]
@@ -507,31 +452,7 @@ fn a_reference_to_another_claim_is_refused_at_the_claim() {
 #[trace("FR-009-AC-23")]
 #[test]
 fn a_reference_cycle_is_refused() {
-    let mut document = Document::new();
-    let p = document.parameter();
-    let first = document.op(AND, &[&p, &p]);
-    let second = document.op(AND, &[&first, &p]);
-    // `first = and(second, p)` closes the loop `first -> second -> first`.
-    document.set_body(
-        &first,
-        json!({
-            "term": "application",
-            "operator": "binary",
-            "operation": {"identity": AND, "laws": [], "mode": null, "member": null, "leaves": []},
-            "result_type": id("scalar_type/boolean"),
-            "arguments": [reference(&second), reference(&p)],
-        }),
-        &[&second, &p],
-    );
-    for label in [&first, &second] {
-        let node = document
-            .nodes
-            .iter_mut()
-            .find(|node| node["node_id"] == id(label))
-            .expect("node");
-        node["recursion_group"] = json!("loop");
-    }
-    let claim = document.claim(&second);
+    let (document, claim, [first, second]) = cycle_document();
     let (package, error) = refusal(&document, &[&claim]);
     assert_eq!(error.kind(), TranslationErrorKind::CannotLower, "{error}");
     assert!(error.message().contains("cycle"), "{error}");

@@ -10,6 +10,7 @@ mod common;
 use std::{
     ffi::OsString,
     fs,
+    io::Write,
     os::unix::{
         ffi::OsStringExt,
         fs::{symlink, PermissionsExt},
@@ -18,7 +19,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use common::{Document, TempDir, AND, NOT};
+use common::{cycle_document, id, not_chain, Document, Sized, TempDir, AND, NOT};
 use ix_trace_rs::trace;
 use quire_analyze::{
     lower_analysis_request, translate_analysis_claims, validate_report_document,
@@ -52,6 +53,10 @@ stat -c %a "$root" >> "$D/modes.log"
 if [ "$kind" = query ]; then cp "$root/query.smt2" "$D/$eng.staged"; fi
 f="$D/$eng.$kind"
 if [ -f "$f.signal" ]; then kill -KILL $$; fi
+if [ -f "$D/undeletable" ] && [ ! -e "$root/locked" ]; then
+  mkdir -p "$root/locked"; : > "$root/locked/entry"; chmod 000 "$root/locked"
+fi
+if [ -f "$f.flood" ]; then yes aaaaaaaaaaaaaaa | head -c 70000000; exit 0; fi
 if [ -f "$f" ]; then
   while IFS= read -r l || [ -n "$l" ]; do printf '%s\n' "$l"; done < "$f"
 fi
@@ -225,6 +230,21 @@ impl Fixture {
         self.answer_all(&answers(z3, cvc5));
     }
 
+    /// Change the `producer-execute` execution time every scripted answer reports.
+    fn retime(&self, from_nanos: u64, to_nanos: u64) {
+        for entry in fs::read_dir(self.path("stub/data")).expect("data") {
+            let path = entry.expect("entry").path();
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let from = format!("\"executionNanos\":{from_nanos}");
+            if text.contains(&from) {
+                let to = format!("\"executionNanos\":{to_nanos}");
+                fs::write(&path, text.replace(&from, &to)).expect("retime");
+            }
+        }
+    }
+
     fn arguments(&self) -> Vec<OsString> {
         let pairs: [(&str, &Path); 5] = [
             ("--package", &self.package),
@@ -325,6 +345,30 @@ fn finish(mut command: Command) -> Run {
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
+}
+
+/// Set every `elapsedMs` field to `0`: the one field FR-009 excludes from determinism.
+fn zero_elapsed(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if key == "elapsedMs" {
+                    *entry = json!(0);
+                } else {
+                    zero_elapsed(entry);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(zero_elapsed),
+        _ => {}
+    }
+}
+
+/// The report bytes parsed with every `elapsedMs` set to `0`.
+fn normalised(bytes: &[u8]) -> Value {
+    let mut value: Value = serde_json::from_slice(bytes).expect("report json");
+    zero_elapsed(&mut value);
+    value
 }
 
 fn answers<'a>(z3: &str, cvc5: &str) -> Vec<(&'a str, &'a str, String)> {
@@ -716,6 +760,13 @@ fn refused_packages_exit_two_without_a_report() {
         let run = fixture.run();
         assert_eq!(run.code, Some(2), "{label}: {}", run.stderr);
         assert!(run.stderr.contains("--package"), "{label}: {}", run.stderr);
+        if label == "dependency" {
+            assert!(
+                run.stderr.contains("dependency_selections"),
+                "{label}: {}",
+                run.stderr
+            );
+        }
         assert!(fixture.requests().is_empty(), "{label}");
         fixture.assert_no_report();
     }
@@ -737,6 +788,8 @@ fn a_document_at_the_limit_is_not_refused_for_size() {
     let run = fixture.run();
     assert_eq!(run.code, Some(2), "{}", run.stderr);
     assert!(!run.stderr.contains("read limit"), "{}", run.stderr);
+    // The reader got past the size check and refused the padding as non-canonical.
+    assert!(run.stderr.contains("NoncanonicalWire"), "{}", run.stderr);
     padded.push(b' ');
     let fixture = Fixture::new(&padded);
     let run = fixture.run();
@@ -836,7 +889,7 @@ fn a_bad_destination_exits_four_and_keeps_existing_bytes() {
     fs::set_permissions(&out, fs::Permissions::from_mode(0o700)).expect("restore");
 }
 
-#[trace("FR-009-AC-11", "FR-009-AC-12", "FR-009-AC-26")]
+#[trace("FR-009-AC-11", "FR-009-AC-12")]
 #[test]
 fn identical_inputs_give_identical_bytes_and_leave_no_trace() {
     let built = consistent();
@@ -854,8 +907,12 @@ fn identical_inputs_give_identical_bytes_and_leave_no_trace() {
     assert_eq!(fixture.run().code, Some(0));
     let first = fs::read(fixture.output()).expect("report");
     fs::remove_file(fixture.output()).expect("remove");
+    // The second run measures a different execution time: only `elapsedMs` may differ.
+    fixture.retime(3_000_000, 7_000_000);
     assert_eq!(fixture.run().code, Some(0));
-    assert_eq!(first, fs::read(fixture.output()).expect("report"));
+    let second = fs::read(fixture.output()).expect("report");
+    assert_ne!(first, second, "elapsedMs carries the measured time");
+    assert_eq!(normalised(&first), normalised(&second));
 
     let after = (
         directory_names(&fixture.path("pkg")),
@@ -1047,27 +1104,142 @@ fn a_claim_without_occurrences_exits_two_naming_the_node() {
 
 #[trace("NFR-003-AC-2")]
 #[test]
-fn closed_stdin_and_a_minimal_environment_give_the_same_report() {
+fn null_stdin_and_an_empty_environment_give_the_same_report_as_open_stdin() {
     let built = consistent();
     let fixture = Fixture::new(&built.bytes);
     fixture.both(&built.model, &built.model);
+
+    // Open stdin: a pipe holding unread data that stays open until the run has ended, and the
+    // full environment. A runner that read stdin would block or take the data into its report.
     let mut command = fixture.command(&fixture.arguments());
-    command.stdin(Stdio::piped());
     let mut child = command
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn");
-    drop(child.stdin.take());
-    let normal_code = child.wait().expect("wait").code();
-    let normal_report = fs::read(fixture.output()).expect("report");
+    let mut open_stdin = child.stdin.take().expect("stdin");
+    open_stdin
+        .write_all(b"unread data that must not matter\n")
+        .expect("write stdin");
+    let open_code = child.wait().expect("wait").code();
+    drop(open_stdin);
+    let open_report = fs::read(fixture.output()).expect("report");
     fs::remove_file(fixture.output()).expect("remove");
 
+    // Null stdin and an empty environment. Network access is not restricted or asserted.
+    fixture.retime(3_000_000, 9_000_000);
     let mut command = fixture.command(&fixture.arguments());
     command.env_clear();
     let hermetic = finish(command);
-    assert_eq!(normal_code, hermetic.code);
-    assert_eq!(normal_report, fs::read(fixture.output()).expect("report"));
+    assert_eq!(open_code, Some(0));
+    assert_eq!(open_code, hermetic.code);
+    assert_eq!(
+        normalised(&open_report),
+        normalised(&fs::read(fixture.output()).expect("report"))
+    );
+}
+
+/// TC-015 case 20: every refusal of case 19 exits `2` naming `semantic_graph.nodes[N]`, with no
+/// request and no report, when the binary is spawned over the built package.
+#[trace("FR-009-AC-23")]
+#[test]
+fn every_translation_refusal_exits_two_naming_a_node() {
+    let mut cases: Vec<(&str, Vec<u8>)> = Vec::new();
+
+    let mut document = Document::new();
+    let p = document.parameter();
+    let q = document.parameter();
+    let and = document.op(AND, &[&p, &q]);
+    let claim = document.claim(&and);
+    let bytes = document.bytes(&[&claim]);
+    let node = node_index(&bytes, &p);
+    let mut value: Value = serde_json::from_slice(&bytes).expect("json");
+    value["semantic_graph"]["nodes"][node]["semantic_type"] = id("scalar_type/integer");
+    cases.push((
+        "integer operand",
+        serde_json::to_vec(&value).expect("bytes"),
+    ));
+
+    let mut document = Document::new();
+    let p = document.parameter();
+    let inner = document.claim(&p);
+    let outer = document.claim(&inner);
+    cases.push(("reference to a claim", document.bytes(&[&outer])));
+
+    let (document, claim, _) = cycle_document();
+    cases.push(("reference cycle", document.bytes(&[&claim])));
+
+    let mut document = Document::new();
+    let (claim, _) = not_chain(&mut document, 128);
+    cases.push(("depth 129", document.bytes(&[&claim])));
+
+    let mut document = Document::new();
+    let mut sized = Sized::new(&mut document);
+    let body = sized.node(&mut document, 9_998);
+    let last = document.op(NOT, &[&sized.parameter]);
+    let top = document.op(AND, &[&body, &last]);
+    let claim = document.claim(&top);
+    cases.push(("10,001 nodes", document.bytes(&[&claim])));
+
+    let mut document = Document::new();
+    let mut sized = Sized::new(&mut document);
+    let top = sized.node(&mut document, 10_000);
+    let claims = (0..11).map(|_| document.claim(&top)).collect::<Vec<_>>();
+    let labels = claims.iter().map(String::as_str).collect::<Vec<_>>();
+    cases.push(("100,001 nodes over claims", document.bytes(&labels)));
+
+    for (label, bytes) in cases {
+        let fixture = Fixture::new(&bytes);
+        let run = fixture.run();
+        assert_eq!(run.code, Some(2), "{label}: {}", run.stderr);
+        assert!(
+            run.stderr.contains("semantic_graph.nodes["),
+            "{label}: {}",
+            run.stderr
+        );
+        assert!(fixture.requests().is_empty(), "{label}");
+        fixture.assert_no_report();
+    }
+}
+
+/// FR-009-AC-28: an unremovable capability root is named on stderr; the exit status stays.
+#[trace("FR-009-AC-28")]
+#[test]
+fn an_unremovable_capability_root_is_named_and_keeps_the_exit_status() {
+    let built = consistent();
+    let fixture = Fixture::new(&built.bytes);
+    fixture.both(&built.model, &built.model);
+    fs::write(fixture.path("stub/data/undeletable"), "").expect("flag");
+    let run = fixture.run();
+    let leftovers = directory_names(&fixture.path("out"));
+    // Restore access so that the temporary directory can be removed.
+    for name in &leftovers {
+        let locked = fixture.path("out").join(name).join("locked");
+        if locked.exists() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).expect("restore");
+        }
+    }
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert!(
+        run.stderr.contains("cannot remove the capability root"),
+        "{}",
+        run.stderr
+    );
+    assert!(fixture.output().exists());
+}
+
+/// A result line past the bound ends the executor and exits `4` without a report.
+#[trace("FR-009-AC-5")]
+#[test]
+fn an_oversize_result_line_exits_four_without_a_report() {
+    let built = consistent();
+    let fixture = Fixture::new(&built.bytes);
+    fs::write(fixture.path("stub/data/z3.version.flood"), "").expect("flag");
+    let run = fixture.run();
+    assert_eq!(run.code, Some(4), "{}", run.stderr);
+    assert!(run.stderr.contains("exceeds"), "{}", run.stderr);
+    fixture.assert_no_report();
 }
 
 fn find_executable(name: &str) -> Option<PathBuf> {

@@ -27,7 +27,7 @@ package file, the named `producer-execute` executable and the named solver execu
 | ID | Criteria | Verification |
 |---|---|---|
 | NFR-003-AC-1 | A solver that stalls past its wall-time limit or floods past its output limit, run through the real `producer-execute`, yields a published report with a typed non-conclusive outcome and exit `3`, never a hang and never exit `0` or `1`. | Test |
-| NFR-003-AC-2 | A run with closed stdin, no network namespace access and an environment limited to what process spawning needs yields the same report bytes and exit status as a run with open stdin and a full environment. | Test |
+| NFR-003-AC-2 | A run with null stdin and an empty environment yields the same exit status and the same report bytes, except the `elapsedMs` fields, as a run whose stdin is an open pipe holding unread data and whose environment is full; the run with open stdin does not wait for it. Network access is not restricted or asserted. | Test |
 | NFR-003-AC-3 | The runner reads no standard input and consults no environment variable to select a solver, a limit or an output; inspection of `run-package` finds no such read. | Inspection |
 
 ## Verification

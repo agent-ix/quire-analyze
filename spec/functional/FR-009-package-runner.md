@@ -232,7 +232,8 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
 - The runner shall create a runner-owned capability root as a fresh directory with mode `0700`,
   created exclusively under the parent directory of `--output` with a name unique to the run, shall
   pass it as `capabilityRoot` and shall remove it, with the staged query, on every exit path, including
-  failure and non-conclusive outcomes.
+  failure and non-conclusive outcomes. If the removal fails, the runner shall name the path and the
+  cause on stderr and shall keep the exit status the run would otherwise have had.
 - When `producer-execute` returns state `completed`, the runner shall take the solver's exit code,
   stdout and stderr from the retained process evidence.
 - For every `producer-execute` result state the runner shall record the engine outcome given by the
@@ -281,8 +282,10 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
   ahead of the atomic rename, the runner shall exit `4` and leave the destination unmodified.
 - If publication fails with `published-durability-unknown`, the runner shall exit `4` and report that
   state on stderr.
-- The runner shall produce byte-identical report bytes for identical package bytes, identical solver
-  executables and identical limits.
+- The runner shall produce identical report bytes for identical package bytes, identical solver
+  executables and identical limits, except for the `elapsedMs` fields, which carry the measured
+  `producer-execute` execution time and are excluded from determinism as in
+  [NFR-001](../nonfunctional/NFR-001-determinism-bounds.md).
 - The runner shall write no file other than the capability root and its staged query, which it removes, and the staged and published report.
 - The runner shall modify no developer-owned file as defined in [FR-005](./FR-005-evidence-cli.md).
 
@@ -306,7 +309,7 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
 | FR-009-AC-8 | Each of a relative, an empty, a non-UTF-8 and an over-long path, given in turn as `--z3`, `--cvc5` and `--producer-execute`, exits `2` and writes no report. | Test |
 | FR-009-AC-9 | An existing `--output` file, a missing parent directory and an unwritable parent directory each exit `4`; an existing destination keeps its bytes. | Test |
 | FR-009-AC-10 | A unit test of the runner function, injecting a directory-sync failure after rename through the publication seam of [TC-008](../test/TC-008-library-cli-atomic.md), shows the runner maps the `published-durability-unknown` publication error to exit `4` with that state named on stderr. | Test |
-| FR-009-AC-11 | Two runs over the same package bytes, executables and stub results write byte-identical report files. | Test |
+| FR-009-AC-11 | Two runs over the same package bytes, executables and stub results, whose stub timings differ, write report files that are byte-identical once every `elapsedMs` field is set to `0`, and that differ in no other field. | Test |
 | FR-009-AC-12 | After a run the package file and its directory hold no added, removed or modified entry; the only entries added to the `--output` parent directory are the published report, and during the run a capability-root directory of mode `0700` that is gone after every exit path (conclusive, non-conclusive, exit `2`, exit `4`). | Test |
 | FR-009-AC-13 | `run-package --help` lists the five arguments and the exit classes `0` to `4`. | Inspection |
 | FR-009-AC-17 | For each row of the result-state table other than `completed`, a stub result of that state for one engine yields the stated engine outcome in the published report, the stated disposition, and exit `3`. For the `completed` row, the engine outcome is the classification the library gives the same bytes run directly and the exit status is the one the comparison gives (`0`, `1` or `3`). | Test |
@@ -319,6 +322,7 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
 | FR-009-AC-24 | The `SourceSpan` of a claim is built from `source_map.nodes[N].occurrences[0].regions[0]` of its node: line `1`, column `1`, byte offsets the region start and end, document `contract-package`, revision `1`. A claim node whose `source_map.nodes[N].occurrences` is empty exits `2` naming the node. | Test |
 | FR-009-AC-25 | By inspection, an error from `check_expression`, `from_clause` or `lower_boolean_statements` for a clause maps to exit `2` naming `claim-N`, the path and the message, with no report; no admitted package reaches these errors, because the translation bounds are tighter. | Inspection |
 | FR-009-AC-26 | Two translations of the same package bytes yield equal clause order, ids, declarations and spans. | Test |
+| FR-009-AC-28 | When the capability root cannot be removed (an entry inside it is unreadable), the runner names the root path on stderr and exits with the status the run would otherwise have had, and the report is still published. | Test |
 | FR-009-AC-27 | Every contract-package document that a test of `run-package` reads is built at test time through the public APIs of the `quire-contract-*` dependencies and the QSL crates (a `quire.checked-package/v2` document built in test code, read with `CheckedPackageV2::read`, lowered with `CheckedPackageV2::lower`, and the canonical bytes of the resulting `CompleteContractPackageV2`), or by byte-level mutation of such a built document (malformed, oversized, at-limit); no contract-package document or copy of another repository's file is committed to this repository. | Inspection |
 | FR-009-AC-15 | Every request the runner logs validates against the request schema published by `producer-execute --schema request`, and the budget it carries has `maxStdoutBytes` and `maxStderrBytes` at most 8,388,608, `maxOutputArtifacts` and `maxOutputBytes` `0`, `maxDescendants` `16` and `maxConcurrency` `1`. | Test |
 | FR-009-AC-16 | The version request of an engine carries `producer.version` `unprobed` and stdin `null`; its query request carries the trimmed version stdout of the version result; a version result that is not `completed` or is empty yields no query request, the engine is recorded with the outcome the result-state table gives for that version result (`identity-error` when the text is empty), and the exit status is `3`. | Test |

@@ -30,7 +30,8 @@ use crate::{
     solver_record_from_evidence, translate_analysis_claims, validate_differential_report,
     version_request, version_text, AdapterLimits, AnalysisStatus, DifferentialDisposition,
     ProducerExecutionRequest, ProducerExecutionResult, PublicationError, PublicationState,
-    QueryBundle, SolverConfig, SolverEngine, SolverRecord, MAX_SOLVER_PATH_BYTES,
+    QueryBundle, SolverConfig, SolverEngine, SolverRecord, MAX_PRODUCER_STREAM_BYTES,
+    MAX_SOLVER_PATH_BYTES,
 };
 
 /// Exit status of a satisfied analysis.
@@ -48,9 +49,18 @@ pub const EXIT_FAILURE: u8 = 4;
 const QUERY_FILE: &str = "query.smt2";
 /// The most bytes of one `producer-execute` result line the runner reads.
 ///
-/// A result line carries up to 8,388,608 stdout and 8,388,608 stderr bytes as JSON number
-/// arrays of at most four characters per byte, plus a small envelope.
-const MAX_RESULT_LINE_BYTES: u64 = 80 * 1024 * 1024;
+/// A result line carries up to [`MAX_PRODUCER_STREAM_BYTES`] stdout bytes and as many stderr
+/// bytes, each rendered as a JSON number of at most three digits and a comma (four characters),
+/// plus an envelope of timing, state and host fields that stays far below one MiB.
+const MAX_RESULT_LINE_BYTES: u64 =
+    RESULT_STREAMS * MAX_PRODUCER_STREAM_BYTES as u64 * RESULT_CHARACTERS_PER_STREAM_BYTE
+        + RESULT_ENVELOPE_BYTES;
+/// The captured streams of one result: stdout and stderr.
+const RESULT_STREAMS: u64 = 2;
+/// The most JSON characters one captured byte takes: up to three digits and a comma.
+const RESULT_CHARACTERS_PER_STREAM_BYTE: u64 = 4;
+/// The room for everything in a result line other than the captured bytes.
+const RESULT_ENVELOPE_BYTES: u64 = 1024 * 1024;
 /// The most bytes of the package file the runner reads, one past the reader's ceiling so that
 /// an oversized document is refused by the reader as `Incomplete`.
 const MAX_PACKAGE_READ_BYTES: u64 = CheckedPackageReadLimits::bounded().bytes + 1;
@@ -153,19 +163,20 @@ pub enum RunPackageCommand {
 pub fn parse_run_package_arguments(
     arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<RunPackageCommand, RunnerError> {
+    let arguments: Vec<OsString> = arguments.into_iter().collect();
+    if let [only] = arguments.as_slice() {
+        if only.to_str() == Some("--help") {
+            return Ok(RunPackageCommand::Help);
+        }
+    }
     let mut arguments = arguments.into_iter();
     let mut package = None;
     let mut output = None;
     let mut z3 = None;
     let mut cvc5 = None;
     let mut producer_execute = None;
-    let mut seen = 0_usize;
     while let Some(argument) = arguments.next() {
-        seen += 1;
         let slot = match argument.to_str() {
-            Some("--help") if seen == 1 && arguments.next().is_none() => {
-                return Ok(RunPackageCommand::Help)
-            }
             Some("--package") => &mut package,
             Some("--output") => &mut output,
             Some("--z3") => &mut z3,
@@ -237,7 +248,7 @@ pub fn run_package(arguments: &RunPackageArguments) -> Result<u8, RunnerError> {
     let bytes = render_differential_report(&query, &run)
         .and_then(|bytes| validate_differential_report(&bytes, &query, &run).map(|()| bytes))
         .map_err(|error| RunnerError::failure(format!("the report is not valid: {error}")))?;
-    publish_report_new(&output, &bytes).map_err(|error| publication_failure(&error))?;
+    publish_with(&output, &bytes, publish_report_new)?;
     drop(root);
     eprint!("{}", render_differential_summary(&run));
     eprintln!("quire-analyze: published {}", output.display());
@@ -252,9 +263,18 @@ fn exit_status(disposition: DifferentialDisposition, agreed: Option<AnalysisStat
     }
 }
 
+/// Publish the report through `publish` and map a publication error to its exit `4` failure.
+pub(crate) fn publish_with(
+    output: &Path,
+    bytes: &[u8],
+    publish: impl FnOnce(&Path, &[u8]) -> Result<(), PublicationError>,
+) -> Result<(), RunnerError> {
+    publish(output, bytes).map_err(|error| publication_failure(&error))
+}
+
 /// The exit `4` failure of a publication error, naming `published-durability-unknown` when the
 /// report was renamed into place but its directory could not be synced.
-pub(crate) fn publication_failure(error: &PublicationError) -> RunnerError {
+fn publication_failure(error: &PublicationError) -> RunnerError {
     let state = match error.state() {
         PublicationState::PublishedDurabilityUnknown => "published-durability-unknown",
         PublicationState::DestinationUnmodified => "destination-unmodified",
@@ -397,6 +417,8 @@ impl CapabilityRoot {
     }
 }
 
+/// Removal runs on every exit path. A removal that fails is named on stderr and does not change
+/// the exit status (FR-009-AC-28).
 impl Drop for CapabilityRoot {
     fn drop(&mut self) {
         if let Err(error) = fs::remove_dir_all(&self.path) {

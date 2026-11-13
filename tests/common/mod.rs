@@ -425,3 +425,88 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+/// `not` applied `depth` times over a Boolean parameter; returns the claim and the
+/// innermost `not`, whose `ValueReference` operand sits at tree depth `depth + 1`.
+pub fn not_chain(document: &mut Document, depth: usize) -> (String, String) {
+    let p = document.parameter();
+    let mut innermost = document.op(NOT, &[&p]);
+    let mut top = innermost.clone();
+    for _ in 1..depth {
+        top = document.op(NOT, &[&top]);
+    }
+    if depth == 0 {
+        innermost = p.clone();
+        top = p;
+    }
+    (document.claim(&top), innermost)
+}
+
+/// Shared `and` chains: `chains[k]` expands to `2^(k+1) - 1` `Expression` nodes.
+pub struct Sized {
+    pub parameter: String,
+    chains: Vec<String>,
+}
+
+impl Sized {
+    pub fn new(document: &mut Document) -> Self {
+        let parameter = document.parameter();
+        Self {
+            chains: vec![parameter.clone()],
+            parameter,
+        }
+    }
+
+    /// A node whose translation has exactly `size` `Expression` nodes.
+    pub fn node(&mut self, document: &mut Document, size: usize) -> String {
+        if size == 1 {
+            return self.parameter.clone();
+        }
+        if size.is_multiple_of(2) {
+            let inner = self.node(document, size - 1);
+            return document.op(NOT, &[&inner]);
+        }
+        let mut level = 0;
+        while (1_usize << (level + 2)) - 1 < size {
+            level += 1;
+        }
+        while self.chains.len() <= level {
+            let last = self.chains[self.chains.len() - 1].clone();
+            self.chains.push(document.op(AND, &[&last, &last]));
+        }
+        let largest = (1_usize << (level + 1)) - 1;
+        let rest = self.node(document, size - 1 - largest);
+        let chain = self.chains[level].clone();
+        document.op(AND, &[&chain, &rest])
+    }
+}
+
+/// A claim over a two-node reference cycle; returns the document, the claim and the two cycle nodes.
+pub fn cycle_document() -> (Document, String, [String; 2]) {
+    let mut document = Document::new();
+    let p = document.parameter();
+    let first = document.op(AND, &[&p, &p]);
+    let second = document.op(AND, &[&first, &p]);
+    // `first = and(second, p)` closes the loop `first -> second -> first`.
+    document.set_body(
+        &first,
+        json!({
+            "term": "application",
+            "operator": "binary",
+            "operation": {"identity": AND, "laws": [], "mode": null, "member": null, "leaves": []},
+            "result_type": id("scalar_type/boolean"),
+            "arguments": [reference(&second), reference(&p)],
+        }),
+        &[&second, &p],
+    );
+    for label in [&first, &second] {
+        let node = document
+            .nodes
+            .iter_mut()
+            .find(|node| node["node_id"] == id(label))
+            .expect("node");
+        node["recursion_group"] = json!("loop");
+    }
+    let claim = document.claim(&second);
+    (document, claim, [first, second])
+}
