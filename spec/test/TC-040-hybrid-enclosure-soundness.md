@@ -1,16 +1,16 @@
 ---
-id: TC-030
+id: TC-040
 title: "Verify hybrid enclosure soundness and disposition"
 type: TC
 relationships:
-  - target: ix://agent-ix/quire-analyze/FR-030
+  - target: ix://agent-ix/quire-analyze/FR-040
     type: verifies
-  - target: ix://agent-ix/quire-analyze/FR-032
+  - target: ix://agent-ix/quire-analyze/FR-042
     type: verifies
-  - target: ix://agent-ix/quire-analyze/NFR-030
+  - target: ix://agent-ix/quire-analyze/NFR-040
     type: verifies
 ---
-# TC-030: Verify hybrid enclosure soundness and disposition
+# TC-040: Verify hybrid enclosure soundness and disposition
 
 ## Description
 
@@ -19,7 +19,7 @@ state, and that the disposition recorded by the review is carried out.
 
 ## Test Procedure
 
-For each FR-030 criterion, build requests that attack it and compare the provider's answer with an
+For each FR-040 criterion, build requests that attack it and compare the provider's answer with an
 independent enumeration of concrete executions on a small model (explicit states over the declared
 horizon). Cover bounds one unit from the representable limit, a flowed interval touching a guard at one
 point, two overlapping guards from one mode, two transitions into one target mode, a reset applied to
@@ -37,5 +37,5 @@ result maps to an enclosure.
 ## Limitations
 
 The enumeration check covers bounded integer models small enough to enumerate. It does not prove
-soundness for all models. The disposition criteria that FR-031 states are verified by inspection of the
+soundness for all models. The disposition criteria that FR-041 states are verified by inspection of the
 review record, not by this case.
