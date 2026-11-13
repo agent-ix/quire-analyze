@@ -411,6 +411,18 @@ struct SpanSource<'a> {
 }
 
 impl SpanSource<'_> {
+    /// Whether the node has a first source region.
+    fn has_region(&self, node: usize) -> bool {
+        self.package
+            .wire()
+            .source_map
+            .nodes
+            .get(node)
+            .and_then(|entry| entry.occurrences.first())
+            .and_then(|occurrence| occurrence.regions.first())
+            .is_some()
+    }
+
     fn node(&self, node: usize) -> Result<SourceSpan, TranslationError> {
         let region = self
             .package
@@ -622,11 +634,13 @@ impl<'a> Walker<'a> {
     }
 
     /// The span of a type node, or the span of the claim in translation when the type node has
-    /// no source region.
-    fn type_span(&self, type_node: usize) -> SourceSpan {
-        self.spans
-            .node(type_node)
-            .unwrap_or_else(|_| self.span.clone())
+    /// no source region. A region that builds no valid span is an error.
+    fn type_span(&self, type_node: usize) -> Result<SourceSpan, TranslationError> {
+        if self.spans.has_region(type_node) {
+            self.spans.node(type_node)
+        } else {
+            Ok(self.span.clone())
+        }
     }
 
     /// The type node a term of an application argument has: the `semantic_type` of a reference
@@ -711,7 +725,7 @@ impl<'a> Walker<'a> {
         let Some((_, members)) = body.enum_details() else {
             return Err(cannot_lower(type_node, "the enum has no declaration body"));
         };
-        let span = self.type_span(type_node);
+        let span = self.type_span(type_node)?;
         let variants = members
             .iter()
             .map(|member| {
@@ -756,7 +770,7 @@ impl<'a> Walker<'a> {
         let Some(CheckedTerm::Aggregate { members }) = self.terms[type_node] else {
             return Err(cannot_lower(type_node, "the record has no field list"));
         };
-        let span = self.type_span(type_node);
+        let span = self.type_span(type_node)?;
         let mut fields = Vec::with_capacity(members.len());
         for member in members {
             let CheckedTerm::Binding { name: field, value } = member else {

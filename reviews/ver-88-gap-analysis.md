@@ -87,3 +87,12 @@ and in TC-020 Test Procedure, add "an option-access claim under a
 | FND-002 | medium | FR-022-AC-1 fixtures 3, 4 and 5 (record field sat, record field with `Guest`, guarded option) have no `run-package` test even as ignored, and their translation tests are `#[ignore]` pending VER-86; fixture 4's exit `1` is asserted nowhere. AC-1 and the ticket's record-field acceptance criterion are not met by this PR. | `tests/datatype_translation.rs:205-270`, `tests/package_runner.rs:1494-1541` |
 | FND-003 | low | The record-cycle refusal (`declaring` set) and the type-nesting guard have no test, though both are new refusal paths naming a type node. | `src/package_translation.rs:569-574`, `src/package_translation.rs:677-679` |
 | FND-004 | low | FR-022 is silent on two translation rules the code applies: a `Reference` to an enum `value/enum_value` member node translates to `EnumLiteral`, and enum and record declarations are named `t{N}` after the type node index. Add both to the FR-022 Terms table and Types bullet. | `src/package_translation.rs:777-779`, `src/package_translation.rs:636-639` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | 7e067c9: FR-022-AC-1 and TC-020 carry the amendment text verbatim; consistent with FR-020 "Replay until FR-021" and FR-020-AC-10. |
+| FND-002 | deferred | 7e067c9 adds `record_and_option_fixtures_have_their_fixed_exits_through_the_runner` for fixtures 3-5 (exits 3, 1, 3); it and the three translation tests are ignored and fail only in the src/smt.rs lowering ("record expressions are unsupported"). Un-ignore all four when VER-86 lands; VER-88 stays open until they pass. |
+| FND-003 | fixed | 7e067c9: record-cycle test (byte-level mutation adding a self field and recursion group, permitted by FR-009-AC-27, the shape of a QSL recursive record) and a 130-level nesting test. |
+| FND-004 | fixed | 7e067c9: FR-022 Terms row adds the `value/enum_value` reference and Types states the `t{N}` name. |

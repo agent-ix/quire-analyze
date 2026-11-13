@@ -55,3 +55,20 @@ build artifact, committed fixture, SHA, digest, roadmap or compatibility layer.
 | FND-003 | low | The datatype class conflates enum, record and option, so `quire.op.enum.eq/ne` over two records or two options translates to a structural `Compare` that `check_expression` accepts, and `option.present`/`option.value` over a record or enum exits `2` naming `claim-N` instead of the application node FR-022 Refusals name. The operand's type kind is known at translation and can be checked per identity. | `src/package_translation.rs:1058-1066`, `src/package_translation.rs:1103` |
 | FND-004 | low | Spans for enum variants, records and fields are taken from the type node (`self.spans.node(type_node)?`), so a type node with empty `source_map` occurrences (an imported or built-in type) refuses every claim that reaches it. FR-009 states the empty-occurrence rule for claim nodes only; for type nodes this is spec-silent and a zero span would not refuse a valid claim. | `src/package_translation.rs:652`, `src/package_translation.rs:697` |
 | FND-005 | low | The satisfiable-enum runner test asserts exit `3`, explanation `incomplete` and disposition inconclusive but not the witness reason `sort_not_replayable` naming the enum variable that FR-020 "Replay until FR-021" and FR-020-AC-10 fix, so a different incompleteness cause would also pass. | `tests/package_runner.rs:1525-1541` |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-006 | low | `type_span` falls back to the claim span on every `SpanSource::node` error, not only the missing source region FR-022 now names: a type node whose region exists but yields an invalid `SourceLocation` or `SourceSpan` is silently given the claim span instead of exiting `2`. Match on `TranslationErrorKind::SourceRegion` from the missing-region branch only, or split the lookup. | `src/package_translation.rs:624-630` |
+| FND-007 | low | The SR files were committed as `reviews/2026-11-13-ver-88-*.md`; the reviewer convention and the repository's recent files (`reviews/ver-94-*.md`) carry no date prefix. Copy the updated files to `reviews/ver-88-code-review.md` and `reviews/ver-88-gap-analysis.md` and remove the dated copies. | `reviews/2026-11-13-ver-88-code-review.md`, `reviews/2026-11-13-ver-88-gap-analysis.md` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | 7e067c9: unit test asserts path `expression` and the message; runner test asserts `claim-N at expression: option presence is not established`. |
+| FND-002 | fixed | 7e067c9: `projected_field` refuses a member whose `kind` is not `field` or whose `declaration` is not the operand's type node; matches the QSL FR-093 `field{declaration: the record's node, name}` shape, so no legitimate projection is refused; both mutations are tested and each check alone fails its case. |
+| FND-003 | fixed | 7e067c9: `operand_sort` limits `enum.*` to enums, `structural.*` to enum, record or option, `record.project` to records and `option.*` to options, refused at the application node; tested by two identity mutations. |
+| FND-004 | fixed | 7e067c9: FR-022 now states the claim-span fallback and `type_span` implements it; tested. See FND-006 for its breadth. |
+| FND-005 | fixed | 7e067c9: `a_satisfiable_translated_enum_claim_is_incomplete_with_sort_not_replayable` pins `ReplayFailureReason::SortNotReplayable` and the enum variable through the analysis API the runner uses. |
