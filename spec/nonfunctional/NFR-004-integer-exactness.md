@@ -16,9 +16,12 @@ relationships:
 ## Statement
 
 For integer-typed analysis, the analyzer shall return `unsupported` for any term it cannot encode
-exactly, publish no model as verified unless replay passes, and parse and evaluate every integer
-within declared bounds, so that no input causes a panic, a wrapped value, an approximated result or an
-unbounded computation.
+exactly.
+
+For integer-typed analysis, the analyzer shall publish a model as verified only when replay passes.
+
+For integer-typed analysis, the analyzer shall parse and evaluate every integer within declared bounds,
+so that no input causes a panic, a wrapped value, an approximated result or an unbounded computation.
 
 ## Measurement and Evaluation
 
@@ -35,7 +38,7 @@ unbounded computation.
 | ID | Criteria | Verification |
 |---|---|---|
 | NFR-004-AC-1 | Every unsupported integer construct of FR-010 returns `unsupported` and none yields a query, a `satisfied` result or a `refuted` result. | Test (TC-016) |
-| NFR-004-AC-2 | Integer literals and bounds at the minimum and maximum of the signed 64-bit range lower and replay without overflow or panic; arithmetic whose exact result exceeds the evaluation range fails replay with `evaluation_overflow`. | Test (TC-016, TC-017) |
+| NFR-004-AC-2 | Integer literals and bounds at the minimum and maximum of the 128-bit signed range lower and replay without panic; arithmetic whose exact result exceeds the 128-bit signed range fails replay with `evaluation_overflow`. | Test (TC-016, TC-017) |
 | NFR-004-AC-3 | An integer model above the parsed-model ceiling is rejected as non-conclusive by the adapter bounds of NFR-001. | Test (TC-017) |
 | NFR-004-AC-4 | Repeated and order-permuted integer analyses preserve query and normalized evidence bytes. | Test (TC-016) |
 

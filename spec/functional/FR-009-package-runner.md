@@ -117,7 +117,7 @@ exits `2` as the Input section states. For every other term:
 The operation identity is `CheckedApplicationOperation::identity()`, an entry of
 `quire.checked-operation-catalog/v1` of `quire-verification-contracts` (`CheckedApplicationOperation::read()` returns `NotAdmitted` for a package read by `ContractPackageWireV1::read`, which installs no admitted operation views; an application with no identity is one the translation cannot lower), and the arguments of an
 application are translated in order as left and right (the one argument of `not` as the operand).
-This subset is exactly the `exact_constructs` of `CAPABILITY_CONTRACT` in `src/smt.rs`. `and` and `or`
+This Boolean subset is the Boolean part of the `exact_constructs` of `CAPABILITY_CONTRACT` in `src/smt.rs`; the integer terms are those of [FR-012](./FR-012-integer-claim-translation.md). `and` and `or`
 become the total operators because this subset has no partial operation, so evaluation order carries no
 meaning. Every other operation, term form and node family is one the translation cannot lower, and
 so is a reference chain that returns to a node it is already translating. The runner shall exit `2`
@@ -151,14 +151,15 @@ target and so a node shared by several references expands once per reference: a 
 ### Value declarations
 
 - For each distinct `value/parameter` node `N` reached by any claim, the runner shall declare one
-  `ValueDeclaration` named `nN` of kind `ValueDeclarationKind::Input`, of type `ValueType::Boolean`,
+  `ValueDeclaration` named `nN` of kind `ValueDeclarationKind::Input`, of type `ValueType::Boolean` (or the
+  integer type FR-012 defines for an `integer_range` parameter),
   with the span of node `N`, in ascending order of `N`. The name satisfies `SymbolName` (it starts
   with a letter) and cannot collide, because `N` is unique.
 - The kind is `Input` and the observation is `Current` because `check_value_reference` admits an
   `Input` only with `Current`, and admits that at every execution point, so the choice does not depend
   on the synthetic anchor. A parameter reached from two claims is one declaration and one SMT symbol.
-- Integer types, `IntegerDomain` and `OverflowPolicy` are not used: a declaration of any type other than
-  Boolean is not produced (Dependencies, gap 5).
+- Integer types, `IntegerDomain` and `OverflowPolicy` are mapped as FR-012 defines; a declaration of any
+  type other than Boolean or integer is not produced.
 
 ### Refusals
 
@@ -317,7 +318,7 @@ Solver limits are `AdapterLimits::default()` of [NFR-001](../nonfunctional/NFR-0
 | FR-009-AC-20 | For a package with analysis claims at nodes `i` and `j`, the statements the translation builds have `ClauseRef` (`source.name`, `analysis`, `1`) with clause ids `claim-i` and `claim-j` in node order, one `RequirementRef` for both, and the execution point `Handler` named `analysis`; `from_clause` accepts both. A `source.name` that `PackageId::new` refuses exits `2` naming the package name. | Test |
 | FR-009-AC-21 | Each of `quire.op.boolean.not`, `and`, `or`, `implies`, `eq` and `ne`, applied to Boolean parameters, translates to the `ExpressionKind` and operator of the Terms table, and a Boolean `Literal` to `BooleanLiteral`; a claim that is a `Reference` to an expression node translates to the body of that node. | Test |
 | FR-009-AC-22 | Two claims that reference the same Boolean `value/parameter` node `N` yield one `ValueDeclaration` named `nN` of kind `Input` and type Boolean, referenced with observation `Current`, and the lowered query holds one variable symbol for it; two distinct parameter nodes yield two declarations. | Test |
-| FR-009-AC-23 | Each of a `quire.op.integer.div` application, a reference to a node that is neither an expression, a literal nor a parameter, a reference cycle, a tree deeper than 128 (128 nested `not` applications over a Boolean parameter, depth 129, are refused; 127, depth 128, are not) and a shared-subterm chain `x1 = and(p, p)`, `xk = and(x(k-1), x(k-1))` of 61 nodes (about 2^61 expanded `Expression` nodes; a tree of 10,000 `Expression` nodes is not refused for size and one of 10,001 is) and claims sharing one 10,000-node tree (the 11th, whose first `Expression` is the 100,001st in total, is refused) each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report. The shared-subterm run finishes within the time of a normal run. | Test |
+| FR-009-AC-23 | Each of a `quire.op.integer.div`, `quire.op.integer.rem` or `quire.op.integer.mod` application, an integer-typed operand of a Boolean operation (`not`, `and`, `or`, `implies`, Boolean `eq` or `ne`), a reference to a node that is neither an expression, a literal nor a parameter, a reference cycle, a tree deeper than 128 (128 nested `not` applications over a Boolean parameter, depth 129, are refused; 127, depth 128, are not) and a shared-subterm chain `x1 = and(p, p)`, `xk = and(x(k-1), x(k-1))` of 61 nodes (about 2^61 expanded `Expression` nodes; a tree of 10,000 `Expression` nodes is not refused for size and one of 10,001 is) and claims sharing one 10,000-node tree (the 11th, whose first `Expression` is the 100,001st in total, is refused) each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report. The shared-subterm run finishes within the time of a normal run. | Test |
 | FR-009-AC-24 | The `SourceSpan` of a claim is built from `source_map.nodes[N].occurrences[0].regions[0]` of its node: line `1`, column `1`, byte offsets the region start and end, document `contract-package`, revision `1`. A claim node whose `source_map.nodes[N].occurrences` is empty exits `2` naming the node. | Test |
 | FR-009-AC-25 | By inspection, an error from `check_expression`, `from_clause` or `lower_boolean_statements` for a clause maps to exit `2` naming `claim-N`, the path and the message, with no report; no admitted package reaches these errors, because the translation bounds are tighter. | Inspection |
 | FR-009-AC-26 | Two translations of the same package bytes yield equal clause order, ids, declarations and spans. | Test |
@@ -357,11 +358,8 @@ change, and none is closed by invented behaviour here.
    rendered. Whether `execute_solver` itself migrates is outside this requirement.
 4. `producer-execute` is a separate executable. The runner depends on it through a process boundary
    only, with no Cargo dependency on `engineering-assurance`.
-5. The capability contract of `src/smt.rs` (`quire.smtlib2/v1`, logic `QF_UF`) lists integers,
-   arithmetic and ordering as unsupported, so integer and range types, `IntegerDomain` and
-   `OverflowPolicy` have no consumer and the translation defines none; the package has no overflow
-   policy field to map. When FR-002 admits an integer construct, this requirement must be extended
-   with its type mapping, its operation rows and its overflow policy together with that change.
+5. Integer types, operation rows and overflow policy are defined by FR-010 and FR-012, which extend this
+   requirement; the package has no overflow policy field, and FR-012 states the mapping.
 6. The `quire-contract-model` revision in `Cargo.lock` predates the `CatalogUnavailable` variant of
    `ContractPackageReadResult` that `Cargo.toml` (branch `main`) delivers. The implementing change updates
    the lock to current `main` of `quire-contract-ir` so the reader has the four variants the Input section

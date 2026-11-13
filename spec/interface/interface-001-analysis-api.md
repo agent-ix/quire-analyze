@@ -65,12 +65,13 @@ exit_classes:
 resource_limits:
   lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
   adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, path_bytes]
-lowering_v1:
+lowering_v2:
   request_kind: boolean_conjunction
-  logic: QF_UF
+  profile: quire.smtlib2/v2
+  logic: QF_LIA
   identities: [binding_set_digest, analysis_request_digest, query_digest]
   maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding]
-  unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
+  unsupported: [non_linear_arithmetic, quantification, non_integer_non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
   source_release: requires the human PGM-02 Wave 4 decision

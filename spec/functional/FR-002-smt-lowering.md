@@ -21,13 +21,13 @@ construct has a declared exact encoding under the selected profile.
 - Symbols use injective encoding of complete semantic identities.
 - Each named assertion maps to its complete package, requirement, revision, clause digest, and source
   span identity; each variable map retains all complete declaration origins and any explicit binding.
-- `quire.smtlib2/v1` is deliberately Boolean-only: literals, typed Boolean input/state references,
-  negation, short-circuit and total conjunction/disjunction, implication, and Boolean equality or
-  inequality lower exactly to SMT-LIB 2.6 `QF_UF`.
-- Linear integer arithmetic is admitted by [FR-010](./FR-010-linear-integer-arithmetic.md) under profile
-  `quire.smtlib2/v2`, which replaces this profile and keeps every Boolean encoding above.
+- The live profile is `quire.smtlib2/v2` ([FR-010](./FR-010-linear-integer-arithmetic.md)). Literals,
+  typed Boolean input/state references, negation, short-circuit and total conjunction/disjunction,
+  implication, and Boolean equality or inequality lower exactly to SMT-LIB 2.6, and every query,
+  including a query with no integer construct, declares logic `QF_LIA`. The Boolean-only profile
+  `quire.smtlib2/v1` (logic `QF_UF`) is replaced; it is not selectable and no fallback to it exists.
 - Rational, text, enum, record, option, collection, field/index/option access, calls, non-linear
-  arithmetic, locals, and quantifiers are explicitly unsupported by this profile. The
+  arithmetic, locals, and quantifiers are explicitly unsupported by the live profile. The
   exhaustive Rust match makes an upstream expression variant addition a compile-time review point.
 - State observations and execution points remain part of variable identity. Short-circuit and total
   Boolean operators share an encoding only after upstream validation establishes total Boolean

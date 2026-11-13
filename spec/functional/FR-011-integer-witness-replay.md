@@ -26,16 +26,26 @@ model, so a witness is never accepted on a solver's own word. This extends the B
   accepting a non-negative numeral and the SMT-LIB negation of a numeral for a negative value, and
   assigning each value to the declared query symbol it names. Boolean and integer symbols can occur in
   one model. A numeral with a decimal point, a real or other sort, or an exponent form is malformed.
+  A numeral of more than 1,024 characters is malformed and is refused before conversion.
+- **Numeral boundary.** A well-formed integer numeral of at most 1,024 characters whose value does not
+  fit the 128-bit signed range is `value_out_of_domain`, because every declared integer domain lies
+  inside that range.
 - **Complete and exact symbol set.** A verified model defines every declared integer and Boolean
-  symbol of the query exactly once and defines no other symbol.
-- **Domain.** Each integer value must lie within the declared minimum and maximum of its symbol.
-- **Replay.** Every replay assertion, including the declared-range assertions, is evaluated on the
-  analysis expression with exact arithmetic that detects overflow; an evaluation that overflows
-  fails replay and never wraps. Every assertion must evaluate true.
-- **Typed failure.** A model that does not verify is reported with one reason from the closed set
-  `symbol_missing`, `symbol_unknown`, `symbol_repeated`, `sort_mismatch`, `value_malformed`,
-  `value_out_of_domain`, `assertion_false` and `evaluation_overflow`. The reason names the symbol or
-  assertion where one applies.
+  symbol of the query exactly once and defines no other symbol. The named-assertion aliases of the
+  query that a solver may echo in a returned model are accepted and skipped, as the Boolean parser
+  does; they are not values and not symbols for this rule.
+- **Domain.** Each integer value must lie within the declared minimum and maximum of its symbol. The
+  query's range constraints are unnamed assertions (FR-010), so this check, not an assertion
+  replay, is the domain verdict.
+- **Replay.** Every replay assertion is evaluated on the analysis expression with exact 128-bit signed
+  arithmetic that detects overflow; an evaluation that overflows fails replay and never wraps. This is
+  reachable when a declared domain spans the 128-bit extremes. Every assertion must evaluate true.
+- **Typed failure and precedence.** A model that does not verify is reported with exactly one reason
+  from the closed set `value_malformed`, `symbol_repeated`, `symbol_unknown`, `sort_mismatch`,
+  `symbol_missing`, `value_out_of_domain`, `evaluation_overflow` and `assertion_false`. When several
+  apply, the first in that order is reported; within a reason the first symbol in ascending symbol
+  order, or the first assertion in assertion-map order (for the last two reasons, the first
+  assertion that does not evaluate true, whichever reason it has), is named.
 - **Incomplete, never verified.** A model that fails replay, or that omits an integer symbol, leaves
   the logical response of the solver unchanged but marks the requested witness evidence incomplete
   (as FR-004 states). It is never published as a verified witness and no value is invented to fill a
@@ -50,14 +60,15 @@ model, so a witness is never accepted on a solver's own word. This extends the B
 | ID | Criteria | Verification |
 |---|---|---|
 | FR-011-AC-1 | A model returned by Z3 and a model returned by cvc5 for a satisfiable integer fixture are each parsed, every named assertion is re-evaluated true, and the published witness lists every symbol with its integer value and origins. | Test (TC-017, real solvers) |
-| FR-011-AC-2 | For recorded model texts in each solver's output format (including negative values and a model that mixes Boolean and integer symbols) the parser yields the expected symbol-to-value assignment. | Test (TC-017) |
+| FR-011-AC-2 | For recorded model texts in each solver's output format (including negative values, a model that mixes Boolean and integer symbols, and a model that echoes named-assertion aliases) the parser yields the expected symbol-to-value assignment and skips the aliases. | Test (TC-017) |
 | FR-011-AC-3 | A model for which one assertion evaluates false is reported incomplete with reason `assertion_false` naming that assertion, never as a verified witness. | Test (TC-017) |
 | FR-011-AC-4 | A model that omits one declared integer symbol is reported incomplete with reason `symbol_missing`; a model with an undeclared symbol, a repeated symbol, or an integer value for a Boolean symbol (or the reverse) is reported with `symbol_unknown`, `symbol_repeated` or `sort_mismatch`. | Test (TC-017) |
 | FR-011-AC-5 | A value one above the declared maximum, one below the declared minimum, and a value exactly at each bound: the first two fail with `value_out_of_domain`, the bound values verify. | Test (TC-017) |
-| FR-011-AC-6 | A decimal, a real-sorted, an exponent-form and an over-long numeral each fail with `value_malformed` without panicking. | Test (TC-017) |
-| FR-011-AC-7 | An assertion whose evaluation overflows the exact arithmetic range fails with `evaluation_overflow`, not a wrapped result. | Test (TC-017) |
+| FR-011-AC-6 | A decimal, a real-sorted and an exponent-form numeral, and a numeral of 1,025 characters, each fail with `value_malformed` without panicking; a numeral of 1,024 characters, and the value 2^127, each fail with `value_out_of_domain`. | Test (TC-017) |
+| FR-011-AC-7 | With a symbol declared over the full 128-bit signed range set to its maximum, the assertion `x + 1 > 0` fails with `evaluation_overflow`, not a wrapped result. | Test (TC-017) |
 | FR-011-AC-8 | In every failing case above the logical status of the solver response (`sat`) and the adapter outcome remain available and the witness evidence is marked incomplete. | Test (TC-017) |
 | FR-011-AC-9 | Replay reads only the typed analysis expressions and the parsed assignment; mutating the SMT-LIB query text of a lowered query does not change a replay verdict. | Test (TC-017) |
+| FR-011-AC-10 | A model with a missing symbol and a malformed numeral reports `value_malformed`; a model with an out-of-domain value and a false assertion reports `value_out_of_domain`; a model with an overflowing assertion before a false one in assertion-map order reports `evaluation_overflow`, and the reverse order reports `assertion_false`. | Test (TC-017) |
 
 ## Dependencies
 
