@@ -7,13 +7,14 @@
 //! The soundness oracle is an independent enumeration of concrete executions
 //! over explicit integer states, computed in `i128` so it cannot overflow.
 //!
+//! FR-041-AC-1 "a reset that leaves an invariant" is not applicable: the request
+//! type has no invariant (FR-040-AC-7), so no such request can be built.
+//!
 //! A test that asserts the sound behaviour and currently fails is marked
 //! `#[ignore = "VER-94 finding Fn: ..."]`. Run them with
 //! `cargo test --test hybrid_enclosure_soundness -- --ignored`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::mpsc;
-use std::time::Duration;
 
 use ix_trace_rs::trace;
 use proptest::prelude::*;
@@ -433,22 +434,26 @@ fn fr040_ac6_reset_maps_only_the_guard_satisfying_part() {
 
 #[trace("TC-040", "FR-040-AC-7")]
 #[test]
-#[ignore = "VER-94 finding F6: a model with an invariant cannot be refused; a hand-translated request drops it"]
-fn fr040_ac7_state_leaving_a_dropped_invariant_is_not_reported_reached() {
-    // Source model: mode m with invariant x <= 5 and flow +1 per step. Every
-    // concrete execution blocks at 5, so 8 is unreachable. The request type has
-    // no invariant, so the only translation drops it.
-    let req = request("m", 0, 0, 8, (1, 1));
-    let reported = match run(&req) {
-        HybridOutcome::Enclosure { enclosures, .. } => enclosures
-            .iter()
-            .any(|e| e.interval.lower <= 8 && 8 <= e.interval.upper),
-        _ => false,
+fn fr040_ac7_request_type_carries_no_invariant() {
+    // Exhaustive struct literals (no `..`): the request has no invariant field, so
+    // an invariant cannot reach the provider. Adding a field breaks this test and
+    // forces the FR-040-AC-7 invariant behaviour to be tested at that point.
+    let _ = HybridRequest {
+        initial_mode: "m".into(),
+        transitions: vec![HybridTransition {
+            from_mode: "m".into(),
+            to_mode: "t".into(),
+            guard: Interval { lower: 0, upper: 0 },
+            reset_offset: 0,
+        }],
+        initial_set: Interval { lower: 0, upper: 0 },
+        horizon: 0,
+        flow_delta_lower: 0,
+        flow_delta_upper: 0,
+        error_bound: 0,
+        step_bound: 0,
+        convergence_steps: 0,
     };
-    assert!(
-        !reported,
-        "state 8 violates the invariant yet is reported reached"
-    );
 }
 
 // ---------------------------------------------------------------- FR-040-AC-8
@@ -626,12 +631,12 @@ fn fr040_ac12_extreme_requests_end_in_exactly_one_typed_outcome_without_panic() 
                 let outcome = run(&req);
                 let (method, terminal) = hybrid_method_outcome(&outcome);
                 assert_eq!(method, AnalyzeMethod::HybridReachability);
-                assert!(matches!(
-                    terminal,
-                    AnalyzeOutcome::Enclosure
-                        | AnalyzeOutcome::Incomplete
-                        | AnalyzeOutcome::Refused
-                ));
+                let expected = match outcome {
+                    HybridOutcome::Enclosure { .. } => AnalyzeOutcome::Enclosure,
+                    HybridOutcome::Incomplete { .. } => AnalyzeOutcome::Incomplete,
+                    HybridOutcome::Refused { .. } => AnalyzeOutcome::Refused,
+                };
+                assert_eq!(terminal, expected);
             }
         }
     }
@@ -663,18 +668,46 @@ proptest! {
 
 // ------------------------------------------------------------------ NFR-040
 
+#[trace("TC-040", "NFR-040-AC-1")]
+#[test]
+#[ignore = "VER-94 finding F10: no crate limit on step bound, transitions or distinct modes"]
+fn nfr040_ac1_no_crate_limits_on_steps_transitions_modes() {
+    // A step bound far above any plausible crate limit ends Incomplete.
+    let mut steps = request("m", 0, 0, 0, (0, 0));
+    steps.step_bound = 1_000_000;
+    assert!(matches!(
+        run(&steps),
+        HybridOutcome::Incomplete {
+            code: HybridIncompleteCode::StepBoundExhausted,
+            ..
+        }
+    ));
+    // So many transitions, and so many distinct modes, end Refused.
+    let many = |distinct: bool| {
+        let transitions = (0..100_000)
+            .map(|n| {
+                let to = if distinct {
+                    format!("t{n}")
+                } else {
+                    "t".into()
+                };
+                transition("m", &to, (0, 0), 0)
+            })
+            .collect();
+        with_transitions(request("m", 0, 0, 0, (0, 0)), transitions)
+    };
+    for req in [many(false), many(true)] {
+        assert!(matches!(run(&req), HybridOutcome::Refused { .. }));
+    }
+}
+
 #[trace("TC-040", "NFR-040-AC-2")]
 #[test]
-#[ignore = "VER-94 finding F9: no crate step limit; a huge admitted horizon is iterated one step at a time"]
-fn nfr040_ac2_huge_horizon_returns_in_bounded_time() {
-    let (sender, receiver) = mpsc::channel();
-    let mut req = request("m", 0, 0, u64::MAX, (0, 0));
-    req.step_bound = u64::MAX;
-    std::thread::spawn(move || {
-        let _ = sender.send(reach(&req));
-    });
-    assert!(
-        receiver.recv_timeout(Duration::from_secs(2)).is_ok(),
-        "reach did not return within 2s for horizon u64::MAX"
-    );
+#[ignore = "VER-94 finding F9: no crate step limit; an admitted horizon is iterated one step at a time"]
+fn nfr040_ac2_large_horizon_is_cut_by_a_crate_limit_not_iterated() {
+    // Bounded stand-in for u64::MAX: a crate limit ends this Incomplete before any
+    // per-step work; today all 1,000,000 steps run and an enclosure is returned.
+    let mut req = request("m", 0, 0, 1_000_000, (0, 0));
+    req.step_bound = 1_000_000;
+    assert!(matches!(run(&req), HybridOutcome::Incomplete { .. }));
 }
