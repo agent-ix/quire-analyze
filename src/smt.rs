@@ -584,8 +584,21 @@ struct DatatypeSet {
     records: BTreeMap<String, RecordSortMap>,
     options: BTreeMap<String, OptionSortMap>,
     variable_sorts: BTreeMap<String, String>,
-    /// Range assertions over the integer parts of datatype-sorted variables, by variable symbol.
-    variable_ranges: BTreeMap<String, Vec<String>>,
+    /// The range predicates of typed shapes with integer parts, by predicate symbol.
+    range_predicates: BTreeMap<String, RangePredicate>,
+    /// The predicate of each typed shape already examined, by shape identity; `None` when the
+    /// shape has no integer part.
+    range_checked: BTreeMap<String, Option<String>>,
+    /// The range predicate asserted for each datatype-sorted variable, by variable symbol.
+    variable_predicates: BTreeMap<String, String>,
+}
+
+/// A non-recursive predicate that holds when every integer part of a value is in its range.
+struct RangePredicate {
+    sort: String,
+    body: String,
+    /// The predicates the body calls.
+    dependencies: Vec<String>,
 }
 
 impl DatatypeSet {
@@ -608,6 +621,25 @@ impl DatatypeSet {
             .collect();
         symbols.sort_unstable();
         symbols
+    }
+
+    /// The range predicate definitions in dependency order, ties broken by the predicate symbol.
+    fn range_definitions(&self) -> Vec<String> {
+        let mut pending: Vec<(&String, &RangePredicate)> = self.range_predicates.iter().collect();
+        let mut ordered = Vec::with_capacity(pending.len());
+        while let Some(position) = pending.iter().position(|(_, predicate)| {
+            predicate
+                .dependencies
+                .iter()
+                .all(|dependency| !pending.iter().any(|(symbol, _)| *symbol == dependency))
+        }) {
+            let (symbol, predicate) = pending.remove(position);
+            ordered.push(format!(
+                "(define-fun {symbol} ((x {})) Bool {})\n",
+                predicate.sort, predicate.body
+            ));
+        }
+        ordered
     }
 
     /// The declarations in dependency order, ties broken by the encoded sort symbol.
@@ -1049,7 +1081,11 @@ fn lower_statement_specs(
     };
     query.push_str(logic);
     query.push_str(")\n");
-    for declaration in datatypes.declarations() {
+    for declaration in datatypes
+        .declarations()
+        .into_iter()
+        .chain(datatypes.range_definitions())
+    {
         query.push_str(&declaration);
     }
     for symbol in variables.keys() {
@@ -1072,12 +1108,8 @@ fn lower_statement_specs(
             numeral(*maximum)
         ));
     }
-    for constraints in datatypes.variable_ranges.values() {
-        for constraint in constraints {
-            query.push_str("(assert ");
-            query.push_str(constraint);
-            query.push_str(")\n");
-        }
+    for (symbol, predicate) in &datatypes.variable_predicates {
+        query.push_str(&format!("(assert ({predicate} {symbol}))\n"));
     }
     let mut assertions = Vec::with_capacity(lowered.len());
     let mut replay_assertions = Vec::with_capacity(lowered.len());
@@ -1812,61 +1844,97 @@ impl LowerState<'_> {
         Ok(self.datatypes.options[&built.sort].clone())
     }
 
-    /// Records the range assertions over the integer parts of a datatype-sorted variable, so a
-    /// solver cannot choose an integer outside its declared type.
-    fn range_constraints(
-        &mut self,
-        term: &str,
-        value_type: &ValueType,
-        budget: &mut usize,
-        out: &mut Vec<String>,
-    ) -> Result<(), LoweringError> {
-        if *budget == 0 {
-            return Err(LoweringError::new(
-                LoweringErrorCode::ResourceLimit,
-                "type.ranges",
-                "datatype range constraints exceed the public bound",
-            ));
+    /// The range predicate of a record or option type, defined on first use, or `None` when the
+    /// type has no integer part. One predicate serves every variable of the same typed shape, so
+    /// the query grows with the number of shapes and variables, not with the integer leaves.
+    fn range_predicate(&mut self, value_type: &ValueType) -> Result<Option<String>, LoweringError> {
+        if !matches!(
+            value_type,
+            ValueType::Record { .. } | ValueType::Option { .. }
+        ) {
+            return Ok(None);
         }
-        *budget -= 1;
-        match value_type {
-            ValueType::Integer { value } => out.push(format!(
-                "(and (<= {} {term}) (<= {term} {}))",
-                numeral(value.minimum()),
-                numeral(value.maximum())
-            )),
+        let built = self.sort_of(value_type, 1, "")?;
+        if let Some(checked) = self.datatypes.range_checked.get(&built.identity) {
+            return Ok(checked.clone());
+        }
+        let symbol = format!(
+            "p_{}",
+            hex(hash_fields("range-predicate", &[built.identity.as_bytes()]).as_bytes())
+        );
+        // (selected term, type) pairs the predicate constrains.
+        let mut parts: Vec<(String, ValueType)> = Vec::new();
+        let guard = match value_type {
             ValueType::Record { name } => {
-                let built = self.record_sort(name, 1, "")?;
                 let map = self.datatypes.records[&built.sort].clone();
                 let statement = self.statement;
-                let declaration = record_declaration(&statement.environment, name);
-                for field in &map.fields {
-                    let declared = declaration.and_then(|declaration| {
-                        declaration
+                if let Some(declaration) = record_declaration(&statement.environment, name) {
+                    for field in &map.fields {
+                        if let Some(declared) = declaration
                             .fields()
                             .iter()
                             .find(|candidate| candidate.name().as_str() == field.field)
-                    });
-                    if let Some(declared) = declared {
-                        let selected = format!("({} {term})", field.selector);
-                        self.range_constraints(&selected, declared.value_type(), budget, out)?;
+                        {
+                            parts.push((
+                                format!("({} x)", field.selector),
+                                declared.value_type().clone(),
+                            ));
+                        }
+                    }
+                }
+                None
+            }
+            ValueType::Option { value } => {
+                let map = self.datatypes.options[&built.sort].clone();
+                parts.push((format!("({} x)", map.selector), (**value).clone()));
+                Some(format!("((_ is {}) x)", map.some))
+            }
+            _ => None,
+        };
+        let mut conjuncts = Vec::new();
+        let mut dependencies = Vec::new();
+        for (term, part_type) in parts {
+            match &part_type {
+                ValueType::Integer { value } => conjuncts.push(format!(
+                    "(and (<= {} {term}) (<= {term} {}))",
+                    numeral(value.minimum()),
+                    numeral(value.maximum())
+                )),
+                _ => {
+                    if let Some(called) = self.range_predicate(&part_type)? {
+                        conjuncts.push(format!("({called} {term})"));
+                        dependencies.push(called);
                     }
                 }
             }
-            ValueType::Option { value } => {
-                let map = self.option_map(value_type, "type.range")?;
-                let mut inner = Vec::new();
-                let selected = format!("({} {term})", map.selector);
-                self.range_constraints(&selected, value, budget, &mut inner)?;
-                out.extend(
-                    inner.into_iter().map(|constraint| {
-                        format!("(=> ((_ is {}) {term}) {constraint})", map.some)
-                    }),
-                );
-            }
-            _ => {}
         }
-        Ok(())
+        let predicate = match (conjuncts.len(), guard) {
+            (0, _) => None,
+            (_, guard) => {
+                let body = if conjuncts.len() == 1 {
+                    conjuncts.remove(0)
+                } else {
+                    format!("(and {})", conjuncts.join(" "))
+                };
+                let body = match guard {
+                    Some(guard) => format!("(=> {guard} {body})"),
+                    None => body,
+                };
+                self.datatypes.range_predicates.insert(
+                    symbol.clone(),
+                    RangePredicate {
+                        sort: built.sort.clone(),
+                        body,
+                        dependencies,
+                    },
+                );
+                Some(symbol)
+            }
+        };
+        self.datatypes
+            .range_checked
+            .insert(built.identity, predicate.clone());
+        Ok(predicate)
     }
 
     fn lower_integer_comparison(
@@ -1928,6 +1996,8 @@ impl LowerState<'_> {
                 depth,
                 path,
             } => {
+                // `fold_integer` already counted this node, so lowering it must not count it again.
+                self.nodes = self.nodes.saturating_sub(1);
                 let lowered = self.lower(expression, *depth, &ExprPath::detached(path))?;
                 (lowered.smt, ReplayTerm::DatatypeUnreplayed)
             }
@@ -1992,7 +2062,11 @@ impl LowerState<'_> {
             datatype @ (ValueType::Enum { .. }
             | ValueType::Record { .. }
             | ValueType::Option { .. }) => {
-                datatype_sort = Some(self.sort_of(datatype, 1, "")?.sort);
+                let path = match datatype {
+                    ValueType::Option { .. } => format!("value.{}", name.as_str()),
+                    _ => String::new(),
+                };
+                datatype_sort = Some(self.sort_of(datatype, 1, &path)?.sort);
                 datatype_value = Some(datatype);
                 None
             }
@@ -2054,13 +2128,10 @@ impl LowerState<'_> {
             self.datatypes.variable_sorts.insert(symbol.clone(), sort);
         }
         if let Some(value_type) = datatype_value {
-            let mut constraints = Vec::new();
-            let mut budget = MAX_EXPRESSION_NODES;
-            self.range_constraints(&symbol, value_type, &mut budget, &mut constraints)?;
-            if !constraints.is_empty() {
+            if let Some(predicate) = self.range_predicate(value_type)? {
                 self.datatypes
-                    .variable_ranges
-                    .insert(symbol.clone(), constraints);
+                    .variable_predicates
+                    .insert(symbol.clone(), predicate);
             }
         }
         Ok(symbol)
@@ -3171,5 +3242,84 @@ mod tests {
             let errors = lower_boolean_statements(&[statement], &[]).expect_err("refused");
             assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
         }
+    }
+
+    /// NFR-001: an integer read out of a datatype counts once against the expression node bound.
+    /// Each comparison below is four nodes (compare, field access, its base, the literal), so 20,000
+    /// joined by 19,999 conjunctions is 99,999 nodes and 20,001 is 100,004.
+    #[ix_trace_rs::trace("TC-020", "NFR-020-AC-1")]
+    #[test]
+    fn integer_datatype_reads_count_once_against_the_node_bound() {
+        fn join(items: &mut Vec<Expression>) -> Expression {
+            while items.len() > 1 {
+                let mut next = Vec::with_capacity(items.len() / 2 + 1);
+                let mut drained = std::mem::take(items).into_iter();
+                while let Some(left) = drained.next() {
+                    next.push(match drained.next() {
+                        Some(right) => Expression::new(
+                            ExpressionKind::Boolean {
+                                operator: BooleanOperator::TotalAnd,
+                                left: Box::new(left),
+                                right: Box::new(right),
+                            },
+                            span(),
+                        ),
+                        None => left,
+                    });
+                }
+                *items = next;
+            }
+            items.remove(0)
+        }
+        let integer = IntegerType::new(
+            quire_contract_model::IntegerDomain::Signed,
+            0,
+            100,
+            OverflowPolicy::Reject,
+        )
+        .expect("integer type");
+        let build = |count: usize| {
+            let mut items: Vec<Expression> = (0..count)
+                .map(|_| {
+                    Expression::new(
+                        ExpressionKind::Compare {
+                            operator: ComparisonOperator::LessEqual,
+                            left: Box::new(Expression::new(
+                                ExpressionKind::FieldAccess {
+                                    base: Box::new(reference("r")),
+                                    field: SymbolName::new("n").expect("symbol"),
+                                },
+                                span(),
+                            )),
+                            right: Box::new(Expression::new(
+                                ExpressionKind::IntegerLiteral {
+                                    value: 5,
+                                    value_type: integer.clone(),
+                                },
+                                span(),
+                            )),
+                        },
+                        span(),
+                    )
+                })
+                .collect();
+            let expression = join(&mut items);
+            unchecked_statement(
+                vec![record_declaration_with(
+                    "R",
+                    &[("n", ValueType::integer(integer.clone()))],
+                )],
+                vec![input(
+                    "r",
+                    ValueType::Record {
+                        name: SymbolName::new("R").expect("symbol"),
+                    },
+                )],
+                expression,
+            )
+        };
+        lower_boolean_statements(&[build(20_000)], &[]).expect("99,999 nodes admitted");
+        let errors = lower_boolean_statements(&[build(20_001)], &[]).expect_err("over the bound");
+        assert_eq!(errors[0].code(), LoweringErrorCode::ResourceLimit);
     }
 }

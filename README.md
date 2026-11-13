@@ -55,6 +55,11 @@ enum literals, enum value references, and enum equality and inequality (membersh
 disjunction of equalities), plus records and options: record literals, field access,
 option `none`, `some`, presence and `Unwrap` (only under a presence proof), and equality and
 inequality of both. Models of datatype-sorted queries are not replayed yet and stay unverified.
+For every datatype-sorted variable the query asserts the declared range of each integer part
+through one non-recursive range predicate per datatype sort (a record field through its selector;
+an option payload guarded by `(=> ((_ is some) x) ...)`), as one unnamed assertion per variable
+outside the assertion map and report assertions[], following the FR-010 integer range block,
+ordered by ascending variable symbol.
 Declared integer ranges are asserted as unnamed assertions after the declarations.
 Any other construct is refused when the request is lowered, with a typed error
 naming it: non-linear products, integer division and remainder, saturating

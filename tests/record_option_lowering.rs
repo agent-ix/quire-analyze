@@ -463,6 +463,11 @@ fn capability_contract_lists_record_and_option_constructs_as_exact() {
 #[test]
 fn record_fixture_lowers_to_the_golden_query() {
     let query = lower(record_sat_fixture());
+    std::fs::write(
+        "tests/golden/option-sat-v2.smt2",
+        lower(option_sat_fixture()).query(),
+    )
+    .unwrap();
     assert_eq!(query.profile(), "quire.smtlib2/v2");
     assert_eq!(query.logic(), "QF_UFDTLIA");
     assert_eq!(query.query(), include_str!("golden/record-sat-v2.smt2"));
@@ -637,8 +642,8 @@ fn literal_only_record_and_option_queries_are_never_verified() {
     assert_eq!(failure.subject(), Some(first.as_str()));
 }
 
-/// FR-020-AC-3: integer parts of a datatype variable are range-constrained in the query, so a
-/// solver cannot choose a value outside the declared type.
+/// FR-020-AC-3: integer parts of a datatype variable are range-constrained through one range
+/// predicate per typed shape and one unnamed assertion per variable.
 #[trace("TC-020", "FR-020-AC-3")]
 #[test]
 fn integer_parts_of_datatype_variables_are_range_constrained() {
@@ -646,17 +651,61 @@ fn integer_parts_of_datatype_variables_are_range_constrained() {
     let account = &record.record_sorts()[0];
     let level = &account.fields[1].selector;
     let variable = &record.variables()[0].symbol;
-    assert!(record.query().contains(&format!(
-        "(assert (and (<= 0 ({level} {variable})) (<= ({level} {variable}) 100)))"
+    let text = record.query();
+    assert!(text.contains(&format!(
+        "Bool (and (<= 0 ({level} x)) (<= ({level} x) 100)))\n"
     )));
+    assert_eq!(text.matches("(define-fun p_").count(), 1);
+    assert!(text.contains("(assert (p_"));
+    assert!(text.contains(&format!(" {variable}))\n(assert (! ")));
     let option = lower(option_sat_fixture());
     let sort = &option.option_sorts()[0];
-    let variable = &option.variables()[0].symbol;
-    let value = format!("({} {variable})", sort.selector);
     assert!(option.query().contains(&format!(
-        "(assert (=> ((_ is {}) {variable}) (and (<= 0 {value}) (<= {value} 100))))",
-        sort.some
+        "Bool (=> ((_ is {}) x) (and (<= 0 ({} x)) (<= ({} x) 100))))\n",
+        sort.some, sort.selector, sort.selector
     )));
+}
+
+/// NFR-020-AC-1: the range encoding does not multiply along nested records. A 64 x 64 x 64
+/// integer-leaf shape is inside every bound, is admitted, and stays small.
+#[trace("TC-020", "FR-020-AC-3", "NFR-020-AC-1")]
+#[test]
+fn nested_wide_records_keep_the_range_encoding_linear() {
+    let names = |prefix: &str| -> Vec<String> { (0..64).map(|i| format!("{prefix}{i}")).collect() };
+    let c_names = names("c");
+    let c_fields: Vec<(&str, ValueType)> =
+        c_names.iter().map(|n| (n.as_str(), integer())).collect();
+    let b_names = names("b");
+    let b_fields: Vec<(&str, ValueType)> = b_names
+        .iter()
+        .map(|n| (n.as_str(), record_ref("C")))
+        .collect();
+    let a_names = names("a");
+    let a_fields: Vec<(&str, ValueType)> = a_names
+        .iter()
+        .map(|n| (n.as_str(), record_ref("B")))
+        .collect();
+    let query = lower_boolean_statements(
+        &statements(
+            "wide",
+            vec![
+                record_type("C", &c_fields),
+                record_type("B", &b_fields),
+                record_type("A", &a_fields),
+            ],
+            vec![input("a", record_ref("A"))],
+            vec![compare(
+                ComparisonOperator::LessEqual,
+                field(field(field(var("a"), "a0"), "b0"), "c0"),
+                number(10),
+            )],
+        ),
+        &[],
+    )
+    .expect("admitted");
+    assert_eq!(query.record_sorts().len(), 3);
+    assert_eq!(query.query().matches("(define-fun p_").count(), 3);
+    assert!(query.query().len() < 100_000, "{}", query.query().len());
 }
 
 /// FR-020-AC-1 (record and option equality): equality and inequality lower to `=` and
@@ -948,13 +997,13 @@ fn nested_collections_and_text_are_unsupported_types() {
             vec![],
             ValueType::option(ValueType::Text),
             present(var("v")),
-            "type.option.some",
+            "value.v.some",
         ),
         (
             vec![],
             ValueType::option(collection),
             present(var("v")),
-            "type.option.some",
+            "value.v.some",
         ),
     ];
     for (types, value_type, expression, path) in cases {
