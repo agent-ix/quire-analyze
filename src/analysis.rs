@@ -1183,7 +1183,7 @@ mod tests {
         ] {
             let parsed = parse(text, &entries).expect("model parses");
             assert!(parsed.first_defect().is_none());
-            assert_eq!(parsed.assignment.booleans["b"], true);
+            assert!(parsed.assignment.booleans["b"]);
             assert_eq!(parsed.assignment.integers["x"], 7);
             assert_eq!(parsed.assignment.integers["y"], -3);
             assert_eq!(parsed.defined.len(), 3);

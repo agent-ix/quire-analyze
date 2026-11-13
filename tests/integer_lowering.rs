@@ -789,11 +789,13 @@ fn symbol_of(query: &QueryBundle, name: &str) -> String {
 /// A fixture whose only constraint is `x >= -5`, over `x` declared in `[-5, 5]`.
 fn bounded_query() -> QueryBundle {
     let ty = integer_type(-5, 5, OverflowPolicy::Reject);
-    lower_one(
+    let bounded = statement(
         "bounded",
         &[("x", ty.clone())],
         compare(ComparisonOperator::GreaterEqual, var("x"), lit(-5, &ty)),
-    )
+    );
+    let request = AnalysisRequest::consistency(vec![], vec![bounded], vec![]).expect("request");
+    lower_analysis_request(&request).expect("lower")
 }
 
 fn z3_model(definitions: &[String]) -> String {
