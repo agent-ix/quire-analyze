@@ -1316,3 +1316,36 @@ fn differential_v2_requires_retained_identities_and_rejects_v1() {
     assert!(validate_report_document(&bytes).is_err());
     assert!(validate_differential_report(&bytes, &query, &run).is_err());
 }
+
+/// FR-005-AC-1: a schema rejection names the failing member by its JSON pointer.
+#[trace("TC-007", "FR-005-AC-1")]
+#[test]
+fn schema_rejection_names_the_failing_member() {
+    let request =
+        AnalysisRequest::dead_antecedent(vec![], statement("path", literal(false), &[]), vec![])
+            .expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let z3 = execute_engine_response(&query, "unsat\n", SolverEngine::Z3);
+    let cvc5 = execute_engine_response(&query, "unsat\n", SolverEngine::Cvc5);
+    let run = compare_solver_records(&query, &z3, &cvc5);
+    let report = render_differential_report(&query, &run).expect("report");
+    let value: serde_json::Value = serde_json::from_slice(&report).expect("JSON");
+
+    let cases: [(&str, serde_json::Value); 5] = [
+        ("/engines/0/elapsedMs", "x".into()),
+        ("/logic", "BOGUS".into()),
+        ("/differential/disposition", "bogus".into()),
+        ("/engines/0/status", "bogus".into()),
+        ("/engines/0/outcome", "bogus".into()),
+    ];
+    for (pointer, bad) in cases {
+        let mut mutated = value.clone();
+        *mutated.pointer_mut(pointer).expect("member") = bad;
+        let message = validate_report_document(&canonical_report(mutated))
+            .expect_err("schema violation is rejected");
+        assert!(
+            message.contains(&format!("at {pointer}:")),
+            "{pointer} not named in: {message}"
+        );
+    }
+}

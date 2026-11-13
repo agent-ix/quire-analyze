@@ -304,9 +304,9 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
     if let Err(mut errors) = validator.validate(&value) {
         let error = errors
             .next()
-            .map(|error| error.to_string())
+            .map(|error| format!("at {}: {error}", error.instance_path))
             .unwrap_or_else(|| "unknown validation error".to_owned());
-        return Err(format!("report does not satisfy its schema: {error}"));
+        return Err(format!("report does not satisfy its schema {error}"));
     }
     {
         let object = require_object(&value, "report root")?;
