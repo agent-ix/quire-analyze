@@ -29,6 +29,9 @@ const SOURCE_DOCUMENT: &str = "contract-package";
 const REQUIREMENT_ID: &str = "analysis";
 const ANCHOR_NAME: &str = "analysis";
 
+/// The most `Expression` nodes the translation produces across all claims of a package.
+const MAX_TOTAL_EXPRESSIONS: u32 = 100_000;
+
 const OP_NOT: &str = "quire.op.boolean.not";
 const OP_AND: &str = "quire.op.boolean.and";
 const OP_OR: &str = "quire.op.boolean.or";
@@ -49,6 +52,8 @@ pub enum TranslationErrorKind {
     CannotLower,
     /// The translated tree of a clause exceeds the expression node bound.
     ExpressionNodeBound,
+    /// The translated trees of all claims together exceed the total expression bound.
+    ExpressionTotalBound,
     /// The translated tree of a clause exceeds the expression depth bound.
     ExpressionDepthBound,
     /// A node has no usable source region.
@@ -255,6 +260,7 @@ pub fn translate_analysis_claims(
         in_progress: BTreeSet::new(),
         entered: Vec::new(),
         produced: 0,
+        total: 0,
         parameters: BTreeSet::new(),
         span: zero_span(&source)?,
     };
@@ -420,6 +426,8 @@ struct Walker<'a> {
     entered: Vec<usize>,
     /// `Expression` nodes produced for the current claim, each inlined copy counted.
     produced: u32,
+    /// `Expression` nodes produced for all claims so far, never reset between claims.
+    total: u32,
     /// Distinct `value/parameter` nodes reached by any claim.
     parameters: BTreeSet<usize>,
     /// The span every `Expression` of the current claim carries.
@@ -589,11 +597,19 @@ impl<'a> Walker<'a> {
     /// Counts one produced `Expression` at `depth`, refusing the first over a bound.
     fn count(&mut self, node: usize, depth: usize) -> Result<(), TranslationError> {
         self.produced = self.produced.saturating_add(1);
+        self.total = self.total.saturating_add(1);
         if self.produced > MAX_EXPRESSION_NODES {
             return Err(TranslationError::at_node(
                 TranslationErrorKind::ExpressionNodeBound,
                 node,
                 format!("the translation exceeds {MAX_EXPRESSION_NODES} expression nodes"),
+            ));
+        }
+        if self.total > MAX_TOTAL_EXPRESSIONS {
+            return Err(TranslationError::at_node(
+                TranslationErrorKind::ExpressionTotalBound,
+                node,
+                format!("the claims together exceed {MAX_TOTAL_EXPRESSIONS} expression nodes"),
             ));
         }
         if depth > MAX_EXPRESSION_DEPTH {

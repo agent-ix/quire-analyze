@@ -630,7 +630,7 @@ fn two_translations_of_the_same_bytes_agree() {
     assert_eq!(first.environment(), second.environment());
 }
 
-#[trace("FR-009-AC-6", "FR-009-AC-23")]
+#[trace("FR-009-AC-23")]
 #[test]
 fn a_package_without_a_claim_or_with_a_non_boolean_claim_is_distinguished() {
     let mut document = Document::new();
@@ -663,7 +663,7 @@ fn assert_refused_at(
         .contains(&format!("semantic_graph.nodes[{node}]")));
 }
 
-#[trace("FR-009-AC-19", "FR-009-AC-23")]
+#[trace("FR-009-AC-23")]
 #[test]
 fn an_integer_operation_is_refused_at_its_node() {
     let mut document = Document::new();
@@ -798,6 +798,73 @@ fn a_shared_subterm_chain_of_61_nodes_is_refused_without_expanding_it() {
         started.elapsed() < std::time::Duration::from_secs(5),
         "{:?}",
         started.elapsed()
+    );
+}
+
+/// The admitted package read from the canonical bytes of `built` after `edit` changed them.
+fn mutated(built: &[u8], edit: impl FnOnce(&mut Value)) -> ContractPackageV1 {
+    let mut value: Value = serde_json::from_slice(built).expect("package json");
+    edit(&mut value);
+    let bytes = serde_json::to_vec(&value).expect("package bytes");
+    match ContractPackageWireV1::read(
+        &bytes,
+        CheckedPackageReadLimits::bounded(),
+        &Default::default(),
+    ) {
+        ContractPackageReadResult::Admitted(package) => *package,
+        other => panic!("mutated package refused: {other:?}"),
+    }
+}
+
+#[trace("FR-009-AC-24")]
+#[test]
+fn a_claim_node_without_occurrences_is_refused_at_the_node() {
+    let mut document = Document::new();
+    let p = document.parameter();
+    let claim = document.claim(&p);
+    let built = document.package(&[&claim]);
+    let node = index(&built, &claim);
+    let package = mutated(&document.bytes(&[&claim]), |value| {
+        value["semantic_graph"]["nodes"][node]["occurrences"] = json!([]);
+        value["source_map"]["nodes"][node]["occurrences"] = json!([]);
+        value["source_map"]["requested_items"][0]["occurrences"] = json!([]);
+    });
+    let error = translate_analysis_claims(&package).expect_err("no occurrence");
+    assert_refused_at(&package, &error, TranslationErrorKind::SourceRegion, &claim);
+}
+
+#[trace("FR-009-AC-23")]
+#[test]
+fn an_integer_typed_parameter_operand_is_refused_at_the_parameter() {
+    let mut document = Document::new();
+    let p = document.parameter();
+    let q = document.parameter();
+    let and = document.op(AND, &[&p, &q]);
+    let claim = document.claim(&and);
+    let built = document.package(&[&claim]);
+    let node = index(&built, &p);
+    let package = mutated(&document.bytes(&[&claim]), |value| {
+        value["semantic_graph"]["nodes"][node]["semantic_type"] = id("scalar_type/integer");
+    });
+    let error = translate_analysis_claims(&package).expect_err("integer parameter");
+    assert_refused_at(&package, &error, TranslationErrorKind::CannotLower, &p);
+    assert!(error.message().contains("not Boolean"), "{error}");
+}
+
+#[trace("FR-009-AC-23")]
+#[test]
+fn claims_sharing_one_large_tree_are_bounded_in_total() {
+    let mut document = Document::new();
+    let mut sized = Sized::new(&mut document);
+    let top = sized.node(&mut document, 10_000);
+    let claims = (0..11).map(|_| document.claim(&top)).collect::<Vec<_>>();
+    let labels = claims.iter().map(String::as_str).collect::<Vec<_>>();
+    let (package, error) = refusal(&document, &labels);
+    assert_refused_at(
+        &package,
+        &error,
+        TranslationErrorKind::ExpressionTotalBound,
+        &top,
     );
 }
 
