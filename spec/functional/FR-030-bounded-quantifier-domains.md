@@ -55,7 +55,8 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   instance count. The map is the observable of admission; entries appear in canonical quantifier
   order, independent of host maps and paths. Canonical order is statements in ascending
   assertion-symbol order and, within a statement, depth-first pre-order with siblings left to
-  right; the map records the lower and upper bound of a range.
+  right; the map records the lower and upper bound of a range, and for an enum or collection the
+  element of each instance in instance order.
 - A universal quantifier over an empty domain is true and an existential quantifier over an empty
   domain is false.
 - Nested admitted quantifiers are admitted; one refused quantifier at any depth refuses the whole

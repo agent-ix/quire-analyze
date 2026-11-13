@@ -41,7 +41,9 @@ universal and by disjunction for an existential quantifier.
   rule, and an empty collection is an empty domain.
 - Assertion names, symbol names and metadata are stable and independent of host maps and paths.
 - Each instance retains the quantifier's source identity and the element, so a counterexample maps
-  back to the instance that failed.
+  back to the instance that failed. The quantifier-map entry of an enum or collection quantifier
+  lists the element of each instance in instance order, so the position of a failing instance names
+  its element and the entry names its source identity.
 - Expansion consumes the instance budget defined in
   [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md); this requirement states no
   separate ceiling.

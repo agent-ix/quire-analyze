@@ -1,11 +1,12 @@
-//! Quantifiers over bounded integer ranges (FR-030, FR-032, NFR-030).
+//! Quantifiers over bounded integer ranges, enum domains and finite collections (FR-030,
+//! FR-031, FR-032, NFR-030).
 //!
 //! The contract model has no range-domain quantifier form, so the analysis model carries one at
 //! the lowering layer: an [`AnalysisFormula`] whose leaves are contract expressions and whose
 //! quantifier nodes are [`RangeQuantifier`]s. A leaf names a quantifier's bound variable with
 //! `ExpressionKind::LocalReference`.
 
-use quire_contract_model::{Expression, IntegerType, QuantifierKind, SymbolName};
+use quire_contract_model::{Expression, IntegerType, QuantifierKind, SymbolName, ValueType};
 
 /// Bound on the instances that expansion may produce in one request, summed over all clauses.
 pub const MAX_EXPANDED_INSTANCES: u128 = 1024;
@@ -76,6 +77,110 @@ pub enum AnalysisFormula {
     Or(Box<AnalysisFormula>, Box<AnalysisFormula>),
     Implies(Box<AnalysisFormula>, Box<AnalysisFormula>),
     Range(Box<RangeQuantifier>),
+    /// A quantifier over an enum domain or a finite collection.
+    Domain(Box<DomainQuantifier>),
+}
+
+/// One literal element of a finite collection.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DomainElement {
+    Boolean(bool),
+    Enum {
+        enumeration: SymbolName,
+        variant: SymbolName,
+    },
+    Integer(i128),
+}
+
+/// The catalog constructor of a collection literal (`quire.op.collection.*`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CollectionKind {
+    Set,
+    OrderedSet,
+    Sequence,
+    Bag,
+}
+
+impl CollectionKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Set => "set",
+            Self::OrderedSet => "ordered_set",
+            Self::Sequence => "sequence",
+            Self::Bag => "bag",
+        }
+    }
+
+    /// Whether a repeated literal collapses to its first occurrence.
+    pub(crate) const fn collapses_repeats(self) -> bool {
+        matches!(self, Self::Set | Self::OrderedSet)
+    }
+
+    /// Whether elements are enumerated in ascending canonical order rather than as written.
+    pub(crate) const fn sorted(self) -> bool {
+        matches!(self, Self::Set | Self::Bag)
+    }
+}
+
+/// A domain with no finite, exactly encodable members. Lowering refuses it (FR-030).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UnboundedDomain {
+    /// An integer with no finite declared bounds.
+    Integer,
+    Text,
+    Rational,
+    /// A collection that is a parameter reference or has a non-literal element.
+    UnfixedCollection,
+    /// A collection element sort with no exact encoding, such as a nested collection.
+    UnencodableElement,
+}
+
+impl UnboundedDomain {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Integer => "integer",
+            Self::Text => "text",
+            Self::Rational => "rational",
+            Self::UnfixedCollection => "unfixed_collection",
+            Self::UnencodableElement => "unencodable_element",
+        }
+    }
+
+    pub(crate) const fn reason(self) -> QuantifierReason {
+        match self {
+            Self::Integer => QuantifierReason::UnboundedDomain,
+            Self::Text => QuantifierReason::TextDomain,
+            Self::Rational => QuantifierReason::RationalDomain,
+            Self::UnfixedCollection => QuantifierReason::UnfixedCollection,
+            Self::UnencodableElement => QuantifierReason::UnencodableElement,
+        }
+    }
+}
+
+/// The members a quantifier ranges over.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QuantifierDomain {
+    /// Every declared member of the named enum, in declaration order.
+    Enum(SymbolName),
+    /// A collection literal of fixed elements.
+    Collection {
+        kind: CollectionKind,
+        elements: Vec<DomainElement>,
+    },
+    /// A domain that is refused at lowering.
+    Unbounded(UnboundedDomain),
+}
+
+/// A universal or existential quantifier over an enum domain or a finite collection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DomainQuantifier {
+    pub identity: String,
+    pub kind: QuantifierKind,
+    pub local: SymbolName,
+    /// The sort of the bound variable: Boolean, an enum, or a bounded integer.
+    pub local_type: ValueType,
+    pub domain: QuantifierDomain,
+    pub body: AnalysisFormula,
 }
 
 impl AnalysisFormula {
@@ -109,7 +214,69 @@ impl AnalysisFormula {
                     "body": quantifier.body.to_value()?,
                 }
             }),
+            Self::Domain(quantifier) => json!({
+                "domain": {
+                    "identity": quantifier.identity,
+                    "kind": match quantifier.kind {
+                        QuantifierKind::ForAll => "forall",
+                        QuantifierKind::Exists => "exists",
+                    },
+                    "local": quantifier.local.as_str(),
+                    "local_type": serde_json::to_value(&quantifier.local_type)?,
+                    "domain": quantifier.domain.to_value(),
+                    "body": quantifier.body.to_value()?,
+                }
+            }),
         })
+    }
+}
+
+impl QuantifierDomain {
+    fn to_value(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Self::Enum(name) => json!({ "enum": name.as_str() }),
+            // Two spellings that enumerate the same members share one identity: a repeat that
+            // collapses and the written order of an unordered collection do not matter.
+            Self::Collection { kind, elements } => {
+                let mut members: Vec<&DomainElement> = elements.iter().collect();
+                if kind.sorted() {
+                    members.sort();
+                }
+                if kind.collapses_repeats() {
+                    let mut seen = std::collections::BTreeSet::new();
+                    members.retain(|member| seen.insert(*member));
+                }
+                json!({
+                    "collection": kind.as_str(),
+                    "elements": members.into_iter().map(DomainElement::to_value).collect::<Vec<_>>(),
+                })
+            }
+            Self::Unbounded(class) => json!({ "unbounded": class.as_str() }),
+        }
+    }
+}
+
+impl DomainElement {
+    fn to_value(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Self::Boolean(value) => json!({ "boolean": value }),
+            Self::Enum {
+                enumeration,
+                variant,
+            } => json!({ "enum": [enumeration.as_str(), variant.as_str()] }),
+            Self::Integer(value) => json!({ "integer": value.to_string() }),
+        }
+    }
+
+    /// The element as it is named in a quantifier-map entry.
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::Boolean(value) => value.to_string(),
+            Self::Enum { variant, .. } => variant.as_str().to_owned(),
+            Self::Integer(value) => value.to_string(),
+        }
     }
 }
 
@@ -167,8 +334,11 @@ pub struct QuantifierEntry {
     pub encoding: QuantifierEncoding,
     /// Instances expansion produced; zero for a bounded quantifier, which consumes no budget.
     pub instance_count: u128,
-    pub lower: RangeBound,
-    pub upper: RangeBound,
+    /// The lower and upper bound of a range quantifier; `None` for an enum or collection.
+    pub bounds: Option<(RangeBound, RangeBound)>,
+    /// For an enum or collection quantifier, the element of each instance in instance order, so
+    /// a failing instance maps back to its element and to `source`. Empty for a range.
+    pub elements: Vec<String>,
 }
 
 /// The width of an inclusive literal range, or `None` when it is not representable. An empty
