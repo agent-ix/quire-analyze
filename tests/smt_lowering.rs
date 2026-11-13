@@ -212,6 +212,7 @@ fn implication(left: &str, right: &str) -> Expression {
     "FR-002-AC-1",
     "FR-002-AC-3",
     "FR-002-AC-5",
+    "FR-010-AC-9",
     "NFR-001-AC-1"
 )]
 #[test]

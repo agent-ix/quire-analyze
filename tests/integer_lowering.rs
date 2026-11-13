@@ -14,7 +14,8 @@ use quire_analyze::{
     compare_solver_records, execute_solver, lower_analysis_request, lower_boolean_statements,
     render_differential_report, validate_differential_report, validate_report_document,
     AdapterLimits, AnalysisRequest, CancellationToken, DifferentialDisposition, LoweringErrorCode,
-    QueryBundle, SolverConfig, SolverEngine, StatementInput, CAPABILITY_CONTRACT, SMTLIB2_PROFILE,
+    QueryBundle, SolverConfig, SolverEngine, StatementInput, UnsupportedClass, CAPABILITY_CONTRACT,
+    SMTLIB2_PROFILE,
 };
 use quire_contract_model::{
     AnchorName, BooleanOperator, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
@@ -325,13 +326,15 @@ fn capability_contract_declares_the_integer_profile() {
         assert!(!CAPABILITY_CONTRACT.exact_constructs.contains(unsupported));
     }
     for class in [
-        "non_linear_arithmetic",
-        "integer_division",
-        "integer_remainder",
-        "saturating_arithmetic",
-        "constant_overflow",
+        UnsupportedClass::NonLinearArithmetic,
+        UnsupportedClass::IntegerDivision,
+        UnsupportedClass::IntegerRemainder,
+        UnsupportedClass::SaturatingArithmetic,
+        UnsupportedClass::ConstantOverflow,
     ] {
-        assert!(CAPABILITY_CONTRACT.unsupported_constructs.contains(&class));
+        assert!(CAPABILITY_CONTRACT
+            .unsupported_constructs
+            .contains(&class.as_str()));
     }
 }
 
@@ -525,22 +528,22 @@ fn constant_subtrees_fold_and_other_terms_keep_their_shape() {
 fn non_linear_and_unsupported_terms_are_refused() {
     let ty = narrow();
     let saturating = integer_type(-1000, 1000, OverflowPolicy::Saturate);
-    let refusal = |class: &str, variables: &[(&str, IntegerType)], expression: Expression| {
+    let refusal = |class: UnsupportedClass,
+                   path: &str,
+                   variables: &[(&str, IntegerType)],
+                   expression: Expression| {
         let statement = statement("refused", variables, expression);
         let errors = lower_boolean_statements(&[statement], &[]).expect_err("unsupported");
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
-        assert!(
-            errors[0].message().starts_with(class),
-            "{class}: {}",
-            errors[0].message()
-        );
-        assert!(errors[0].path().starts_with("expression"));
+        assert_eq!(errors[0].unsupported_class(), Some(class));
+        assert_eq!(errors[0].path(), path);
     };
     // Facts that a divisor is non-zero and that operands are small come from guards.
     let small = |body: Expression| guarded(&["x", "y"], 10, body);
     refusal(
-        "non_linear_arithmetic",
+        UnsupportedClass::NonLinearArithmetic,
+        "expression.right.right.left",
         &[("x", ty.clone()), ("y", ty.clone())],
         small(compare(
             ComparisonOperator::Equal,
@@ -557,7 +560,8 @@ fn non_linear_and_unsupported_terms_are_refused() {
         ),
     );
     refusal(
-        "integer_division",
+        UnsupportedClass::IntegerDivision,
+        "expression.right.right.right.left",
         &[("x", ty.clone()), ("y", ty.clone())],
         small(nonzero),
     );
@@ -570,12 +574,14 @@ fn non_linear_and_unsupported_terms_are_refused() {
         ),
     );
     refusal(
-        "integer_remainder",
+        UnsupportedClass::IntegerRemainder,
+        "expression.right.right.right.left",
         &[("x", ty.clone()), ("y", ty.clone())],
         small(remainder),
     );
     refusal(
-        "saturating_arithmetic",
+        UnsupportedClass::SaturatingArithmetic,
+        "expression.left",
         &[("x", saturating.clone())],
         compare(
             ComparisonOperator::Equal,
@@ -632,9 +638,9 @@ fn sat_against_unsat_is_a_disagreement() {
     assert!(!run.is_conclusive());
 }
 
-/// FR-010-AC-7 (controlled responses): an unsatisfiable fixture decided unsat by both agrees,
-/// and a satisfiable integer model is never published as verified before FR-011 replay exists.
-#[trace("TC-016", "FR-010-AC-7")]
+/// FR-010-AC-10 (controlled responses): an unsat integer run agrees and its report names the
+/// integer profile and logic; a satisfiable integer model is never verified before FR-011 replay.
+#[trace("TC-016", "FR-010-AC-10")]
 #[test]
 fn unsat_fixture_agrees_and_integer_models_stay_unverified() {
     let request = AnalysisRequest::consistency(vec![], unsat_fixture(), vec![]).expect("request");
@@ -692,7 +698,7 @@ fn reports_naming_the_boolean_only_profile_are_refused() {
     }
 }
 
-/// FR-010-AC-7: real solvers decide the fixtures identically.
+/// FR-010-AC-7: real solvers agree on the unsat fixture and both answer sat on the sat fixture.
 #[trace("TC-016", "FR-010-AC-7")]
 #[test]
 #[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
@@ -702,16 +708,37 @@ fn real_z3_cvc5_decide_integer_fixtures_identically() {
     let z3 = SolverConfig::new(SolverEngine::Z3, z3_path, AdapterLimits::default()).expect("z3");
     let cvc5 =
         SolverConfig::new(SolverEngine::Cvc5, cvc5_path, AdapterLimits::default()).expect("cvc5");
-    for (statements, status) in [
-        (sat_fixture(), quire_analyze::AnalysisStatus::Satisfied),
-        (unsat_fixture(), quire_analyze::AnalysisStatus::Refuted),
-    ] {
+    let run_for = |statements: Vec<StatementInput>| {
         let request = AnalysisRequest::consistency(vec![], statements, vec![]).expect("request");
         let query = lower_analysis_request(&request).expect("lower");
         let run =
             quire_analyze::execute_differential(&query, &z3, &cvc5, &CancellationToken::default())
                 .expect("run");
-        assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
-        assert_eq!(run.agreed_status(), Some(status));
+        (query, run)
+    };
+    let (query, run) = run_for(unsat_fixture());
+    assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+    assert_eq!(
+        run.agreed_status(),
+        Some(quire_analyze::AnalysisStatus::Refuted)
+    );
+    let report = render_differential_report(&query, &run).expect("report");
+    validate_differential_report(&report, &query, &run).expect("valid");
+
+    // Both engines answer sat, but integer models are not replayed until FR-011, so the
+    // models stay unverified and the comparison is not an agreement.
+    let (_, run) = run_for(sat_fixture());
+    for conclusion in [run.z3(), run.cvc5()] {
+        assert_eq!(
+            conclusion.solver().outcome(),
+            quire_analyze::SolverOutcome::Sat
+        );
+        assert_eq!(
+            conclusion.explanation(),
+            quire_analyze::ExplanationState::Incomplete
+        );
+        assert!(conclusion.verified_model().is_none());
     }
+    assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
+    assert_eq!(run.agreed_status(), None);
 }

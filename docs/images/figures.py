@@ -36,7 +36,7 @@ def hero():
         980,
         244,
         "Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB "
-        "query over Booleans, runs a pinned solver (Z3 or cvc5) and classifies the reply. The "
+        "query over Booleans and linear integers, runs a pinned solver (Z3 or cvc5) and classifies the reply. The "
         "answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported "
         "or tool-error.",
     )
@@ -44,13 +44,13 @@ def hero():
     w = 150
     f.box(xs[0], 0, w, 56, "model", "contract clauses", "from Contract IR")
     f.box(xs[1], 0, w, 56, "logic", "request", "a role per clause")
-    f.box(xs[2], 0, w, 56, "model", "SMT-LIB query", "QF_UF · Booleans")
+    f.box(xs[2], 0, w, 56, "model", "SMT-LIB query", "QF_LIA · Bool, Int")
     f.box(xs[3], 0, w, 56, "ink", "pinned solver", "Z3 or cvc5")
     f.box(xs[4], 0, w, 56, "logic", "classify", "replay the model")
     for i in range(4):
         role = "ink" if i == 2 else "logic" if i == 0 else "model"
         f.line([(xs[i] + w, 28), (xs[i + 1] - 3, 28)], role)
-    f.note(xs[1] + 90, 84, "non-Boolean constructs are refused when lowering", "muted", anchor="start")
+    f.note(xs[1] + 90, 84, "non-linear and other constructs are refused when lowering", "muted", anchor="start")
     f.line([(xs[4] + w // 2, 56), (xs[4] + w // 2, 100)], "evidence", arrow=False)
     cols = [
         (0, "satisfied", "consistent · implied", "logic"),

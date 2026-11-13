@@ -15,7 +15,7 @@ as their own states.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
-  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans, runs a configured solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
+  <img alt="Quire Analyze turns Contract IR clauses into an analysis request, lowers it to an SMT-LIB query over Booleans and linear integers, runs a configured solver (Z3 or cvc5) and classifies the reply. The answer is satisfied, refuted with a verified witness model, unknown, timeout, unsupported or tool-error." src="docs/images/hero-light.svg">
 </picture>
 
 > **Status: public prerelease.** The crate is at 0.1.0, its API is not stable
@@ -70,7 +70,7 @@ Every analysis ends in one `AnalysisStatus`. Only `satisfied` and `refuted` are 
 | Status | Meaning |
 | --- | --- |
 | `satisfied` | The property holds (consistent, or the implication is valid). |
-| `refuted` | The property fails; a verified witness model is attached when the solver produced one. |
+| `refuted` | The property fails; a verified witness model is attached when the solver produced one. A satisfiable query over integers keeps its model unverified (explanation `Incomplete`) until integer witness replay exists. |
 | `unknown` | The solver answered `unknown`. |
 | `timeout` | The wall-clock limit was reached, or the run was cancelled. |
 | `unsupported` | The platform cannot run the solver adapter. |

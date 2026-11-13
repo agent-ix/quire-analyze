@@ -101,9 +101,32 @@ pub enum LoweringErrorCode {
     ResourceLimit,
 }
 
+/// Why an integer term has no exact linear encoding.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum UnsupportedClass {
+    NonLinearArithmetic,
+    IntegerDivision,
+    IntegerRemainder,
+    SaturatingArithmetic,
+    ConstantOverflow,
+}
+
+impl UnsupportedClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NonLinearArithmetic => "non_linear_arithmetic",
+            Self::IntegerDivision => "integer_division",
+            Self::IntegerRemainder => "integer_remainder",
+            Self::SaturatingArithmetic => "saturating_arithmetic",
+            Self::ConstantOverflow => "constant_overflow",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoweringError {
     code: LoweringErrorCode,
+    class: Option<UnsupportedClass>,
     path: String,
     message: String,
 }
@@ -112,6 +135,7 @@ impl LoweringError {
     fn new(code: LoweringErrorCode, path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code,
+            class: None,
             path: path.into(),
             message: message.into(),
         }
@@ -119,6 +143,10 @@ impl LoweringError {
 
     pub const fn code(&self) -> LoweringErrorCode {
         self.code
+    }
+    /// The integer construct class of an unsupported integer term, when it has one.
+    pub const fn unsupported_class(&self) -> Option<UnsupportedClass> {
+        self.class
     }
     pub fn path(&self) -> &str {
         &self.path
@@ -847,7 +875,7 @@ fn lower_expression(
         ranges,
         nodes: 0,
     };
-    state.lower(&statement.expression, 1)
+    state.lower(&statement.expression, 1, &ExprPath::ROOT)
 }
 
 struct LowerState<'a> {
@@ -864,6 +892,7 @@ impl LowerState<'_> {
         &mut self,
         expression: &Expression,
         depth: usize,
+        path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
         count_node(depth, &mut self.nodes)?;
         match expression.kind() {
@@ -879,7 +908,7 @@ impl LowerState<'_> {
                 })
             }
             ExpressionKind::BooleanNot { operand } => {
-                let operand = self.lower(operand, depth + 1)?;
+                let operand = self.lower(operand, depth + 1, &path.child("operand"))?;
                 Ok(LoweredExpression {
                     smt: format!("(not {})", operand.smt),
                     replay: ReplayExpression::Not(Box::new(operand.replay)),
@@ -890,8 +919,8 @@ impl LowerState<'_> {
                 left,
                 right,
             } => {
-                let left = self.lower(left, depth + 1)?;
-                let right = self.lower(right, depth + 1)?;
+                let left = self.lower(left, depth + 1, &path.child("left"))?;
+                let right = self.lower(right, depth + 1, &path.child("right"))?;
                 let (operator_name, replay) = match operator {
                     BooleanOperator::ShortCircuitAnd | BooleanOperator::TotalAnd => (
                         "and",
@@ -917,19 +946,19 @@ impl LowerState<'_> {
                 right,
             } => {
                 if self.is_integer_term(left) {
-                    return self.lower_integer_comparison(*operator, left, right, depth);
+                    return self.lower_integer_comparison(*operator, left, right, depth, path);
                 }
                 if !matches!(
                     operator,
                     ComparisonOperator::Equal | ComparisonOperator::NotEqual
                 ) {
                     return Err(unsupported(
-                        "expression",
+                        &path.render(),
                         "ordering comparison of non-integer terms is unsupported",
                     ));
                 }
-                let left = self.lower(left, depth + 1)?;
-                let right = self.lower(right, depth + 1)?;
+                let left = self.lower(left, depth + 1, &path.child("left"))?;
+                let right = self.lower(right, depth + 1, &path.child("right"))?;
                 Ok(if *operator == ComparisonOperator::Equal {
                     LoweredExpression {
                         smt: format!("(= {} {})", left.smt, right.smt),
@@ -948,7 +977,7 @@ impl LowerState<'_> {
                     }
                 })
             }
-            other => Err(unsupported("expression", construct_name(other))),
+            other => Err(unsupported(&path.render(), construct_name(other))),
         }
     }
 
@@ -974,13 +1003,20 @@ impl LowerState<'_> {
         left: &Expression,
         right: &Expression,
         depth: usize,
+        path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
         let environment = &self.statement.environment;
         let types = |name: &SymbolName| integer_declaration_type(environment, name);
-        let left = fold_integer(left, "expression.left", &types, depth + 1, &mut self.nodes)?;
+        let left = fold_integer(
+            left,
+            &path.child("left"),
+            &types,
+            depth + 1,
+            &mut self.nodes,
+        )?;
         let right = fold_integer(
             right,
-            "expression.right",
+            &path.child("right"),
             &types,
             depth + 1,
             &mut self.nodes,
@@ -1101,6 +1137,33 @@ impl LowerState<'_> {
     }
 }
 
+/// The position of an expression within the statement, rendered only when an error needs it.
+struct ExprPath<'a> {
+    parent: Option<&'a ExprPath<'a>>,
+    segment: &'static str,
+}
+
+impl<'a> ExprPath<'a> {
+    const ROOT: ExprPath<'static> = ExprPath {
+        parent: None,
+        segment: "expression",
+    };
+
+    fn child(&'a self, segment: &'static str) -> ExprPath<'a> {
+        ExprPath {
+            parent: Some(self),
+            segment,
+        }
+    }
+
+    fn render(&self) -> String {
+        match self.parent {
+            Some(parent) => format!("{}.{}", parent.render(), self.segment),
+            None => self.segment.to_owned(),
+        }
+    }
+}
+
 fn count_node(depth: usize, nodes: &mut usize) -> Result<(), LoweringError> {
     if depth > MAX_EXPRESSION_DEPTH {
         return Err(LoweringError::new(
@@ -1166,15 +1229,21 @@ struct FoldedInteger {
     value_type: IntegerType,
 }
 
-fn integer_unsupported(class: &str, path: &str, message: &str) -> LoweringError {
-    unsupported(path, &format!("{class}: {message}"))
+fn integer_unsupported(
+    class: UnsupportedClass,
+    path: &ExprPath<'_>,
+    message: &str,
+) -> LoweringError {
+    let mut error = unsupported(&path.render(), message);
+    error.class = Some(class);
+    error
 }
 
 /// Folds every maximal constant subtree to one literal and rejects any term outside linear
 /// integer arithmetic. `types` resolves a value reference to its declared integer type.
 fn fold_integer(
     expression: &Expression,
-    path: &str,
+    path: &ExprPath<'_>,
     types: &dyn Fn(&SymbolName) -> Option<IntegerType>,
     depth: usize,
     nodes: &mut usize,
@@ -1182,7 +1251,7 @@ fn fold_integer(
     count_node(depth, nodes)?;
     let overflow = || {
         integer_unsupported(
-            "constant_overflow",
+            UnsupportedClass::ConstantOverflow,
             path,
             "constant fold leaves the 128-bit signed range",
         )
@@ -1195,7 +1264,7 @@ fn fold_integer(
         ExpressionKind::ValueReference { name, observation } => {
             let value_type = types(name).ok_or_else(|| {
                 unsupported(
-                    path,
+                    &path.render(),
                     "only integer value references are exact in an integer term",
                 )
             })?;
@@ -1208,8 +1277,7 @@ fn fold_integer(
             })
         }
         ExpressionKind::NumericNegate { operand } => {
-            let operand =
-                fold_integer(operand, &format!("{path}.operand"), types, depth + 1, nodes)?;
+            let operand = fold_integer(operand, &path.child("operand"), types, depth + 1, nodes)?;
             reject_saturating(&operand.value_type, path)?;
             let tree = match operand.tree {
                 IntegerTree::Constant(value) => {
@@ -1230,22 +1298,22 @@ fn fold_integer(
             match operator {
                 NumericOperator::Divide => {
                     return Err(integer_unsupported(
-                        "integer_division",
+                        UnsupportedClass::IntegerDivision,
                         path,
                         "integer division is outside linear integer arithmetic",
                     ))
                 }
                 NumericOperator::Remainder => {
                     return Err(integer_unsupported(
-                        "integer_remainder",
+                        UnsupportedClass::IntegerRemainder,
                         path,
                         "integer remainder is outside linear integer arithmetic",
                     ))
                 }
                 NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
             }
-            let left = fold_integer(left, &format!("{path}.left"), types, depth + 1, nodes)?;
-            let right = fold_integer(right, &format!("{path}.right"), types, depth + 1, nodes)?;
+            let left = fold_integer(left, &path.child("left"), types, depth + 1, nodes)?;
+            let right = fold_integer(right, &path.child("right"), types, depth + 1, nodes)?;
             reject_saturating(&left.value_type, path)?;
             let tree = match (operator, left.tree, right.tree) {
                 (NumericOperator::Add, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
@@ -1270,7 +1338,7 @@ fn fold_integer(
                 }
                 _ => {
                     return Err(integer_unsupported(
-                        "non_linear_arithmetic",
+                        UnsupportedClass::NonLinearArithmetic,
                         path,
                         "product of two non-constant terms",
                     ))
@@ -1282,16 +1350,16 @@ fn fold_integer(
             })
         }
         _ => Err(unsupported(
-            path,
+            &path.render(),
             "construct is outside linear integer arithmetic",
         )),
     }
 }
 
-fn reject_saturating(value_type: &IntegerType, path: &str) -> Result<(), LoweringError> {
+fn reject_saturating(value_type: &IntegerType, path: &ExprPath<'_>) -> Result<(), LoweringError> {
     if value_type.overflow() == OverflowPolicy::Saturate {
         Err(integer_unsupported(
-            "saturating_arithmetic",
+            UnsupportedClass::SaturatingArithmetic,
             path,
             "a saturating result has no exact encoding",
         ))
@@ -1628,7 +1696,7 @@ mod tests {
     }
 
     fn fold(expression: &Expression) -> Result<FoldedInteger, LoweringError> {
-        fold_integer(expression, "expression", &|_| None, 1, &mut 0)
+        fold_integer(expression, &ExprPath::ROOT, &|_| None, 1, &mut 0)
     }
 
     /// FR-010-AC-11: a constant fold outside the 128-bit signed range is refused, not wrapped.
@@ -1668,7 +1736,10 @@ mod tests {
         for expression in &cases {
             let error = fold(expression).err().expect("overflow");
             assert_eq!(error.code(), LoweringErrorCode::UnsupportedConstruct);
-            assert!(error.message().starts_with("constant_overflow"));
+            assert_eq!(
+                error.unsupported_class(),
+                Some(UnsupportedClass::ConstantOverflow)
+            );
         }
         let exact = binary(
             NumericOperator::Add,

@@ -20,7 +20,7 @@ Feed recorded Z3-format and cvc5-format model texts for integer fixtures, then m
 symbol, add an undeclared symbol, repeat a symbol, change a sort, push a value over each bound, falsify
 one assertion, supply a decimal, a real and an over-long numeral, and force an overflowing evaluation at the 128-bit extremes, echo named-assertion aliases, and combine two defects to check the reason precedence of FR-011.
 Mutate the query text and show the verdict does not move. Where solvers are installed, replay the
-models they actually return for the satisfiable fixtures.
+models they actually return for the satisfiable fixtures, and compare the two engines for agreement.
 
 ## Expected Results
 
