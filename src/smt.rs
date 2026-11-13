@@ -6,9 +6,9 @@ use std::{
 use quire_contract_model::{
     BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
     DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType,
-    NumericOperator, OverflowPolicy, RecordDeclaration, Requirement, RequirementRef, SourceSpan,
-    StateObservation, SymbolName, TypeDeclaration, TypedExpression, ValueDeclarationKind,
-    ValueType,
+    NumericOperator, OverflowPolicy, RecordDeclaration, RecordLiteralField, Requirement,
+    RequirementRef, SourceSpan, StateObservation, SymbolName, TypeDeclaration, TypedExpression,
+    ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -1267,99 +1267,17 @@ impl LowerState<'_> {
                 })
             }
             ExpressionKind::RecordLiteral { record, fields } => {
-                let built = self.record_sort(record, 1, &format!("type.{}", record.as_str()))?;
-                let map = self.datatypes.records[&built.sort].clone();
-                if fields.len() != map.fields.len() {
-                    return Err(LoweringError::new(
-                        LoweringErrorCode::InvalidStatement,
-                        "expression.record_literal",
-                        "validated record literal no longer matches its declaration",
-                    ));
-                }
-                let mut smt = format!("({}", map.constructor);
-                for field in &map.fields {
-                    let value = fields
-                        .iter()
-                        .find(|candidate| candidate.name().as_str() == field.field)
-                        .ok_or_else(|| {
-                            LoweringError::new(
-                                LoweringErrorCode::InvalidStatement,
-                                "expression.record_literal",
-                                "validated record field no longer resolves",
-                            )
-                        })?;
-                    let value = self.lower_term(value.value(), depth + 1, &path.child("field"))?;
-                    smt.push(' ');
-                    smt.push_str(&value.smt);
-                }
-                smt.push(')');
-                Ok(LoweredExpression {
-                    smt,
-                    replay: ReplayExpression::DatatypeUnreplayed,
-                })
+                self.lower_record_literal(record, fields, depth, path)
             }
             ExpressionKind::FieldAccess { base, field } => {
-                let Some(ValueType::Record { name }) = term_type(&self.statement.environment, base)
-                else {
-                    return Err(unsupported(
-                        &path.render(),
-                        "field access requires a record-typed base",
-                    ));
-                };
-                let built = self.record_sort(&name, 1, &format!("type.{}", name.as_str()))?;
-                let selector = self.datatypes.records[&built.sort]
-                    .fields
-                    .iter()
-                    .find(|candidate| candidate.field == field.as_str())
-                    .map(|candidate| candidate.selector.clone())
-                    .ok_or_else(|| {
-                        LoweringError::new(
-                            LoweringErrorCode::InvalidStatement,
-                            "expression.field_access",
-                            "validated record field no longer resolves",
-                        )
-                    })?;
-                let base = self.lower(base, depth + 1, &path.child("base"))?;
-                Ok(LoweredExpression {
-                    smt: format!("({selector} {})", base.smt),
-                    replay: ReplayExpression::DatatypeUnreplayed,
-                })
+                self.lower_field_access(base, field, depth, path)
             }
-            ExpressionKind::OptionNone { value_type } => {
-                let map = self.option_map(value_type, "expression.option_none")?;
-                Ok(LoweredExpression {
-                    smt: map.none,
-                    replay: ReplayExpression::DatatypeUnreplayed,
-                })
-            }
+            ExpressionKind::OptionNone { value_type } => self.lower_option_none(value_type),
             ExpressionKind::OptionSome { value_type, value } => {
-                let map = self.option_map(value_type, "expression.option_some")?;
-                let value = self.lower_term(value, depth + 1, &path.child("value"))?;
-                Ok(LoweredExpression {
-                    smt: format!("({} {})", map.some, value.smt),
-                    replay: ReplayExpression::DatatypeUnreplayed,
-                })
+                self.lower_option_some(value_type, value, depth, path)
             }
             ExpressionKind::IsPresent { option } | ExpressionKind::Unwrap { option } => {
-                let Some(option_type @ ValueType::Option { .. }) =
-                    term_type(&self.statement.environment, option)
-                else {
-                    return Err(unsupported(
-                        &path.render(),
-                        "option access requires an option-typed operand",
-                    ));
-                };
-                let map = self.option_map(&option_type, "expression.option")?;
-                let operand = self.lower(option, depth + 1, &path.child("option"))?;
-                let smt = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
-                    format!("((_ is {}) {})", map.some, operand.smt)
-                } else {
-                    format!("({} {})", map.selector, operand.smt)
-                };
-                Ok(LoweredExpression {
-                    smt,
-                    replay: ReplayExpression::DatatypeUnreplayed,
-                })
+                self.lower_option_read(expression, option, depth, path)
             }
             ExpressionKind::BooleanNot { operand } => {
                 let operand = self.lower(operand, depth + 1, &path.child("operand"))?;
@@ -1398,63 +1316,192 @@ impl LowerState<'_> {
                 operator,
                 left,
                 right,
-            } => {
-                if self.is_integer_term(left) {
-                    return self.lower_integer_comparison(*operator, left, right, depth, path);
-                }
-                if !matches!(
-                    operator,
-                    ComparisonOperator::Equal | ComparisonOperator::NotEqual
-                ) {
-                    return Err(unsupported(
-                        &path.render(),
-                        "ordering comparison of non-integer terms is unsupported",
-                    ));
-                }
-                let environment = &self.statement.environment;
-                let left_type = term_type(environment, left);
-                let right_type = term_type(environment, right);
-                let left = self.lower(left, depth + 1, &path.child("left"))?;
-                let right = self.lower(right, depth + 1, &path.child("right"))?;
-                let left_sort = self.comparable_sort(left_type.as_ref())?;
-                let right_sort = self.comparable_sort(right_type.as_ref())?;
-                let Some(sort) = left_sort.filter(|sort| right_sort.as_ref() == Some(sort)) else {
-                    return Err(unsupported(
-                        &path.render(),
-                        "comparison operands must both be Boolean or both of one datatype sort",
-                    ));
-                };
-                if sort != "Bool" {
-                    let name = if *operator == ComparisonOperator::Equal {
-                        "="
-                    } else {
-                        "distinct"
-                    };
-                    return Ok(LoweredExpression {
-                        smt: format!("({name} {} {})", left.smt, right.smt),
-                        replay: ReplayExpression::DatatypeUnreplayed,
-                    });
-                }
-                Ok(if *operator == ComparisonOperator::Equal {
-                    LoweredExpression {
-                        smt: format!("(= {} {})", left.smt, right.smt),
-                        replay: ReplayExpression::Equal(
-                            Box::new(left.replay),
-                            Box::new(right.replay),
-                        ),
-                    }
-                } else {
-                    LoweredExpression {
-                        smt: format!("(not (= {} {}))", left.smt, right.smt),
-                        replay: ReplayExpression::NotEqual(
-                            Box::new(left.replay),
-                            Box::new(right.replay),
-                        ),
-                    }
-                })
-            }
+            } => self.lower_comparison(operator, left, right, depth, path),
             other => Err(unsupported(&path.render(), construct_name(other))),
         }
+    }
+
+    fn lower_record_literal(
+        &mut self,
+        record: &SymbolName,
+        fields: &[RecordLiteralField],
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let built = self.record_sort(record, 1, &format!("type.{}", record.as_str()))?;
+        let map = self.datatypes.records[&built.sort].clone();
+        if fields.len() != map.fields.len() {
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                "expression.record_literal",
+                "validated record literal no longer matches its declaration",
+            ));
+        }
+        let mut smt = format!("({}", map.constructor);
+        for field in &map.fields {
+            let value = fields
+                .iter()
+                .find(|candidate| candidate.name().as_str() == field.field)
+                .ok_or_else(|| {
+                    LoweringError::new(
+                        LoweringErrorCode::InvalidStatement,
+                        "expression.record_literal",
+                        "validated record field no longer resolves",
+                    )
+                })?;
+            let value = self.lower_term(value.value(), depth + 1, &path.child("field"))?;
+            smt.push(' ');
+            smt.push_str(&value.smt);
+        }
+        smt.push(')');
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_field_access(
+        &mut self,
+        base: &Expression,
+        field: &SymbolName,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let Some(ValueType::Record { name }) = term_type(&self.statement.environment, base) else {
+            return Err(unsupported(
+                &path.render(),
+                "field access requires a record-typed base",
+            ));
+        };
+        let built = self.record_sort(&name, 1, &format!("type.{}", name.as_str()))?;
+        let selector = self.datatypes.records[&built.sort]
+            .fields
+            .iter()
+            .find(|candidate| candidate.field == field.as_str())
+            .map(|candidate| candidate.selector.clone())
+            .ok_or_else(|| {
+                LoweringError::new(
+                    LoweringErrorCode::InvalidStatement,
+                    "expression.field_access",
+                    "validated record field no longer resolves",
+                )
+            })?;
+        let base = self.lower(base, depth + 1, &path.child("base"))?;
+        Ok(LoweredExpression {
+            smt: format!("({selector} {})", base.smt),
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_none(
+        &mut self,
+        value_type: &ValueType,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let map = self.option_map(value_type, "expression.option_none")?;
+        Ok(LoweredExpression {
+            smt: map.none,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_some(
+        &mut self,
+        value_type: &ValueType,
+        value: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let map = self.option_map(value_type, "expression.option_some")?;
+        let value = self.lower_term(value, depth + 1, &path.child("value"))?;
+        Ok(LoweredExpression {
+            smt: format!("({} {})", map.some, value.smt),
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_option_read(
+        &mut self,
+        expression: &Expression,
+        option: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let Some(option_type @ ValueType::Option { .. }) =
+            term_type(&self.statement.environment, option)
+        else {
+            return Err(unsupported(
+                &path.render(),
+                "option access requires an option-typed operand",
+            ));
+        };
+        let map = self.option_map(&option_type, "expression.option")?;
+        let operand = self.lower(option, depth + 1, &path.child("option"))?;
+        let smt = if matches!(expression.kind(), ExpressionKind::IsPresent { .. }) {
+            format!("((_ is {}) {})", map.some, operand.smt)
+        } else {
+            format!("({} {})", map.selector, operand.smt)
+        };
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::DatatypeUnreplayed,
+        })
+    }
+
+    fn lower_comparison(
+        &mut self,
+        operator: &ComparisonOperator,
+        left: &Expression,
+        right: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        if self.is_integer_term(left) {
+            return self.lower_integer_comparison(*operator, left, right, depth, path);
+        }
+        if !matches!(
+            operator,
+            ComparisonOperator::Equal | ComparisonOperator::NotEqual
+        ) {
+            return Err(unsupported(
+                &path.render(),
+                "ordering comparison of non-integer terms is unsupported",
+            ));
+        }
+        let environment = &self.statement.environment;
+        let left_type = term_type(environment, left);
+        let right_type = term_type(environment, right);
+        let left = self.lower(left, depth + 1, &path.child("left"))?;
+        let right = self.lower(right, depth + 1, &path.child("right"))?;
+        let left_sort = self.comparable_sort(left_type.as_ref())?;
+        let right_sort = self.comparable_sort(right_type.as_ref())?;
+        let Some(sort) = left_sort.filter(|sort| right_sort.as_ref() == Some(sort)) else {
+            return Err(unsupported(
+                &path.render(),
+                "comparison operands must both be Boolean or both of one datatype sort",
+            ));
+        };
+        if sort != "Bool" {
+            let name = if *operator == ComparisonOperator::Equal {
+                "="
+            } else {
+                "distinct"
+            };
+            return Ok(LoweredExpression {
+                smt: format!("({name} {} {})", left.smt, right.smt),
+                replay: ReplayExpression::DatatypeUnreplayed,
+            });
+        }
+        Ok(if *operator == ComparisonOperator::Equal {
+            LoweredExpression {
+                smt: format!("(= {} {})", left.smt, right.smt),
+                replay: ReplayExpression::Equal(Box::new(left.replay), Box::new(right.replay)),
+            }
+        } else {
+            LoweredExpression {
+                smt: format!("(not (= {} {}))", left.smt, right.smt),
+                replay: ReplayExpression::NotEqual(Box::new(left.replay), Box::new(right.replay)),
+            }
+        })
     }
 
     /// Whether the term is integer-typed. Validation makes both comparison operands agree, so
