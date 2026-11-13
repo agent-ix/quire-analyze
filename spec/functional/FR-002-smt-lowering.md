@@ -24,8 +24,10 @@ construct has a declared exact encoding under the selected profile.
 - `quire.smtlib2/v1` is deliberately Boolean-only: literals, typed Boolean input/state references,
   negation, short-circuit and total conjunction/disjunction, implication, and Boolean equality or
   inequality lower exactly to SMT-LIB 2.6 `QF_UF`.
-- Integer, rational, text, enum, record, option, collection, field/index/option access, calls,
-  arithmetic, ordering, locals, and quantifiers are explicitly unsupported by this profile. The
+- Linear integer arithmetic is admitted by [FR-010](./FR-010-linear-integer-arithmetic.md) under profile
+  `quire.smtlib2/v2`, which replaces this profile and keeps every Boolean encoding above.
+- Rational, text, enum, record, option, collection, field/index/option access, calls, non-linear
+  arithmetic, locals, and quantifiers are explicitly unsupported by this profile. The
   exhaustive Rust match makes an upstream expression variant addition a compile-time review point.
 - State observations and execution points remain part of variable identity. Short-circuit and total
   Boolean operators share an encoding only after upstream validation establishes total Boolean

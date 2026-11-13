@@ -34,6 +34,12 @@ type: TestMatrix
 | FR-005 | FR-005-AC-6 | TC-007 | ✅ v2 schema, validator, and rejection tests; v1 rejected |
 | FR-007 | FR-007-AC-1, FR-007-AC-2, FR-007-AC-3 | TC-013 | ✅ Bounded hybrid reachability provider complete |
 | FR-008 | FR-008-AC-1, FR-008-AC-2, FR-008-AC-3 | TC-014 | ✅ Bounded canonical synthesis provider complete |
+| FR-010 | FR-010-AC-1 to FR-010-AC-6, FR-010-AC-8, FR-010-AC-9 | TC-016 | 🚧 Specified |
+| FR-010 | FR-010-AC-7 | TC-016 | 🚧 Specified; real-solver cases run where Z3 and cvc5 are installed |
+| FR-011 | FR-011-AC-2 to FR-011-AC-9 | TC-017 | 🚧 Specified |
+| FR-011 | FR-011-AC-1 | TC-017 | 🚧 Specified; real-solver cases run where Z3 and cvc5 are installed |
+| FR-012 | FR-012-AC-1 to FR-012-AC-7 | TC-018 | 🚧 Specified |
+| FR-012 | FR-012-AC-8 | TC-018 | 🚧 Specified; real-solver cases run where Z3 and cvc5 are installed |
 
 ## Nonfunctional and Stakeholder Coverage
 
@@ -46,6 +52,8 @@ type: TestMatrix
 | NFR-002 | NFR-002-AC-1, NFR-002-AC-3 | TC-007 | 🚧 Planned |
 | NFR-002 | NFR-002-AC-2 | TC-005 | ✅ Adapter failure states complete |
 | NFR-002 | NFR-002-AC-4 | Inspection | 🚧 Planned |
+| NFR-004 | NFR-004-AC-1, NFR-004-AC-2, NFR-004-AC-4 | TC-016, TC-017 | 🚧 Specified |
+| NFR-004 | NFR-004-AC-3 | TC-017 | 🚧 Specified |
 
 ## Test Case Summary
 
@@ -63,6 +71,9 @@ type: TestMatrix
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
 | TC-013 | Sound bounded hybrid reachability | Analysis | P0 | FR-007 | ✅ Complete |
 | TC-014 | Bounded canonical synthesis | Property | P0 | FR-008 | ✅ Complete |
+| TC-016 | Linear integer lowering and solver agreement | Integration | P0 | FR-010, NFR-004 | 🚧 Specified |
+| TC-017 | Integer witness model replay | Analysis | P0 | FR-011, NFR-004 | 🚧 Specified |
+| TC-018 | Integer analysis_claim translation | Integration | P0 | FR-012 | 🚧 Specified |
 
 TC-001 completes the Boolean-v1 analysis algebra and independent finite truth table. TC-002 through
 TC-004 and TC-006 through TC-008 remain planned as complete campaigns; issue #4 closes their exact

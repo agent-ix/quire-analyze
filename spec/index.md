@@ -51,10 +51,11 @@ versioned dependencies and a named human retains release authority.
 
 ## Requirements Architecture
 
-StR-001 is refined by FR-001 through FR-005, FR-007, FR-008 and FR-009 and constrained by NFR-001, NFR-002 and NFR-003.
+StR-001 is refined by FR-001 through FR-005, FR-007 through FR-012 and constrained by NFR-001 through NFR-004.
 `interface_001` defines the request, response, outcome, diagnostic, and evidence boundary. TC-001
-through TC-010, TC-013, TC-014 and TC-015 form the verification matrix. FR-007 and FR-008 own the bounded hybrid
-reachability and canonical synthesis providers. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
+through TC-010 and TC-013 through TC-018 form the verification matrix. FR-007 and FR-008 own the bounded hybrid
+reachability and canonical synthesis providers. FR-010 through FR-012 and NFR-004 own linear integer
+arithmetic: lowering and solver agreement, witness replay, and package claim translation. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
 assurance boundary. PLAN-001 maps this foundation and native issues #6, #7, #3, #4, #5, and #33.
 
 ## References
