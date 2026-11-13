@@ -13,7 +13,7 @@ relationships:
 
 The hybrid reachability computation shall return a typed outcome for every request without a panic or wrapped arithmetic.
 
-The hybrid reachability computation shall refuse or end `Incomplete` any request that exceeds the crate limits on step bound, transitions and distinct modes, before it allocates for them.
+The hybrid reachability computation shall end any request that exceeds the crate limits on step bound, transitions and distinct modes as a typed non-conclusion, before it allocates for them.
 
 ## Measurement and Evaluation
 
@@ -27,7 +27,7 @@ The hybrid reachability computation shall refuse or end `Incomplete` any request
 
 | ID | Criteria | Verification |
 |---|---|---|
-| NFR-040-AC-1 | The crate states hybrid limits for step bound, transitions and distinct modes, as the synthesis path states limits for terms and atoms. A request above any limit ends `Refused` or `Incomplete` before work proportional to the excess starts. A request at each limit returns an outcome without a panic or wrapped arithmetic. | Test (TC-040) |
+| NFR-040-AC-1 | The crate states hybrid limits for step bound, transitions and distinct modes, as the synthesis path states limits for terms and atoms. A step bound above the crate limit ends `Incomplete` with the step-bound-exhausted code, and a transition count or distinct-mode count above its limit ends `Refused`, each before work proportional to the excess starts. This criterion owns the crate limit on the step bound; FR-040-AC-9 owns the comparison of the horizon with the request's own step bound. A request at each limit returns an outcome without a panic or wrapped arithmetic. | Test (TC-040) |
 | NFR-040-AC-2 | A request with a step bound of `u64::MAX`, a horizon of `u64::MAX` or extreme interval bounds returns an outcome in time proportional to the crate limits, not to the requested count. | Test (TC-040) |
 | NFR-040-AC-3 | Two evaluations of one request return equal outcomes, including enclosure order. | Test (TC-040) |
 

@@ -36,3 +36,14 @@ Ticket: VER-93. Integrity lens over FR-040, FR-041, FR-042, NFR-040 and TC-040: 
 ## Verdict
 
 FAIL on three medium findings: the adversarial set FR-042-AC-1 gates on does not cover every FR-040 criterion; FR-040-AC-6 is a precision obligation that FR-041's finding rule cannot record; and the delegate-and-remove removal set is incomplete.
+
+## Dispositions
+
+Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | - |
+| FND-002 | fixed | - |
+| FND-003 | fixed | - |
+| FND-004 | fixed | - |

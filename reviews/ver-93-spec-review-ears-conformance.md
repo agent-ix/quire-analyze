@@ -29,3 +29,13 @@ Ticket: VER-93. EARS grammar check of the FR-040, FR-041 and FR-042 statements a
 ## Verdict
 
 FAIL on one medium finding: FR-040's event trigger excludes the case its second SHALL governs. FR-042's statement is a well-formed event-driven requirement.
+
+## Dispositions
+
+Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | - |
+| FND-002 | fixed | - |
+| FND-003 | fixed | - |

@@ -44,3 +44,24 @@ Ticket: VER-93. Failure-domain lens over the FR-040 soundness obligations, NFR-0
 ## Verdict
 
 FAIL on one high finding: FR-040-AC-4's 'forced when enabled' exemption lets the current unsound drop of non-taking source-mode states pass. Six medium findings name boundaries that the obligations depend on but the request type cannot express or the crate does not bound.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-008 | high | The fix makes the default (non-forced) case keep only 'the part of the flowed interval that does not satisfy the guard' in the source mode. Under the default may-transition semantics a state that satisfies the guard can also decline the transition and stay in the source mode, so dropping the guard-satisfying part omits reachable states. The default sentence and the forced-semantics sentence now say the same thing, which shows the distinction collapsed. Fix: in the default semantics the source mode keeps the whole flowed interval and the target receives the reset image of the guard-satisfying part; only a named forced semantics drops the guard-satisfying part from the source. | spec/functional/FR-040-hybrid-enclosure-soundness.md:28 |
+| FND-009 | low | A request above a crate limit 'ends Refused or Incomplete', so two implementers can pick different outcomes, and a step bound above the crate limit overlaps FR-040-AC-9 (horizon above the admitted step bound ends Incomplete). Fix: give each limit one outcome, for example Refused for a request above a crate limit and Incomplete only for exhaustion within it. | spec/nonfunctional/NFR-040-hybrid-enclosure-totality.md:30, spec/functional/FR-040-hybrid-enclosure-soundness.md:33 |
+
+## Dispositions
+
+Round 1, checked against fix commit 83fcd4e on ver-93-hybrid-spec.
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | - |
+| FND-002 | fixed | - |
+| FND-003 | fixed | - |
+| FND-004 | fixed | - |
+| FND-005 | fixed | - |
+| FND-006 | fixed | - |
+| FND-007 | fixed | - |
