@@ -39,10 +39,12 @@ untrusted external engine.
   makes every asserted replay expression true under an independent evaluator of the same expression
   semantics as [FR-020](./FR-020-datatype-lowering.md): enum and record equality, field access,
   option presence and option access, and the Boolean structure of FR-004.
-- Evaluation of an implication is lazy in its consequent: a false antecedent makes the implication
-  true without evaluating the consequent. An `Unwrap` that is evaluated on an absent option is a replay
-  failure and the model is invalid. The evaluator never reads the solver's value of the `some` selector
-  on `none`, and never substitutes a default.
+- Evaluation is lazy in the guarded operand of every operator that can guard an `Unwrap` upstream: the
+  consequent of an implication (a false antecedent makes it true), the right operand of a
+  short-circuit `and` (a false left operand makes it false), and the right operand of a short-circuit
+  `or` (a true left operand makes it true), without evaluating the guarded operand. An `Unwrap` that is
+  evaluated on an absent option is a replay failure and the model is invalid. The evaluator never reads
+  the solver's value of the `some` selector on `none`, and never substitutes a default.
 - An invalid or incomplete model keeps the logical response and marks the requested counterexample
   evidence incomplete; it never fabricates a source value, never repairs a mismatched value, and
   never makes the result conclusive on the strength of a model that failed replay. The exact adapter
@@ -62,7 +64,7 @@ untrusted external engine.
 | FR-021-AC-3 | Replay tests cover each datatype kind: enum, record, option present, option absent, and a record that nests an option and an enum. | Test |
 | FR-021-AC-4 | A model that satisfies the solver but violates one asserted expression under the independent evaluator is rejected as incomplete. | Test |
 | FR-021-AC-5 | A model that omits a declared datatype symbol, or defines an unknown symbol or a symbol twice, is not verified. | Test |
-| FR-021-AC-7 | An implication whose antecedent is false in the model replays true without evaluating its `Unwrap`, and an `Unwrap` evaluated on an absent option fails replay and the model is invalid. | Test |
+| FR-021-AC-7 | An implication, short-circuit `and` or short-circuit `or` whose guard excludes the unwrapped operand replays without evaluating its `Unwrap`, and an `Unwrap` evaluated on an absent option fails replay and the model is invalid. | Test |
 | FR-021-AC-6 | A model nested deeper than the NFR-020 bound or larger than the model ceiling is rejected as a limit breach and is never conclusive. | Test |
 
 ## Dependencies

@@ -62,19 +62,20 @@ unsupported.
 
 ### Logic
 
-[FR-010](./FR-010-lia-lowering.md) fixes one logic per capability profile. This requirement adds
-profiles on the same rule: a query carries exactly one profile, and `CapabilityContract.logic` of that
-profile is the query logic. The logic is never chosen from a solver or host.
+[FR-010](./FR-010-linear-integer-arithmetic.md) replaces the Boolean-only profile with
+`quire.smtlib2/v2`, which is the only profile; `quire.smtlib2/v1` and `QF_UF` are no longer emitted or
+accepted, there is no fallback, and a query is never emitted under two profiles. The profile's logic
+follows the feature set of the query, and this requirement owns the datatype case:
 
-| Query uses | Logic |
+| Query | Logic |
 |---|---|
-| Boolean structure only (`quire.smtlib2/v1`, unchanged) | `QF_UF` |
-| Datatypes (enum, record, option) and Boolean structure, no integer | `QF_DT` |
-| Datatypes and integer record fields or integer comparisons | `QF_UFDTLIA` |
+| No datatype declaration (including a Boolean-only query) | `QF_LIA` (FR-010) |
+| Declares at least one datatype (enum, record or option), with or without integer terms | `QF_UFDTLIA` |
 
-The profile is selected from the constructs the selected statements use, deterministically: any
-datatype sort or datatype expression selects at least the datatype profile, and any integer construct
-selects the integer-with-datatype profile. The integer-only logic remains the one FR-010 declares.
+The logic is determined by whether the query declares a datatype, never by a solver or host. A report
+for a datatype query names `quire.smtlib2/v2` and `QF_UFDTLIA`, and report validation
+([FR-005](./FR-005-evidence-cli.md)) accepts exactly the logic the query's feature set requires and
+refuses `quire.smtlib2/v1` and `QF_UF`.
 
 ### Expressions
 
@@ -84,19 +85,20 @@ selects the integer-with-datatype profile. The integer-only logic remains the on
 - There is no membership construct in `ExpressionKind`. "Role is one of the permitted roles" is
   authored, and lowered, as the total disjunction of enum equalities of the term with each permitted
   literal. The disjunction is built from the exact Boolean `or` and enum equality constructs, and no
-  separate membership encoding exists. Membership over a collection or set value
-  (`quire.op.collection.contains` over `quire.op.collection.set`) and membership through a quantifier
+  separate membership encoding exists. Membership over a collection value and membership through a quantifier
   stay Unsupported here, and the quantifier forms are owned by the quantification requirements.
 - `RecordLiteral` lowers to the constructor applied to the field values in declared field order, and
   `FieldAccess` lowers to the selector. Record equality and inequality lower to `=` and `distinct`.
 - `OptionNone` lowers to the `none` constructor of the payload sort, `OptionSome` to `some`, and
   `IsPresent` to the `some` tester. Option equality and inequality lower to `=` and `distinct`.
 - `Unwrap` lowers to the `some` selector and is defined only where its presence proof holds. The
-  upstream check (`check_expression`) admits `Unwrap` only under a presence proof (an `IsPresent`
-  fact established by the antecedent of an implication, or an `OptionSome` operand). An `Unwrap`
-  without that proof is refused by `check_expression` at statement build as `InvalidStatement`
-  (path `statement.expression`), and the lowering adds no separate check. The selector's value on
-  `none` is unconstrained and unobservable under the proof, and is never given meaning.
+  upstream check (`check_expression`) admits `Unwrap` only under a presence proof: an `IsPresent` fact
+  of the same option term established by the antecedent of an implication, by the left operand of a
+  short-circuit `and`, or by the left operand of a short-circuit `or` (as the negated fact), or an
+  `OptionSome` operand. Total `and` and `or` establish no presence fact. An `Unwrap` without that proof
+  is refused by `check_expression` at statement build as `InvalidStatement` (path
+  `statement.expression`), and the lowering adds no separate check. The selector's value on `none` is
+  unconstrained and unobservable under the proof, and is never given meaning.
 - A `Compare` whose operands are not both Boolean, both of the same enum, both of the same record, or
   both of the same option sort is refused as `UnsupportedConstruct`. A mixed-sort comparison is never
   coerced.
@@ -122,18 +124,18 @@ selects the integer-with-datatype profile. The integer-only logic remains the on
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-020-AC-1 | A satisfiable and an unsatisfiable role-membership fixture, each written as a disjunction of enum equalities (`or` of `role = Admin` and `role = Auditor`, with and without a further `role = Guest`), lower to queries that both Z3 and cvc5 decide `sat` and `unsat` respectively. | Test (real solvers where installed) |
+| FR-020-AC-1 | Two role-membership fixtures, each a single assertion `role = Admin` or `role = Auditor` (a disjunction of enum equalities) plus one further assertion, are decided by both Z3 and cvc5: with the further assertion `role != Admin` the query is `sat`, and with the further assertion `role = Guest` the query is `unsat`. | Test (real solvers where installed) |
 | FR-020-AC-2 | Every enum variant, record field and type name in a query traces to a declaration in the environment, and each unresolved name is refused with the code of the case table before solver execution. | Test |
 | FR-020-AC-3 | A record-field constraint fixture and an option-access fixture (`IsPresent` in the antecedent of an implication, `Unwrap` in the consequent) each lower and are decided correctly by both solvers. | Test (real solvers where installed) |
 | FR-020-AC-4 | An `Unwrap` with no presence proof is refused by `check_expression` as `InvalidStatement` at statement build and nothing is lowered; an `Unwrap` under the proof lowers to the selector. | Test |
 | FR-020-AC-5 | A record or option nesting a collection or text returns `UnsupportedType`, an enum ordering comparison and a mixed-sort comparison return `UnsupportedConstruct`, and a self-containing record fails at `DeclarationEnvironment::new` with `RecursiveType`. None yields a query. | Test |
-| FR-020-AC-6 | `CAPABILITY_CONTRACT` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test |
+| FR-020-AC-6 | The capability contract of `quire.smtlib2/v2` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test |
 | FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test |
-| FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and `quire.op.collection.contains` over `quire.op.collection.set` returns `UnsupportedConstruct`. | Test |
-| FR-020-AC-9 | The query logic is `QF_UF` for a Boolean-only query, `QF_DT` for a datatype query without integers, and `QF_UFDTLIA` for a datatype query with an integer field, each emitted in `(set-logic ...)` and equal to the profile's `CapabilityContract.logic`. | Test |
+| FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`. | Test |
+| FR-020-AC-9 | The `(set-logic ...)` of a query declaring no datatype is `QF_LIA` and of a query declaring at least one datatype is `QF_UFDTLIA`, in both cases under `quire.smtlib2/v2`, and a report naming `quire.smtlib2/v1`, `QF_UF`, or a logic other than the one the feature set requires is refused by validation. | Test |
 
 ## Dependencies
 
-FR-002 and FR-010 (the single-logic-per-profile rule and the integer capability contract). Integer
+FR-002 and FR-010 (the `quire.smtlib2/v2` profile and the integer capability contract). Integer
 record fields are exact only where the selected profile lists integers as exact. Quantification and
 collection membership are owned by other requirements and stay Unsupported here.
