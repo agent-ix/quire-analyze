@@ -86,3 +86,9 @@ FAIL at medium. Clean: id formats; TC frontmatter verifies relationships; real-s
 | FND-002 | fixed | verified in f1ad0f5 |
 | FND-003 | fixed | verified in f1ad0f5 |
 | FND-004 | fixed | verified in f1ad0f5 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-005 | fixed | verified in 53d1ebf |

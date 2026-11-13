@@ -69,3 +69,16 @@ FAIL: FND-001 to FND-005 are contradictions a coder cannot resolve without a spe
 | FND-008 | fixed | verified in f1ad0f5 |
 | FND-009 | fixed | verified in f1ad0f5 |
 | FND-010 | fixed | verified in f1ad0f5 |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-012 | low | FR-010 Profile, FR-002 and FR-005-AC-6 delegate the logic of a datatype query to 'the logic FR-020 specifies', but FR-020 exists on neither main nor this branch; it is in open PR #88, whose FR-020 Logic table still keeps quire.smtlib2/v1 with QF_UF for Boolean-only queries, which this PR refuses. If #90 lands first, the datatype branch of FR-005-AC-6 points at an undefined requirement. Under this PR alone the live profile lists enum, record and option as unsupported, so no datatype query exists yet and nothing is wrong at runtime. Fix: route the FR-020 table change to #88, or state here that until FR-020 lands every v2 query declares QF_LIA. | spec/functional/FR-010-linear-integer-arithmetic.md:31-37 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-011 | fixed | verified in 53d1ebf |
+| FND-012 | accepted | merge ordering: #88 lands directly after and aligns its FR-020 logic table to this PR's rule |

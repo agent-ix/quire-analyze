@@ -56,3 +56,9 @@ FAIL at medium: none of these is a contradiction, but FND-001 and FND-004 leave 
 | FND-003 | still-open | f1ad0f5 gives a construction for AC-7 (a symbol over the full i128 range at its maximum, `x + 1 > 0`) and states that evaluation_overflow 'is reachable when a declared domain spans the 128-bit extremes'. That fixture cannot reach replay. StatementInput::from_clause (src/smt.rs:171-215) runs check_expression on every clause, and check_integer_operator on quire-contract-ir main (crates/quire-contract-model/src/expression.rs:2672-2678) refuses an addition whose interval exceeds the checked intermediates ('integer interval computation exceeded checked intermediates'). So x + 1 with x up to i128::MAX is refused before lowering. The reason is still unreachable for admitted statements, and AC-7 and the second clause of NFR-004-AC-2 still name no admissible fixture. Fix: verify evaluation_overflow by inspection as a defensive reason, or build the fixture from an unchecked replay expression in a unit test, and drop the reachability sentence. |
 | FND-004 | fixed | verified in f1ad0f5 |
 | FND-005 | fixed | verified in f1ad0f5 |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-003 | fixed | verified in 53d1ebf |
