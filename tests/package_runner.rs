@@ -1520,10 +1520,10 @@ fn a_contradictory_enum_membership_exits_one_through_the_runner() {
     fixture.assert_no_leftovers();
 }
 
-/// A satisfiable enum model is not verified until datatype replay exists, so it is inconclusive.
-#[trace("FR-022-AC-1", "TC-020")]
+/// A satisfiable enum model that omits the datatype symbol fails replay, so it is inconclusive.
+#[trace("FR-022-AC-1", "FR-021-AC-5", "TC-020")]
 #[test]
-fn a_satisfiable_enum_model_is_not_verified_and_exits_three() {
+fn a_satisfiable_enum_model_without_its_symbol_is_not_verified_and_exits_three() {
     let bytes = guest_membership();
     let fixture = Fixture::new(&bytes);
     fixture.both("sat\n(model)\n", "sat\n(model)\n");
@@ -1633,7 +1633,8 @@ fn an_unguarded_option_value_exits_two_naming_the_clause_through_the_runner() {
     fixture.assert_no_report();
 }
 
-/// FR-022-AC-1 fixtures 3 to 5 need the record and option lowering.
+/// FR-022-AC-1 fixtures 3 to 5 need the record and option lowering; a satisfiable answer whose
+/// model omits the datatype symbol fails replay and exits `3`.
 #[trace("FR-022-AC-1", "TC-020")]
 #[test]
 fn record_and_option_fixtures_have_their_fixed_exits_through_the_runner() {

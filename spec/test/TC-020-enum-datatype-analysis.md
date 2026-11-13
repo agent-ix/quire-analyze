@@ -34,7 +34,7 @@ record-field claim, an option-access claim under a `quire.op.option.present` gua
 
 Supported fixtures are decided correctly, with identical queries under permutation. Invalid models
 and unsupported or over-bound constructs produce explicit non-conclusive outcomes or exit `2`, never
-an approximate query. A satisfiable datatype fixture run through `run-package` exits `3` (witness incomplete with `sort_not_replayable`, differential inconclusive) while the FR-020 "Replay until FR-021" rule applies to a kind it declares, and `0` once FR-021 replay of that kind lands; an unsatisfiable one exits `1`. Real-solver cases run where Z3 and cvc5 are installed and are reported as not
+an approximate query. A satisfiable datatype fixture run through `run-package` exits `0` when both engines' models replay and verify, and `3` when a model fails replay (witness incomplete, differential inconclusive); an unsatisfiable one exits `1`. Real-solver cases run where Z3 and cvc5 are installed and are reported as not
 run elsewhere; the model-parsing, lowering and translation cases need no solver.
 
 ## Limitations
