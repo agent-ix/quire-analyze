@@ -35,7 +35,7 @@ count instances in the single unit defined here.
   enclosing expanded quantifier (the number of copies of its body that expansion produces).
 - **Budget.** The sum of the instance counts of all expanded quantifiers in one request, over all
   clauses. A bounded solver quantifier ([FR-032](../functional/FR-032-bounded-integer-range-quantifier-lowering.md))
-  is not expanded and consumes none. Quantifiers are considered outermost first in canonical order.
+  is not expanded and consumes none. Quantifiers are considered outermost first in canonical order: statements in ascending assertion-symbol order and, within a statement, depth-first pre-order (a quantifier before the quantifiers in its body, siblings left to right).
 - Example: an outer literal range of width 100 has instance count 100 and is expanded. A literal
   range of width 100 inside it would have instance count 100 x 100 = 10,000, above the 924 left, so
   it is emitted as a bounded quantifier; an enum or collection quantifier in that place is refused

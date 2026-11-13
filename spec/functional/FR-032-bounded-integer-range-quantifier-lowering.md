@@ -31,6 +31,46 @@ solver quantifier.
     variable (`forall` with an implication guard, `exists` with a conjunction guard). A bounded
     quantifier consumes no budget.
   - A range wider than the budget is therefore never `unsupported`; it takes the bounded form.
+- Analysis-model input. The contract model has no range-domain quantifier form, so a range reaches
+  lowering as an analysis-model formula attached to a statement:
+  - `AnalysisFormula` is a Boolean tree whose leaves are quantifier-free contract expressions
+    (`Term`) and whose nodes are `Not`, `And`, `Or`, `Implies` and `Range`. A leaf names a
+    quantifier's bound variable with `LocalReference`; the nearest enclosing quantifier that binds
+    that name wins, so an inner quantifier that reuses a name shadows the outer one, and a
+    `ValueReference` of the same name is a different, free variable that is never captured.
+  - `RangeQuantifier` holds the quantifier's source `identity` (a non-empty string chosen by the
+    caller), its kind (`ForAll` or `Exists`), the bound variable's name and its `local_type` (an
+    integer type), the `lower` and `upper` `RangeBound`s, and the body formula.
+  - `RangeBound` is `Literal(i128)`, `Declared(name)` or `Unbounded`. A **declared bound** is the
+    value of a bounded integer input of the statement's declarations, read at the current
+    observation: the bound is that input's value, not its minimum or maximum. It is finite because
+    the input's declared integer type is finite, and the solver, not the lowering, chooses its
+    value. `Unbounded`, a name that is not declared, and a name that is not an integer input are
+    not provably finite.
+  - `StatementInput::with_formula` attaches a formula to a statement built from a clause. The
+    clause supplies the statement's identity, so the assertion map and the report attribute the
+    assertion to that clause and its digest exactly as for any statement; the formula replaces the
+    clause body as the lowered body, and the assertion symbol also binds the formula, so a
+    different formula over one clause is a different assertion. `with_formula` refuses, as
+    `InvalidStatement`, an empty quantifier identity, a bound-variable reference with no enclosing
+    quantifier, a non-empty literal range that lies outside `local_type`, and a declared bound
+    whose input type lies outside `local_type`. Whether a bound is finite is decided at lowering.
+  - `QueryBundle::quantifiers` is the quantifier map of [FR-030](./FR-030-bounded-quantifier-domains.md).
+- Budget order. The budget of [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md) is
+  spent in canonical order: statements in ascending assertion-symbol order, and within a statement
+  the quantifiers in depth-first pre-order (a quantifier before the quantifiers in its body,
+  siblings left to right). The quantifier map lists entries in that order, so the encodings do not
+  depend on the order in which the caller lists the statements.
+- Instance identity. Expansion follows [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md)
+  for instance order, substitution and budget. The per-instance retention of the quantifier's source
+  identity and element, and the counterexample that names a failing instance
+  ([FR-031-AC-5](./FR-031-enum-and-collection-quantifier-lowering.md)), are provided for a range by
+  the quantified replay of [FR-033](./FR-033-quantified-assertion-replay.md); until then the
+  assertion map names the failing assertion and the quantifier map records the source identity.
+- Interim replay. Expanded ranges are quantifier-free and replay exactly. A bounded solver
+  quantifier is not replayed until FR-033: a satisfiable model of a query that holds one is
+  incomplete with reason `quantifier_not_replayable` ([FR-011](./FR-011-integer-witness-replay.md))
+  and is never verified, and the logical response of the solver is unchanged.
 - Package path: until the upstream contract model and operation catalog define a range-domain
   quantifier operand, no QSL package reaches the bounded solver quantifier; a package range arrives
   as a literal integer collection and is expanded or refused as `expansion-ceiling`
@@ -69,6 +109,9 @@ solver quantifier.
 | FR-032-AC-4 | In the bounded form every quantifier carries a finite interval guard; a quantifier without one is never emitted. | Test (TC-030) |
 | FR-032-AC-5 | Lowering a range-quantified package twice yields byte-identical SMT-LIB2 output. | Test (TC-030) |
 | FR-032-AC-6 | A bounded quantifier whose body mentions an enum declares `UFDTLIA`, and one whose body is integer-only declares `LIA`. | Test (TC-030) |
+| FR-032-AC-7 | `with_formula` refuses an empty quantifier identity, a bound-variable reference with no enclosing quantifier, a non-empty literal range outside `local_type` and a declared bound outside `local_type`, each as `InvalidStatement`. | Test (TC-030) |
+| FR-032-AC-8 | A satisfiable model of a query that holds a bounded solver quantifier is incomplete with reason `quantifier_not_replayable`, never verified, and the solver's logical response is unchanged. | Test (TC-030) |
+| FR-032-AC-9 | A contested budget gives the same encodings and the same quantifier map for any order of the caller's statements, and spends the budget in depth-first pre-order within a statement. | Test (TC-030) |
 
 ## Dependencies
 

@@ -35,8 +35,10 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
     [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md). A collection that is a reference to
     a parameter, has a non-literal element, or has any other element sort is not a finite collection;
   - a bounded integer range: an inclusive range whose lower and upper bounds are integer literals or
-    declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). This
-    is the target design for the analysis model. The checked operation catalog and `quire-contract-model`
+    declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). The
+    analysis model carries it as the `RangeQuantifier` input of
+    [FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md), which also defines a declared
+    bound. The checked operation catalog and `quire-contract-model`
     currently have no range-domain quantifier form, so a QSL package supplies an integer range only
     as a literal integer collection ([FR-034](./FR-034-quantifier-package-translation.md)); When
     the lower bound exceeds the upper bound the range is empty.
@@ -51,7 +53,9 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
 - For every admitted quantifier the query carries one quantifier-map entry holding its source
   identity, domain class (`enum`, `collection` or `range`), encoding (`expanded` or `bounded`) and
   instance count. The map is the observable of admission; entries appear in canonical quantifier
-  order, independent of host maps and paths.
+  order, independent of host maps and paths. Canonical order is statements in ascending
+  assertion-symbol order and, within a statement, depth-first pre-order with siblings left to
+  right; the map records the lower and upper bound of a range.
 - A universal quantifier over an empty domain is true and an existential quantifier over an empty
   domain is false.
 - Nested admitted quantifiers are admitted; one refused quantifier at any depth refuses the whole

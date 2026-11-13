@@ -57,7 +57,7 @@
       "maxItems": 2,
       "items": { "$ref": "#/definitions/engine" }
     },
-    "logic": { "enum": ["QF_LIA", "QF_UFDTLIA"] },
+    "logic": { "enum": ["QF_LIA", "QF_UFDTLIA", "LIA", "UFDTLIA"] },
     "pgm01Envelope": {
       "type": "object",
       "additionalProperties": false,

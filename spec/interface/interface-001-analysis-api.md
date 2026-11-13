@@ -68,9 +68,11 @@ resource_limits:
 lowering_v2:
   request_kind: boolean_conjunction
   profile: quire.smtlib2/v2
-  logic: QF_LIA for queries without datatype declarations; the logic the query's feature set requires otherwise
+  logic: QF_LIA for queries without datatype declarations; QF_UFDTLIA with datatypes; LIA or UFDTLIA for a query that holds a bounded solver quantifier (FR-032)
   identities: [binding_set_digest, analysis_request_digest, query_digest]
-  maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding]
+  maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding, quantifier_to_source_domain_encoding_instances_and_bounds]
+  range_quantifier_input: [AnalysisFormula, RangeQuantifier, RangeBound, local_type, StatementInput.with_formula]
+  quantification_note: contract-IR quantifier nodes stay unsupported until FR-034; the range quantifier input above is admitted
   unsupported: [non_linear_arithmetic, quantification, non_integer_non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject

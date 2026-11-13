@@ -130,7 +130,7 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
 A model for a query that declares datatype-sorted symbols is replayed by
 [FR-021](./FR-021-datatype-witness-replay.md) for every datatype kind (enum, record and option). No
 datatype kind is refused as unreplayable, and a datatype symbol that fails replay fails with one of
-the eight [FR-011](./FR-011-integer-witness-replay.md) reasons.
+the nine [FR-011](./FR-011-integer-witness-replay.md) reasons.
 
 ### Refusals
 

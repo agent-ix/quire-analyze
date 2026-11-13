@@ -45,7 +45,7 @@ untrusted external engine.
   `or` (a true left operand makes it true), without evaluating the guarded operand. An `Unwrap` that is
   evaluated on an absent option is a replay failure and the model is invalid. The evaluator never reads
   the solver's value of the `some` selector on `none`, and never substitutes a default.
-- A datatype failure is one of the eight reasons of [FR-011](./FR-011-integer-witness-replay.md):
+- A datatype failure is one of the nine reasons of [FR-011](./FR-011-integer-witness-replay.md):
   `value_malformed` for text that is not a value, names a constructor no declared datatype has (an
   abstract element included), a sort that is not a single symbol (a parametric spelling such as `(Option S)`), or nests a constructor application beyond its declared shape (a
   depth-9 text for a depth-8 declared type, for example); `sort_mismatch` for a constructor of
