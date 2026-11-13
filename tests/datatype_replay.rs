@@ -413,16 +413,11 @@ fn nested_record_replays_from_both_spellings() {
     let present = format!("({} 5)", account.some);
     let absent_plain = account.none.clone();
     let absent_qualified = format!("(as {} {})", account.none, account.option_sort);
-    let absent_parametric = format!("(as {} (Option Int))", account.none);
     let cases = [
         (&present, "{active: true, limit: present(5), role: Admin}"),
         (&absent_plain, "{active: true, limit: absent, role: Admin}"),
         (
             &absent_qualified,
-            "{active: true, limit: absent, role: Admin}",
-        ),
-        (
-            &absent_parametric,
             "{active: true, limit: absent, role: Admin}",
         ),
     ];
@@ -473,6 +468,149 @@ fn nested_record_replays_from_both_spellings() {
         ),
     );
     assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+}
+
+/// FR-021-AC-2: a sort spelling that is not a symbol of the query's symbol map, such as the
+/// parametric `(Option Int)`, is never guessed and fails closed.
+#[trace("TC-020", "FR-021-AC-2")]
+#[test]
+fn invented_sort_spellings_fail_closed() {
+    let account = Account::new();
+    let parametric = format!("(as {} (Option Int))", account.none);
+    let model = account.z3(
+        &account.sort,
+        &account.record("true", &parametric, &account.admin),
+    );
+    assert!(matches!(
+        account.reason(&model),
+        ReplayFailureReason::ValueMalformed | ReplayFailureReason::SortMismatch
+    ));
+    let sort = account.z3(
+        "(Account)",
+        &account.record("true", &account.none, &account.admin),
+    );
+    assert!(matches!(
+        account.reason(&sort),
+        ReplayFailureReason::ValueMalformed | ReplayFailureReason::SortMismatch
+    ));
+}
+
+/// FR-021-AC-2: a nullary constructor of a declared datatype where a Boolean or an integer is
+/// expected is a sort mismatch, in a record field and in an option payload; an integer beyond 128
+/// bits in either position is out of domain.
+#[trace("TC-020", "FR-021-AC-2")]
+#[test]
+fn scalar_positions_reject_constructors_and_oversized_integers() {
+    let account = Account::new();
+    let build = |active: &str, payload: &str| {
+        account.z3(
+            &account.sort,
+            &account.record(
+                active,
+                &format!("({} {payload})", account.some),
+                &account.admin,
+            ),
+        )
+    };
+    let huge = "340282366920938463463374607431768211456";
+    for (model, expected) in [
+        (
+            build(&account.admin, "5"),
+            ReplayFailureReason::SortMismatch,
+        ),
+        (
+            build("true", &account.admin),
+            ReplayFailureReason::SortMismatch,
+        ),
+        (
+            build(
+                "true",
+                &format!("(as {} {})", account.admin, account.role_sort),
+            ),
+            ReplayFailureReason::SortMismatch,
+        ),
+        (build("true", huge), ReplayFailureReason::ValueOutOfDomain),
+        (
+            build("true", &format!("(- {huge})")),
+            ReplayFailureReason::ValueOutOfDomain,
+        ),
+    ] {
+        assert_eq!(account.reason(&model), expected, "{model}");
+    }
+    let level = lower(statements(
+        "level",
+        vec![record_type("Box", &[("level", integer())])],
+        vec![input("boxed", record_ref("Box"))],
+        vec![compare(
+            ComparisonOperator::GreaterEqual,
+            field(var("boxed"), "level"),
+            number(0),
+        )],
+    ));
+    let record = &level.record_sorts()[0];
+    let model = format!(
+        "sat\n(model (define-fun {} () {} ({} {huge})))\n",
+        level.variables()[0].symbol,
+        record.sort,
+        record.constructor
+    );
+    let conclusion = classify_analysis(&level, &response_record(&level, &model, SolverEngine::Z3));
+    assert_eq!(
+        conclusion.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::ValueOutOfDomain
+    );
+}
+
+/// NFR-020 depth boundary in model parsing: a value of a depth-8 declared shape verifies, and a
+/// depth-9 text for that shape is `value_malformed`.
+#[trace("TC-020", "FR-021-AC-6", "NFR-020-AC-3")]
+#[test]
+fn model_parsing_has_an_exact_depth_boundary() {
+    let mut value_type = integer();
+    for _ in 0..8 {
+        value_type = ValueType::option(value_type);
+    }
+    let query = lower(statements(
+        "deep",
+        vec![],
+        vec![input("nested", value_type)],
+        vec![present(var("nested"))],
+    ));
+    // Innermost first: each option sort wraps the previous one.
+    let mut sorts = query.option_sorts().to_vec();
+    let mut chain = Vec::new();
+    let mut payload = "Int".to_owned();
+    while let Some(index) = sorts.iter().position(|sort| sort.payload_sort == payload) {
+        let sort = sorts.remove(index);
+        payload = sort.sort.clone();
+        chain.push(sort);
+    }
+    assert_eq!(chain.len(), 8);
+    let wrap = |base: &str| {
+        let mut text = base.to_owned();
+        for sort in &chain {
+            text = format!("({} {text})", sort.some);
+        }
+        text
+    };
+    let outer = &chain[7].sort;
+    let variable = &query.variables()[0].symbol;
+    let model =
+        |value: String| format!("sat\n(model (define-fun {variable} () {outer} {value}))\n");
+    let verified = classify_analysis(
+        &query,
+        &response_record(&query, &model(wrap("5")), SolverEngine::Z3),
+    );
+    assert_eq!(verified.explanation(), ExplanationState::Verified);
+    let over = wrap(&format!("({} 5)", chain[0].some));
+    let rejected = classify_analysis(
+        &query,
+        &response_record(&query, &model(over), SolverEngine::Z3),
+    );
+    assert_eq!(
+        rejected.replay_failure().expect("failure").reason(),
+        ReplayFailureReason::ValueMalformed
+    );
 }
 
 /// FR-021-AC-3: a lone enum, a lone present option and a lone absent option each replay; the

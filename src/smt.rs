@@ -914,12 +914,11 @@ impl QueryBundle {
         &self.variables
     }
 
-    /// The symbols of datatype-sorted variables, in ascending order.
+    /// The declared type of each datatype-sorted variable, by variable symbol.
     pub(crate) fn datatype_shapes(&self) -> &BTreeMap<String, ReplayShape> {
         &self.datatype_shapes
     }
 
-    /// Every datatype sort symbol the query declares, in ascending order.
     /// The enum datatypes the query declares, in ascending sort-symbol order.
     pub fn enum_sorts(&self) -> &[EnumSortMap] {
         &self.enum_sorts

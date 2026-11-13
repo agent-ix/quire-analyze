@@ -787,20 +787,28 @@ fn verify_model(
             })
         })
         .collect();
-    let datatype_values = query
-        .variables()
-        .iter()
-        .filter_map(|variable| {
-            let value = parsed.assignment.datums.get(&variable.symbol)?;
-            let shape = datatypes.shape(&variable.symbol)?;
-            Some(MappedDatatypeValue {
-                symbol: variable.symbol.clone(),
-                value: datatypes.witness(shape, value)?,
-                origins: variable.origins.clone(),
-                binding_group: variable.binding_group.clone(),
-            })
-        })
-        .collect();
+    // A value that cannot be published fails the model; it is never dropped from a verified one.
+    let mut datatype_values = Vec::new();
+    for variable in query.variables() {
+        let (Some(value), Some(shape)) = (
+            parsed.assignment.datums.get(&variable.symbol),
+            datatypes.shape(&variable.symbol),
+        ) else {
+            continue;
+        };
+        let Some(published) = datatypes.witness(shape, value) else {
+            return Err(ReplayFailure::new(
+                ReplayFailureReason::SortMismatch,
+                Some(variable.symbol.clone()),
+            ));
+        };
+        datatype_values.push(MappedDatatypeValue {
+            symbol: variable.symbol.clone(),
+            value: published,
+            origins: variable.origins.clone(),
+            binding_group: variable.binding_group.clone(),
+        });
+    }
     Ok(VerifiedBooleanModel {
         purpose,
         values,
@@ -965,8 +973,8 @@ fn record_value(
     // A sort that is not Bool, Int or the declared datatype is a foreign datatype sort (a sort
     // mismatch) or no sort at all (malformed).
     let model_sort = match sort {
-        ModelSort::Atom(atom) if atom == "Bool" => Some(Sort::Bool),
-        ModelSort::Atom(atom) if atom == "Int" => Some(Sort::Int),
+        sort if sort == "Bool" => Some(Sort::Bool),
+        sort if sort == "Int" => Some(Sort::Int),
         _ if declared_sort == Some(Sort::Datatype)
             && datatypes
                 .shape(symbol)
@@ -1020,7 +1028,7 @@ fn take_datatype_value(
     datatypes: &DatatypeContext<'_>,
 ) -> Result<ModelValue, ReplayFailure> {
     let start = *cursor;
-    match datatypes.parse_value(tokens, cursor, shape, 0) {
+    match datatypes.parse_value(tokens, cursor, shape) {
         Ok(value) => Ok(ModelValue::Datatype(value)),
         Err(defect) => {
             *cursor = start;

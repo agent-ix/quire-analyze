@@ -6,7 +6,7 @@ use crate::{
     analysis::{take_model_scalar, ModelScalar, ModelToken},
     smt::{
         EnumSortMap, OptionSortMap, RecordSortMap, ReplayAssignment, ReplayExpression, ReplayFault,
-        ReplayTerm, MAX_DATATYPE_DEPTH,
+        ReplayTerm,
     },
     QueryBundle,
 };
@@ -148,32 +148,21 @@ pub(crate) enum ValueDefect {
     Malformed,
     /// A constructor of another datatype, a wrong arity or a wrong qualifying sort.
     SortMismatch,
-    /// An integer beyond 128 bits, or a value nested beyond the datatype depth bound.
+    /// An integer beyond 128 bits.
     OutOfDomain,
 }
 
-/// A sort as a solver prints it: `S`, or the parametric `(Option S)`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ModelSort {
-    Atom(String),
-    Applied(String, String),
-}
+/// A sort as a solver prints it: a sort symbol of the query's symbol map.
+pub(crate) type ModelSort = String;
 
-/// Reads a sort term; `None` when it is neither an atom nor a one-argument application.
+/// Reads a sort term; `None` when it is not a single symbol.
 pub(crate) fn read_sort(tokens: &[ModelToken], cursor: &mut usize) -> Option<ModelSort> {
     match tokens.get(*cursor)? {
         ModelToken::Atom(atom) => {
             *cursor += 1;
-            Some(ModelSort::Atom(atom.clone()))
+            Some(atom.clone())
         }
-        ModelToken::Open => match tokens.get(*cursor + 1..*cursor + 4)? {
-            [ModelToken::Atom(head), ModelToken::Atom(argument), ModelToken::Close] => {
-                *cursor += 4;
-                Some(ModelSort::Applied(head.clone(), argument.clone()))
-            }
-            _ => None,
-        },
-        ModelToken::Close => None,
+        _ => None,
     }
 }
 
@@ -220,47 +209,31 @@ impl<'a> DatatypeContext<'a> {
         }
     }
 
-    #[cfg(test)]
-    fn empty(shapes: &'a BTreeMap<String, ReplayShape>) -> Self {
-        Self {
-            shapes,
-            enums: BTreeMap::new(),
-            records: BTreeMap::new(),
-            options: BTreeMap::new(),
-            constructors: BTreeSet::new(),
-        }
-    }
-
     pub(crate) fn shape(&self, symbol: &str) -> Option<&'a ReplayShape> {
         self.shapes.get(symbol)
     }
 
     /// Whether the sort names a datatype declared by the query.
-    pub(crate) fn is_sort(&self, sort: &ModelSort) -> bool {
-        match sort {
-            ModelSort::Atom(atom) => {
-                self.enums.contains_key(atom.as_str())
-                    || self.records.contains_key(atom.as_str())
-                    || self.options.contains_key(atom.as_str())
-            }
-            ModelSort::Applied(..) => false,
-        }
+    pub(crate) fn is_sort(&self, sort: &str) -> bool {
+        self.enums.contains_key(sort)
+            || self.records.contains_key(sort)
+            || self.options.contains_key(sort)
     }
 
     /// Whether a printed sort spells the shape's sort symbol.
-    pub(crate) fn sort_matches(&self, sort: &ModelSort, shape: &ReplayShape) -> bool {
-        let Some(symbol) = shape.sort() else {
-            return false;
-        };
-        match sort {
-            ModelSort::Atom(atom) => atom == symbol,
-            ModelSort::Applied(head, argument) => {
-                head == "Option"
-                    && self
-                        .options
-                        .get(symbol)
-                        .is_some_and(|map| map.payload_sort == *argument)
+    pub(crate) fn sort_matches(&self, sort: &str, shape: &ReplayShape) -> bool {
+        shape.sort() == Some(sort)
+    }
+
+    /// Whether the term at the cursor is a nullary constructor of a declared datatype, bare or
+    /// qualified.
+    fn is_nullary_constructor(&self, tokens: &[ModelToken], cursor: usize) -> bool {
+        match tokens.get(cursor..cursor + 3) {
+            Some([ModelToken::Atom(atom), ..]) => self.constructors.contains(atom.as_str()),
+            Some([ModelToken::Open, ModelToken::Atom(head), ModelToken::Atom(atom)]) => {
+                head == "as" && self.constructors.contains(atom.as_str())
             }
+            _ => false,
         }
     }
 
@@ -270,9 +243,13 @@ impl<'a> DatatypeContext<'a> {
         tokens: &[ModelToken],
         cursor: &mut usize,
         shape: &ReplayShape,
-        depth: usize,
     ) -> Result<ReplayValue, ValueDefect> {
         match shape {
+            ReplayShape::Bool | ReplayShape::Int { .. }
+                if self.is_nullary_constructor(tokens, *cursor) =>
+            {
+                Err(ValueDefect::SortMismatch)
+            }
             ReplayShape::Bool => {
                 match take_model_scalar(tokens, cursor).unwrap_or(ModelScalar::Malformed) {
                     ModelScalar::Boolean(value) => Ok(ReplayValue::Bool(value)),
@@ -289,7 +266,7 @@ impl<'a> DatatypeContext<'a> {
                     ModelScalar::Malformed => Err(ValueDefect::Malformed),
                 }
             }
-            datatype => self.parse_datatype(tokens, cursor, datatype, depth + 1),
+            datatype => self.parse_datatype(tokens, cursor, datatype),
         }
     }
 
@@ -298,11 +275,7 @@ impl<'a> DatatypeContext<'a> {
         tokens: &[ModelToken],
         cursor: &mut usize,
         shape: &ReplayShape,
-        depth: usize,
     ) -> Result<ReplayValue, ValueDefect> {
-        if depth > MAX_DATATYPE_DEPTH {
-            return Err(ValueDefect::OutOfDomain);
-        }
         let (constructor, applied) = self.read_head(tokens, cursor, shape)?;
         match shape {
             ReplayShape::Enum { sort } => {
@@ -332,7 +305,7 @@ impl<'a> DatatypeContext<'a> {
                 }
                 let mut values = Vec::with_capacity(fields.len());
                 for field in fields {
-                    values.push(self.parse_argument(tokens, cursor, field, depth)?);
+                    values.push(self.parse_argument(tokens, cursor, field)?);
                 }
                 finish(tokens, cursor, applied)?;
                 Ok(ReplayValue::Record(values))
@@ -351,7 +324,7 @@ impl<'a> DatatypeContext<'a> {
                     if !applied {
                         return Err(ValueDefect::SortMismatch);
                     }
-                    let value = self.parse_argument(tokens, cursor, payload, depth)?;
+                    let value = self.parse_argument(tokens, cursor, payload)?;
                     finish(tokens, cursor, applied)?;
                     Ok(ReplayValue::Option(Some(Box::new(value))))
                 } else {
@@ -367,12 +340,11 @@ impl<'a> DatatypeContext<'a> {
         tokens: &[ModelToken],
         cursor: &mut usize,
         shape: &ReplayShape,
-        depth: usize,
     ) -> Result<ReplayValue, ValueDefect> {
         if matches!(tokens.get(*cursor), Some(ModelToken::Close) | None) {
             return Err(ValueDefect::SortMismatch);
         }
-        self.parse_value(tokens, cursor, shape, depth)
+        self.parse_value(tokens, cursor, shape)
     }
 
     /// A constructor of another datatype is a sort mismatch; one the query never declared is not
@@ -575,24 +547,5 @@ mod tests {
         ] {
             assert_eq!(expression.evaluate(&values), Err(ReplayFault::AbsentOption));
         }
-    }
-
-    /// FR-021-AC-6 and NFR-020-AC-3: a value deeper than the datatype nesting bound is rejected at
-    /// the bound, before any symbol lookup or further descent.
-    #[trace("TC-020", "FR-021-AC-6", "NFR-020-AC-3")]
-    #[test]
-    fn nesting_beyond_the_datatype_bound_is_rejected() {
-        let shapes = BTreeMap::new();
-        let context = DatatypeContext::empty(&shapes);
-        let shape = ReplayShape::Enum {
-            sort: "s".to_owned(),
-        };
-        let tokens = [ModelToken::Atom("c".to_owned())];
-        let mut cursor = 0;
-        assert_eq!(
-            context.parse_datatype(&tokens, &mut cursor, &shape, MAX_DATATYPE_DEPTH + 1),
-            Err(ValueDefect::OutOfDomain)
-        );
-        assert_eq!(cursor, 0);
     }
 }

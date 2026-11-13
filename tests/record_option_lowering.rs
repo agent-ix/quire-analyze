@@ -597,6 +597,7 @@ fn literal_only_record_and_option_queries_are_replayed() {
         account_types(),
         vec![input("flag", ValueType::Boolean)],
         vec![
+            var("flag"),
             boolean(
                 BooleanOperator::TotalOr,
                 var("flag"),
@@ -622,7 +623,7 @@ fn literal_only_record_and_option_queries_are_replayed() {
     let query = lower(literal_only);
     assert_eq!(query.logic(), "QF_UFDTLIA");
     let flag = &query.variables()[0].symbol;
-    for (value, verifies) in [("true", true), ("false", true)] {
+    for (value, verifies) in [("true", true), ("false", false)] {
         let model = format!("sat\n(model (define-fun {flag} () Bool {value}))\n");
         let conclusion =
             classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
