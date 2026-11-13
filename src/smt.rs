@@ -581,9 +581,11 @@ impl ReplayExpression {
                 .copied()
                 .ok_or(ReplayFault::Unassigned),
             Self::Not(operand) => Ok(!operand.evaluate(values)?),
-            Self::And(left, right) => Ok(left.evaluate(values)? & right.evaluate(values)?),
-            Self::Or(left, right) => Ok(left.evaluate(values)? | right.evaluate(values)?),
-            Self::Implies(left, right) => Ok(!left.evaluate(values)? | right.evaluate(values)?),
+            // A guard in the left operand may protect arithmetic in the right one, so the right
+            // operand is evaluated only when the left does not decide the result.
+            Self::And(left, right) => Ok(left.evaluate(values)? && right.evaluate(values)?),
+            Self::Or(left, right) => Ok(left.evaluate(values)? || right.evaluate(values)?),
+            Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
             Self::Compare {
@@ -615,7 +617,7 @@ pub(crate) struct ReplayAssertion {
 pub struct QueryBundle {
     profile: &'static str,
     logic: &'static str,
-    pub(crate) query: String,
+    query: String,
     analysis_request_digest: AnalysisDigest,
     query_digest: AnalysisDigest,
     binding_set_digest: AnalysisDigest,
@@ -638,6 +640,12 @@ impl QueryBundle {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// Replaces the query text, to show that replay never reads it.
+    #[cfg(test)]
+    pub(crate) fn set_query_text(&mut self, text: &str) {
+        self.query = text.to_owned();
     }
 
     pub const fn analysis_request_digest(&self) -> AnalysisDigest {

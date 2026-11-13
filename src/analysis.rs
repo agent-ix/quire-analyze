@@ -385,6 +385,7 @@ impl MappedBooleanValue {
     }
 }
 
+/// An integer value of a verified model, mapped to the requirement values it stands for.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MappedIntegerValue {
     symbol: String,
@@ -394,18 +395,22 @@ pub struct MappedIntegerValue {
 }
 
 impl MappedIntegerValue {
+    /// The query symbol the solver assigned the value to.
     pub fn symbol(&self) -> &str {
         &self.symbol
     }
 
+    /// The replay-verified integer value.
     pub const fn value(&self) -> i128 {
         self.value
     }
 
+    /// Every complete origin identity of the symbol from the variable map.
     pub fn origins(&self) -> &[String] {
         &self.origins
     }
 
+    /// The explicit binding group of the symbol, if it has one.
     pub fn binding_group(&self) -> Option<&str> {
         self.binding_group.as_deref()
     }
@@ -425,6 +430,7 @@ pub enum ReplayFailureReason {
 }
 
 impl ReplayFailureReason {
+    /// The reason's stable snake_case code.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ValueMalformed => "value_malformed",
@@ -487,6 +493,7 @@ impl VerifiedBooleanModel {
         &self.values
     }
 
+    /// The verified integer values, in query symbol order.
     pub fn integer_values(&self) -> &[MappedIntegerValue] {
         &self.integer_values
     }
@@ -657,6 +664,8 @@ fn verify_model(
         .map(|assertion| assertion.name.as_str())
         .collect::<BTreeSet<_>>();
     let ranges = query.integer_ranges();
+    // A symbol with no declared range is read as Bool. Enum-sorted symbols (VER-87 owns their
+    // replay) have no range either, so they must not reach this point as Bool.
     let declared = query
         .variables()
         .iter()
@@ -864,6 +873,10 @@ fn record_value(
         "Int" => Sort::Int,
         _ => return note(&mut parsed.malformed, symbol),
     };
+    // The value is read first: a malformed numeral outranks every symbol-level defect.
+    if matches!(value, ModelValue::Malformed) {
+        return note(&mut parsed.malformed, symbol);
+    }
     let Some(&declared_sort) = declared.get(symbol) else {
         return note(&mut parsed.unknown, symbol);
     };
@@ -874,7 +887,7 @@ fn record_value(
         return note(&mut parsed.sort_mismatch, symbol);
     }
     match (model_sort, value) {
-        (_, ModelValue::Malformed) => note(&mut parsed.malformed, symbol),
+        (_, ModelValue::Malformed) => unreachable!("malformed values return above"),
         (Sort::Bool, ModelValue::Boolean(value)) => {
             parsed.assignment.booleans.insert(symbol.to_owned(), value);
         }
@@ -1139,7 +1152,7 @@ mod tests {
         let query = lower_positive_query();
         let symbol = query.variables()[0].symbol.clone();
         let mut mutated = query.clone();
-        mutated.query = "(assert false)\n(check-sat)\n".to_owned();
+        mutated.set_query_text("(assert false)\n(check-sat)\n");
         assert_ne!(mutated.query(), query.query());
         for (value, verifies) in [("5", true), ("0", false)] {
             let model = format!("(model (define-fun {symbol} () Int {value}))");
@@ -1159,16 +1172,21 @@ mod tests {
         parse_model(text.as_bytes(), &declared(entries), &aliases)
     }
 
-    fn defect(text: &str, entries: &[(&str, Sort)]) -> ReplayFailure {
+    /// The first parse defect, if any. `Ok(None)` means the model parsed cleanly, with an
+    /// out-of-domain numeral reported as such.
+    fn defect(text: &str, entries: &[(&str, Sort)]) -> Option<ReplayFailure> {
         match parse(text, entries) {
-            Ok(parsed) => parsed.first_defect().unwrap_or_else(|| {
-                ReplayFailure::new(
-                    ReplayFailureReason::ValueOutOfDomain,
-                    parsed.out_of_domain.clone(),
-                )
+            Ok(parsed) => parsed.first_defect().or_else(|| {
+                parsed.out_of_domain.clone().map(|symbol| {
+                    ReplayFailure::new(ReplayFailureReason::ValueOutOfDomain, Some(symbol))
+                })
             }),
-            Err(failure) => failure,
+            Err(failure) => Some(failure),
         }
+    }
+
+    fn reason_of(text: &str, entries: &[(&str, Sort)]) -> ReplayFailureReason {
+        defect(text, entries).expect("a defect").reason()
     }
 
     /// FR-011-AC-2: both solver spellings, negative values, mixed sorts and echoed aliases.
@@ -1199,28 +1217,29 @@ mod tests {
         for malformed in [
             "1.5", "1e5", "-5", "007", "(- -5)", "(+ 1 2)", "abc", "(- 1 2)",
         ] {
-            let failure = defect(&model(malformed), &entries);
             assert_eq!(
-                failure.reason(),
+                reason_of(&model(malformed), &entries),
                 ReplayFailureReason::ValueMalformed,
                 "{malformed}"
             );
         }
-        let real = defect("(model (define-fun x () Real 1.0))", &entries);
-        assert_eq!(real.reason(), ReplayFailureReason::ValueMalformed);
+        assert_eq!(
+            reason_of("(model (define-fun x () Real 1.0))", &entries),
+            ReplayFailureReason::ValueMalformed
+        );
         let long = "1".repeat(1025);
         assert_eq!(
-            defect(&model(&long), &entries).reason(),
+            reason_of(&model(&long), &entries),
             ReplayFailureReason::ValueMalformed
         );
         let at_limit = format!("1{}", "0".repeat(1023));
         assert_eq!(
-            defect(&model(&at_limit), &entries).reason(),
+            reason_of(&model(&at_limit), &entries),
             ReplayFailureReason::ValueOutOfDomain
         );
         let two_127 = (1u128 << 127).to_string();
         assert_eq!(
-            defect(&model(&two_127), &entries).reason(),
+            reason_of(&model(&two_127), &entries),
             ReplayFailureReason::ValueOutOfDomain
         );
         // The negative bound of the 128-bit range is representable; one beyond it is not.
@@ -1228,7 +1247,7 @@ mod tests {
         assert_eq!(minimum.assignment.integers["x"], i128::MIN);
         let beyond = (1u128 << 127) + 1;
         assert_eq!(
-            defect(&model(&format!("(- {beyond})")), &entries).reason(),
+            reason_of(&model(&format!("(- {beyond})")), &entries),
             ReplayFailureReason::ValueOutOfDomain
         );
         let maximum = parse(&model(&i128::MAX.to_string()), &entries).expect("parses");
@@ -1240,7 +1259,7 @@ mod tests {
     #[test]
     fn parse_defects_follow_the_reason_precedence() {
         let entries = [("b", Sort::Bool), ("x", Sort::Int)];
-        let reason = |text: &str| defect(text, &entries).reason();
+        let reason = |text: &str| reason_of(text, &entries);
         assert_eq!(
             reason("(model (define-fun x () Int 1) (define-fun x () Int 1))"),
             ReplayFailureReason::SymbolRepeated
@@ -1273,6 +1292,15 @@ mod tests {
             reason("(model (define-fun b () Int 1) (define-fun z () Int 1))"),
             ReplayFailureReason::SymbolUnknown
         );
+        // a malformed numeral outranks every symbol-level defect of its own entry
+        for text in [
+            "(model (define-fun z () Int 1.5))",
+            "(model (define-fun x () Int 1) (define-fun x () Int 1.5))",
+            "(model (define-fun b () Int 1.5))",
+            "(model (define-fun x () Bool 1.5))",
+        ] {
+            assert_eq!(reason(text), ReplayFailureReason::ValueMalformed, "{text}");
+        }
         // malformed outranks everything, including a structural defect after it
         assert_eq!(
             reason("(model (define-fun z () Int 1) (define-fun x () Int 1.5))"),
@@ -1283,8 +1311,49 @@ mod tests {
             "(model",
             "(model) trailing",
             "(model (define-fun |x| () Int 1))",
+            "(model (assert true))",
+            "(model (define-fun x (y) Int 1))",
         ] {
-            assert_eq!(reason(structural), ReplayFailureReason::ValueMalformed);
+            let failure = defect(structural, &entries).expect("a defect");
+            assert_eq!(failure.reason(), ReplayFailureReason::ValueMalformed);
+            assert_eq!(failure.subject(), None, "{structural}");
+        }
+    }
+
+    /// FR-011 (model shape): a guard in the left operand protects the right operand, so an
+    /// overflow-prone right side is not evaluated when the left side decides the result.
+    #[trace("TC-017", "FR-011-AC-7")]
+    #[test]
+    fn boolean_connectives_short_circuit() {
+        let overflowing = ReplayExpression::Compare {
+            operator: ComparisonOperator::Greater,
+            left: ReplayTerm::Add(
+                Box::new(ReplayTerm::Variable("x".to_owned())),
+                Box::new(ReplayTerm::Constant(1)),
+            ),
+            right: ReplayTerm::Constant(0),
+        };
+        let boxed = || Box::new(overflowing.clone());
+        let literal = |value| Box::new(ReplayExpression::Literal(value));
+        let max = assigned(i128::MAX);
+        assert_eq!(
+            ReplayExpression::And(literal(false), boxed()).evaluate(&max),
+            Ok(false)
+        );
+        assert_eq!(
+            ReplayExpression::Or(literal(true), boxed()).evaluate(&max),
+            Ok(true)
+        );
+        assert_eq!(
+            ReplayExpression::Implies(literal(false), boxed()).evaluate(&max),
+            Ok(true)
+        );
+        for unguarded in [
+            ReplayExpression::And(literal(true), boxed()),
+            ReplayExpression::Or(literal(false), boxed()),
+            ReplayExpression::Implies(literal(true), boxed()),
+        ] {
+            assert_eq!(unguarded.evaluate(&max), Err(ReplayFault::Overflow));
         }
     }
 
@@ -1313,7 +1382,7 @@ mod tests {
     }
 
     /// FR-011-AC-7: `x + 1 > 0` over an unchecked expression with `x` at the maximum overflows.
-    #[trace("TC-017", "FR-011-AC-7")]
+    #[trace("TC-017", "FR-011-AC-7", "NFR-004-AC-2")]
     #[test]
     fn overflowing_evaluation_fails_instead_of_wrapping() {
         let unchecked = [compare_assertion("a", ComparisonOperator::Greater, 0)];

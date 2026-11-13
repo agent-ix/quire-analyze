@@ -305,6 +305,15 @@ fn response_record(
     response: &str,
     engine: SolverEngine,
 ) -> quire_analyze::SolverRecord {
+    response_record_with(query, response, engine, AdapterLimits::default())
+}
+
+fn response_record_with(
+    query: &QueryBundle,
+    response: &str,
+    engine: SolverEngine,
+    limits: AdapterLimits,
+) -> quire_analyze::SolverRecord {
     let directory = TempDirectory::new("response");
     let path = directory.path().join("solver");
     let body = format!(
@@ -314,7 +323,7 @@ fn response_record(
     let mut permissions = fs::metadata(&path).expect("metadata").permissions();
     permissions.set_mode(0o700);
     fs::set_permissions(&path, permissions).expect("executable");
-    let config = SolverConfig::new(engine, &path, AdapterLimits::default()).expect("config");
+    let config = SolverConfig::new(engine, &path, limits).expect("config");
     execute_solver(query, &config, &CancellationToken::default())
 }
 
@@ -1101,4 +1110,88 @@ fn replay_verified_models_agree() {
     );
     let run = compare_solver_records(&query, &z3, &bad);
     assert_eq!(run.disposition(), DifferentialDisposition::Inconclusive);
+}
+
+/// FR-011-AC-7 (no admitted fixture overflows): a guard in the left operand of an implication
+/// protects `x + 1`, so the correct model `x = MAX` verifies instead of overflowing.
+#[trace("TC-017", "FR-011-AC-7", "NFR-004-AC-2")]
+#[test]
+fn guarded_arithmetic_at_the_extreme_replays_without_overflow() {
+    let full = integer_type(i128::MIN, i128::MAX, OverflowPolicy::Reject);
+    let guarded_statement = statement(
+        "guarded",
+        &[("x", full.clone())],
+        node(ExpressionKind::Boolean {
+            operator: BooleanOperator::Implication,
+            left: Box::new(compare(
+                ComparisonOperator::Less,
+                var("x"),
+                lit(i128::MAX, &full),
+            )),
+            right: Box::new(compare(
+                ComparisonOperator::Greater,
+                add(var("x"), lit(1, &full)),
+                var("x"),
+            )),
+        }),
+    );
+    let request =
+        AnalysisRequest::consistency(vec![], vec![guarded_statement], vec![]).expect("request");
+    let query = lower_analysis_request(&request).expect("lower");
+    let x = only_symbol(&query).to_owned();
+    assert_replay_verifies(
+        &query,
+        &z3_model(&[define(&x, "Int", &i128::MAX.to_string())]),
+        SolverEngine::Z3,
+    );
+    assert_replay_verifies(
+        &query,
+        &cvc5_model(&[define(&x, "Int", &format!("(- {})", 1u128 << 127))]),
+        SolverEngine::Cvc5,
+    );
+}
+
+/// FR-011 (model shape): a text that is not a sequence of `define-fun` entries is
+/// `value_malformed` and names no symbol.
+#[trace("TC-017", "FR-011-AC-6", "FR-011-AC-8")]
+#[test]
+fn an_unreadable_model_text_is_malformed_and_names_no_symbol() {
+    let query = bounded_query();
+    for response in [
+        "sat\n(model (assert true))\n",
+        "sat\n(model (define-fun x))\n",
+    ] {
+        assert_replay_fails(&query, response, ReplayFailureReason::ValueMalformed, None);
+    }
+}
+
+/// NFR-004-AC-3: an integer model above the parsed-model ceiling is a non-conclusive adapter
+/// outcome, never a verified witness.
+#[trace("TC-017", "NFR-004-AC-3")]
+#[test]
+fn an_integer_model_above_the_model_ceiling_is_not_conclusive() {
+    let query = bounded_query();
+    let x = only_symbol(&query).to_owned();
+    let response = z3_model(&[define(&x, "Int", "5")]);
+    let limits = AdapterLimits {
+        model_bytes: 64,
+        ..AdapterLimits::default()
+    };
+    assert!(response.len() > 64);
+    let record = response_record_with(&query, &response, SolverEngine::Z3, limits);
+    assert_eq!(record.outcome(), quire_analyze::SolverOutcome::ModelLimit);
+    let conclusion = classify_analysis(&query, &record);
+    assert!(!conclusion.is_conclusive());
+    assert_eq!(conclusion.status(), AnalysisStatus::ToolError);
+    assert!(conclusion.verified_model().is_none());
+    let within = response_record_with(
+        &query,
+        &response,
+        SolverEngine::Z3,
+        AdapterLimits {
+            model_bytes: 4096,
+            ..AdapterLimits::default()
+        },
+    );
+    assert_eq!(within.outcome(), quire_analyze::SolverOutcome::Sat);
 }
