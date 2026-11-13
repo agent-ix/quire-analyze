@@ -336,7 +336,6 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
         for (field, expected) in [
             ("analysisModelProfile", "quire.analysis-model/v1"),
             ("encodingProfile", "quire.smtlib2/v2"),
-            ("logic", "QF_LIA"),
         ] {
             if object.get(field).and_then(Value::as_str) != Some(expected) {
                 return Err(format!("report {field} is absent or unsupported"));
@@ -366,6 +365,17 @@ pub fn validate_report_document(bytes: &[u8]) -> Result<DifferentialDisposition,
             .and_then(Value::as_str)
             .ok_or_else(|| "query bytes are absent".to_owned())?,
     )?;
+    let required_logic = crate::smt::required_logic(&query_bytes);
+    let set_logic = format!("(set-logic {required_logic})\n");
+    if object.get("logic").and_then(Value::as_str) != Some(required_logic)
+        || !query_bytes
+            .windows(set_logic.len())
+            .any(|window| window == set_logic.as_bytes())
+    {
+        return Err(
+            "report logic differs from the logic the query's feature set requires".to_owned(),
+        );
+    }
     let engines = object
         .get("engines")
         .and_then(Value::as_array)
