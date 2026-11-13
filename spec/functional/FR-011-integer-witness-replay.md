@@ -70,6 +70,7 @@ model, so a witness is never accepted on a solver's own word. This extends the B
 | FR-011-AC-8 | In every failing case above the logical status of the solver response (`sat`) and the adapter outcome remain available and the witness evidence is marked incomplete. | Test (TC-017) |
 | FR-011-AC-9 | Replay reads only the typed analysis expressions and the parsed assignment; mutating the SMT-LIB query text of a lowered query does not change a replay verdict. | Test (TC-017) |
 | FR-011-AC-10 | A model with a missing symbol and a malformed numeral reports `value_malformed`; a model with an out-of-domain value and a false assertion reports `value_out_of_domain`; in the same unchecked-expression unit test, an overflowing assertion before a false one in assertion-map order reports `evaluation_overflow`, and the reverse order reports `assertion_false`. | Test (TC-017) |
+| FR-011-AC-11 | With real solvers, the satisfiable integer fixture of FR-010-AC-2 is decided `sat` by Z3 and by cvc5, each returned model replay-verifies, and the differential comparison reports agreement with agreed status `satisfied`. | Test (TC-017, real solvers) |
 
 ## Dependencies
 

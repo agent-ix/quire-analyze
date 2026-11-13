@@ -5,16 +5,18 @@ use std::{
 
 use quire_contract_model::{
     BooleanOperator, CanonicalProfile, Clause, ClauseRef, ComparisonOperator, ContractPackage,
-    DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain,
-    OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation, SymbolName,
-    TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
+    DeclarationEnvironment, ExecutionPoint, Expression, ExpressionKind, IntegerDomain, IntegerType,
+    NumericOperator, OverflowPolicy, Requirement, RequirementRef, SourceSpan, StateObservation,
+    SymbolName, TypeDeclaration, TypedExpression, ValueDeclarationKind, ValueType,
 };
 use sha2::{Digest as _, Sha256};
 
 /// The accepted engine-neutral analysis model profile.
 pub const ANALYSIS_MODEL_PROFILE: &str = "quire.analysis-model/v1";
-/// The first exact SMT-LIB2 encoding profile.
-pub const SMTLIB2_PROFILE: &str = "quire.smtlib2/v1";
+/// The exact SMT-LIB2 encoding profile: Boolean and linear integer arithmetic.
+pub const SMTLIB2_PROFILE: &str = "quire.smtlib2/v2";
+/// The logic of every query that declares no datatypes.
+pub const SMTLIB2_LOGIC: &str = "QF_LIA";
 /// Bound on a generated query before any solver is invoked.
 pub const MAX_QUERY_BYTES: usize = 16 * 1024 * 1024;
 /// Bound on statements in one query.
@@ -99,9 +101,32 @@ pub enum LoweringErrorCode {
     ResourceLimit,
 }
 
+/// Why an integer term has no exact linear encoding.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum UnsupportedClass {
+    NonLinearArithmetic,
+    IntegerDivision,
+    IntegerRemainder,
+    SaturatingArithmetic,
+    ConstantOverflow,
+}
+
+impl UnsupportedClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NonLinearArithmetic => "non_linear_arithmetic",
+            Self::IntegerDivision => "integer_division",
+            Self::IntegerRemainder => "integer_remainder",
+            Self::SaturatingArithmetic => "saturating_arithmetic",
+            Self::ConstantOverflow => "constant_overflow",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoweringError {
     code: LoweringErrorCode,
+    class: Option<UnsupportedClass>,
     path: String,
     message: String,
 }
@@ -110,6 +135,7 @@ impl LoweringError {
     fn new(code: LoweringErrorCode, path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code,
+            class: None,
             path: path.into(),
             message: message.into(),
         }
@@ -117,6 +143,10 @@ impl LoweringError {
 
     pub const fn code(&self) -> LoweringErrorCode {
         self.code
+    }
+    /// The integer construct class of an unsupported integer term, when it has one.
+    pub const fn unsupported_class(&self) -> Option<UnsupportedClass> {
+        self.class
     }
     pub fn path(&self) -> &str {
         &self.path
@@ -396,7 +426,7 @@ pub struct CapabilityContract {
 pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
     profile: SMTLIB2_PROFILE,
     smtlib_version: "2.6",
-    logic: "QF_UF",
+    logic: SMTLIB2_LOGIC,
     exact_constructs: &[
         "boolean_literal",
         "boolean_value_reference",
@@ -408,9 +438,25 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "implication",
         "boolean_equal",
         "boolean_not_equal",
+        "integer_literal",
+        "integer_value_reference",
+        "integer_negation",
+        "integer_addition",
+        "integer_subtraction",
+        "integer_constant_multiplication",
+        "integer_equal",
+        "integer_not_equal",
+        "integer_less",
+        "integer_less_equal",
+        "integer_greater",
+        "integer_greater_equal",
     ],
     unsupported_constructs: &[
-        "integer",
+        "non_linear_arithmetic",
+        "integer_division",
+        "integer_remainder",
+        "saturating_arithmetic",
+        "constant_overflow",
         "rational",
         "text",
         "enum",
@@ -421,7 +467,7 @@ pub const CAPABILITY_CONTRACT: CapabilityContract = CapabilityContract {
         "option_access",
         "collection_access",
         "pure_function_call",
-        "arithmetic",
+        "rational_arithmetic",
         "ordering",
         "quantification",
         "local_reference",
@@ -461,6 +507,8 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
+    /// An integer-valued term; integer witness replay is not performed, so it never evaluates.
+    Unreplayed,
 }
 
 impl ReplayExpression {
@@ -474,6 +522,7 @@ impl ReplayExpression {
             Self::Implies(left, right) => Some(!left.evaluate(values)? || right.evaluate(values)?),
             Self::Equal(left, right) => Some(left.evaluate(values)? == right.evaluate(values)?),
             Self::NotEqual(left, right) => Some(left.evaluate(values)? != right.evaluate(values)?),
+            Self::Unreplayed => None,
         }
     }
 }
@@ -598,6 +647,7 @@ fn lower_statement_specs(
     let (binding_lookup, binding_set_digest) = validate_bindings(bindings)?;
     let mut encountered = BTreeSet::new();
     let mut variables: BTreeMap<String, VariableMap> = BTreeMap::new();
+    let mut ranges: BTreeMap<String, (i128, i128)> = BTreeMap::new();
     let mut lowered = Vec::with_capacity(statements.len());
     let mut errors = Vec::new();
 
@@ -621,6 +671,7 @@ fn lower_statement_specs(
             &binding_lookup,
             &mut encountered,
             &mut variables,
+            &mut ranges,
         ) {
             Ok(mut expression) => {
                 if specification.polarity == AssertionPolarity::Negated {
@@ -682,13 +733,26 @@ fn lower_statement_specs(
 
     let mut query = String::new();
     query.push_str("(set-info :smt-lib-version 2.6)\n");
-    query.push_str("(set-info :source |quire.smtlib2/v1|)\n");
-    query.push_str("(set-option :produce-models true)\n");
-    query.push_str("(set-logic QF_UF)\n");
+    query.push_str("(set-info :source |");
+    query.push_str(SMTLIB2_PROFILE);
+    query.push_str("|)\n(set-option :produce-models true)\n(set-logic ");
+    query.push_str(SMTLIB2_LOGIC);
+    query.push_str(")\n");
     for symbol in variables.keys() {
         query.push_str("(declare-fun ");
         query.push_str(symbol);
-        query.push_str(" () Bool)\n");
+        query.push_str(if ranges.contains_key(symbol) {
+            " () Int)\n"
+        } else {
+            " () Bool)\n"
+        });
+    }
+    for (symbol, (minimum, maximum)) in &ranges {
+        query.push_str(&format!(
+            "(assert (and (<= {} {symbol}) (<= {symbol} {})))\n",
+            numeral(*minimum),
+            numeral(*maximum)
+        ));
     }
     let mut assertions = Vec::with_capacity(lowered.len());
     let mut replay_assertions = Vec::with_capacity(lowered.len());
@@ -801,121 +865,50 @@ fn lower_expression(
     bindings: &BindingLookup,
     encountered: &mut BTreeSet<String>,
     variables: &mut BTreeMap<String, VariableMap>,
+    ranges: &mut BTreeMap<String, (i128, i128)>,
 ) -> Result<LoweredExpression, LoweringError> {
+    let mut state = LowerState {
+        statement,
+        bindings,
+        encountered,
+        variables,
+        ranges,
+        nodes: 0,
+    };
+    state.lower(&statement.expression, 1, &ExprPath::ROOT)
+}
+
+struct LowerState<'a> {
+    statement: &'a StatementInput,
+    bindings: &'a BindingLookup,
+    encountered: &'a mut BTreeSet<String>,
+    variables: &'a mut BTreeMap<String, VariableMap>,
+    ranges: &'a mut BTreeMap<String, (i128, i128)>,
+    nodes: usize,
+}
+
+impl LowerState<'_> {
     fn lower(
+        &mut self,
         expression: &Expression,
-        statement: &StatementInput,
-        bindings: &BindingLookup,
-        encountered: &mut BTreeSet<String>,
-        variables: &mut BTreeMap<String, VariableMap>,
         depth: usize,
-        nodes: &mut usize,
+        path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        if depth > MAX_EXPRESSION_DEPTH {
-            return Err(LoweringError::new(
-                LoweringErrorCode::ResourceLimit,
-                "expression.depth",
-                "expression depth exceeds the public bound",
-            ));
-        }
-        *nodes = nodes.saturating_add(1);
-        if *nodes > MAX_EXPRESSION_NODES {
-            return Err(LoweringError::new(
-                LoweringErrorCode::ResourceLimit,
-                "expression.nodes",
-                "expression node count exceeds the public bound",
-            ));
-        }
-        let recurse = |child: &Expression,
-                       encountered: &mut BTreeSet<String>,
-                       variables: &mut BTreeMap<String, VariableMap>,
-                       nodes: &mut usize| {
-            lower(
-                child,
-                statement,
-                bindings,
-                encountered,
-                variables,
-                depth + 1,
-                nodes,
-            )
-        };
+        count_node(depth, &mut self.nodes)?;
         match expression.kind() {
             ExpressionKind::BooleanLiteral { value } => Ok(LoweredExpression {
                 smt: value.to_string(),
                 replay: ReplayExpression::Literal(*value),
             }),
             ExpressionKind::ValueReference { name, observation } => {
-                let declaration = statement
-                    .environment
-                    .values()
-                    .iter()
-                    .find(|value| value.name() == name)
-                    .ok_or_else(|| {
-                        LoweringError::new(
-                            LoweringErrorCode::InvalidStatement,
-                            "expression.value_reference",
-                            "validated declaration no longer resolves",
-                        )
-                    })?;
-                if declaration.value_type() != &ValueType::Boolean {
-                    return Err(unsupported(
-                        "expression.value_reference",
-                        "only Boolean value references are exact in quire.smtlib2/v1",
-                    ));
-                }
-                let kind = declaration_kind(declaration.kind());
-                let point = execution_point_key(&statement.execution_point);
-                let digest = type_shape_digest(&statement.environment, declaration.value_type())?;
-                let key = variable_key(
-                    statement.environment.owner(),
-                    kind,
-                    observation_name(*observation),
-                    name.as_str(),
-                    &point,
-                    digest,
-                );
-                let (symbol, binding_group) = match bindings.get(&key) {
-                    Some(group) => {
-                        encountered.insert(key.clone());
-                        (
-                            format!("v_b_{}", hex(group.as_bytes())),
-                            Some(group.clone()),
-                        )
-                    }
-                    None => (
-                        format!("v_s_{}", hash_fields("variable", &[key.as_bytes()])),
-                        None,
-                    ),
-                };
-                let entry = variables
-                    .entry(symbol.clone())
-                    .or_insert_with(|| VariableMap {
-                        symbol: symbol.clone(),
-                        origins: Vec::new(),
-                        binding_group,
-                    });
-                if entry.binding_group.is_none()
-                    && !entry.origins.is_empty()
-                    && !entry.origins.contains(&key)
-                {
-                    return Err(LoweringError::new(
-                        LoweringErrorCode::InvalidStatement,
-                        "expression.value_reference",
-                        "distinct variable identities produced one symbol",
-                    ));
-                }
-                if !entry.origins.contains(&key) {
-                    entry.origins.push(key);
-                    entry.origins.sort();
-                }
+                let symbol = self.reference(name, *observation)?;
                 Ok(LoweredExpression {
                     smt: symbol.clone(),
                     replay: ReplayExpression::Variable(symbol),
                 })
             }
             ExpressionKind::BooleanNot { operand } => {
-                let operand = recurse(operand, encountered, variables, nodes)?;
+                let operand = self.lower(operand, depth + 1, &path.child("operand"))?;
                 Ok(LoweredExpression {
                     smt: format!("(not {})", operand.smt),
                     replay: ReplayExpression::Not(Box::new(operand.replay)),
@@ -926,8 +919,8 @@ fn lower_expression(
                 left,
                 right,
             } => {
-                let left = recurse(left, encountered, variables, nodes)?;
-                let right = recurse(right, encountered, variables, nodes)?;
+                let left = self.lower(left, depth + 1, &path.child("left"))?;
+                let right = self.lower(right, depth + 1, &path.child("right"))?;
                 let (operator_name, replay) = match operator {
                     BooleanOperator::ShortCircuitAnd | BooleanOperator::TotalAnd => (
                         "and",
@@ -951,44 +944,428 @@ fn lower_expression(
                 operator,
                 left,
                 right,
-            } if matches!(
-                operator,
-                ComparisonOperator::Equal | ComparisonOperator::NotEqual
-            ) =>
-            {
-                let left = recurse(left, encountered, variables, nodes)?;
-                let right = recurse(right, encountered, variables, nodes)?;
-                Ok(match operator {
-                    ComparisonOperator::Equal => LoweredExpression {
+            } => {
+                if self.is_integer_term(left) {
+                    return self.lower_integer_comparison(*operator, left, right, depth, path);
+                }
+                if !matches!(
+                    operator,
+                    ComparisonOperator::Equal | ComparisonOperator::NotEqual
+                ) {
+                    return Err(unsupported(
+                        &path.render(),
+                        "ordering comparison of non-integer terms is unsupported",
+                    ));
+                }
+                let left = self.lower(left, depth + 1, &path.child("left"))?;
+                let right = self.lower(right, depth + 1, &path.child("right"))?;
+                Ok(if *operator == ComparisonOperator::Equal {
+                    LoweredExpression {
                         smt: format!("(= {} {})", left.smt, right.smt),
                         replay: ReplayExpression::Equal(
                             Box::new(left.replay),
                             Box::new(right.replay),
                         ),
-                    },
-                    ComparisonOperator::NotEqual => LoweredExpression {
+                    }
+                } else {
+                    LoweredExpression {
                         smt: format!("(not (= {} {}))", left.smt, right.smt),
                         replay: ReplayExpression::NotEqual(
                             Box::new(left.replay),
                             Box::new(right.replay),
                         ),
-                    },
-                    _ => unreachable!(),
+                    }
                 })
             }
-            other => Err(unsupported("expression", construct_name(other))),
+            other => Err(unsupported(&path.render(), construct_name(other))),
         }
     }
-    let mut nodes = 0;
-    lower(
-        &statement.expression,
-        statement,
-        bindings,
-        encountered,
-        variables,
-        1,
-        &mut nodes,
-    )
+
+    /// Whether the term is integer-typed. Validation makes both comparison operands agree, so
+    /// the left operand decides.
+    fn is_integer_term(&self, expression: &Expression) -> bool {
+        match expression.kind() {
+            ExpressionKind::IntegerLiteral { .. } => true,
+            ExpressionKind::Numeric { left, .. } => self.is_integer_term(left),
+            ExpressionKind::NumericNegate { operand } => self.is_integer_term(operand),
+            ExpressionKind::ValueReference { name, .. } => self.integer_type(name).is_some(),
+            _ => false,
+        }
+    }
+
+    fn integer_type(&self, name: &SymbolName) -> Option<IntegerType> {
+        integer_declaration_type(&self.statement.environment, name)
+    }
+
+    fn lower_integer_comparison(
+        &mut self,
+        operator: ComparisonOperator,
+        left: &Expression,
+        right: &Expression,
+        depth: usize,
+        path: &ExprPath<'_>,
+    ) -> Result<LoweredExpression, LoweringError> {
+        let environment = &self.statement.environment;
+        let types = |name: &SymbolName| integer_declaration_type(environment, name);
+        let left = fold_integer(
+            left,
+            &path.child("left"),
+            &types,
+            depth + 1,
+            &mut self.nodes,
+        )?;
+        let right = fold_integer(
+            right,
+            &path.child("right"),
+            &types,
+            depth + 1,
+            &mut self.nodes,
+        )?;
+        let left = self.emit(&left.tree)?;
+        let right = self.emit(&right.tree)?;
+        let name = match operator {
+            ComparisonOperator::Equal => "=",
+            ComparisonOperator::NotEqual => "distinct",
+            ComparisonOperator::Less => "<",
+            ComparisonOperator::LessEqual => "<=",
+            ComparisonOperator::Greater => ">",
+            ComparisonOperator::GreaterEqual => ">=",
+        };
+        Ok(LoweredExpression {
+            smt: format!("({name} {left} {right})"),
+            replay: ReplayExpression::Unreplayed,
+        })
+    }
+
+    fn emit(&mut self, tree: &IntegerTree) -> Result<String, LoweringError> {
+        Ok(match tree {
+            IntegerTree::Constant(value) => numeral(*value),
+            IntegerTree::Reference { name, observation } => self.reference(name, *observation)?,
+            IntegerTree::Negate(operand) => format!("(- {})", self.emit(operand)?),
+            IntegerTree::Add(left, right) => {
+                format!("(+ {} {})", self.emit(left)?, self.emit(right)?)
+            }
+            IntegerTree::Subtract(left, right) => {
+                format!("(- {} {})", self.emit(left)?, self.emit(right)?)
+            }
+            IntegerTree::Scale { factor, term } => {
+                format!("(* {} {})", numeral(*factor), self.emit(term)?)
+            }
+        })
+    }
+
+    /// Resolves a value reference to its query symbol and records the variable. An integer
+    /// reference also records its declared range.
+    fn reference(
+        &mut self,
+        name: &SymbolName,
+        observation: StateObservation,
+    ) -> Result<String, LoweringError> {
+        let statement = self.statement;
+        let declaration = statement
+            .environment
+            .values()
+            .iter()
+            .find(|value| value.name() == name)
+            .ok_or_else(|| {
+                LoweringError::new(
+                    LoweringErrorCode::InvalidStatement,
+                    "expression.value_reference",
+                    "validated declaration no longer resolves",
+                )
+            })?;
+        let range = match declaration.value_type() {
+            ValueType::Boolean => None,
+            ValueType::Integer { value } => Some((value.minimum(), value.maximum())),
+            _ => {
+                return Err(unsupported(
+                    "expression.value_reference",
+                    "only Boolean and integer value references are exact in quire.smtlib2/v2",
+                ))
+            }
+        };
+        let kind = declaration_kind(declaration.kind());
+        let point = execution_point_key(&statement.execution_point);
+        let digest = type_shape_digest(&statement.environment, declaration.value_type())?;
+        let key = variable_key(
+            statement.environment.owner(),
+            kind,
+            observation_name(observation),
+            name.as_str(),
+            &point,
+            digest,
+        );
+        let (symbol, binding_group) = match self.bindings.get(&key) {
+            Some(group) => {
+                self.encountered.insert(key.clone());
+                (
+                    format!("v_b_{}", hex(group.as_bytes())),
+                    Some(group.clone()),
+                )
+            }
+            None => (
+                format!("v_s_{}", hash_fields("variable", &[key.as_bytes()])),
+                None,
+            ),
+        };
+        let entry = self
+            .variables
+            .entry(symbol.clone())
+            .or_insert_with(|| VariableMap {
+                symbol: symbol.clone(),
+                origins: Vec::new(),
+                binding_group,
+            });
+        if entry.binding_group.is_none()
+            && !entry.origins.is_empty()
+            && !entry.origins.contains(&key)
+        {
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                "expression.value_reference",
+                "distinct variable identities produced one symbol",
+            ));
+        }
+        if !entry.origins.contains(&key) {
+            entry.origins.push(key);
+            entry.origins.sort();
+        }
+        if let Some(range) = range {
+            self.ranges.insert(symbol.clone(), range);
+        }
+        Ok(symbol)
+    }
+}
+
+/// The position of an expression within the statement, rendered only when an error needs it.
+struct ExprPath<'a> {
+    parent: Option<&'a ExprPath<'a>>,
+    segment: &'static str,
+}
+
+impl<'a> ExprPath<'a> {
+    const ROOT: ExprPath<'static> = ExprPath {
+        parent: None,
+        segment: "expression",
+    };
+
+    fn child(&'a self, segment: &'static str) -> ExprPath<'a> {
+        ExprPath {
+            parent: Some(self),
+            segment,
+        }
+    }
+
+    fn render(&self) -> String {
+        match self.parent {
+            Some(parent) => format!("{}.{}", parent.render(), self.segment),
+            None => self.segment.to_owned(),
+        }
+    }
+}
+
+fn count_node(depth: usize, nodes: &mut usize) -> Result<(), LoweringError> {
+    if depth > MAX_EXPRESSION_DEPTH {
+        return Err(LoweringError::new(
+            LoweringErrorCode::ResourceLimit,
+            "expression.depth",
+            "expression depth exceeds the public bound",
+        ));
+    }
+    *nodes = nodes.saturating_add(1);
+    if *nodes > MAX_EXPRESSION_NODES {
+        return Err(LoweringError::new(
+            LoweringErrorCode::ResourceLimit,
+            "expression.nodes",
+            "expression node count exceeds the public bound",
+        ));
+    }
+    Ok(())
+}
+
+fn integer_declaration_type(
+    environment: &DeclarationEnvironment,
+    name: &SymbolName,
+) -> Option<IntegerType> {
+    environment
+        .values()
+        .iter()
+        .find(|value| value.name() == name)
+        .and_then(|declaration| match declaration.value_type() {
+            ValueType::Integer { value } => Some(value.clone()),
+            _ => None,
+        })
+}
+
+/// Spells an integer exactly: a negative value is the negation of its magnitude.
+fn numeral(value: i128) -> String {
+    if value < 0 {
+        format!("(- {})", value.unsigned_abs())
+    } else {
+        value.to_string()
+    }
+}
+
+/// A linear integer term after constant folding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum IntegerTree {
+    Constant(i128),
+    Reference {
+        name: SymbolName,
+        observation: StateObservation,
+    },
+    Negate(Box<IntegerTree>),
+    Add(Box<IntegerTree>, Box<IntegerTree>),
+    Subtract(Box<IntegerTree>, Box<IntegerTree>),
+    /// A constant factor times a non-constant term.
+    Scale {
+        factor: i128,
+        term: Box<IntegerTree>,
+    },
+}
+
+struct FoldedInteger {
+    tree: IntegerTree,
+    value_type: IntegerType,
+}
+
+fn integer_unsupported(
+    class: UnsupportedClass,
+    path: &ExprPath<'_>,
+    message: &str,
+) -> LoweringError {
+    let mut error = unsupported(&path.render(), &format!("{}: {message}", class.as_str()));
+    error.class = Some(class);
+    error
+}
+
+/// Folds every maximal constant subtree to one literal and rejects any term outside linear
+/// integer arithmetic. `types` resolves a value reference to its declared integer type.
+fn fold_integer(
+    expression: &Expression,
+    path: &ExprPath<'_>,
+    types: &dyn Fn(&SymbolName) -> Option<IntegerType>,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<FoldedInteger, LoweringError> {
+    count_node(depth, nodes)?;
+    let overflow = || {
+        integer_unsupported(
+            UnsupportedClass::ConstantOverflow,
+            path,
+            "constant fold leaves the 128-bit signed range",
+        )
+    };
+    match expression.kind() {
+        ExpressionKind::IntegerLiteral { value, value_type } => Ok(FoldedInteger {
+            tree: IntegerTree::Constant(*value),
+            value_type: value_type.clone(),
+        }),
+        ExpressionKind::ValueReference { name, observation } => {
+            let value_type = types(name).ok_or_else(|| {
+                unsupported(
+                    &path.render(),
+                    "only integer value references are exact in an integer term",
+                )
+            })?;
+            Ok(FoldedInteger {
+                tree: IntegerTree::Reference {
+                    name: name.clone(),
+                    observation: *observation,
+                },
+                value_type,
+            })
+        }
+        ExpressionKind::NumericNegate { operand } => {
+            let operand = fold_integer(operand, &path.child("operand"), types, depth + 1, nodes)?;
+            reject_saturating(&operand.value_type, path)?;
+            let tree = match operand.tree {
+                IntegerTree::Constant(value) => {
+                    IntegerTree::Constant(value.checked_neg().ok_or_else(overflow)?)
+                }
+                other => IntegerTree::Negate(Box::new(other)),
+            };
+            Ok(FoldedInteger {
+                tree,
+                value_type: operand.value_type,
+            })
+        }
+        ExpressionKind::Numeric {
+            operator,
+            left,
+            right,
+        } => {
+            match operator {
+                NumericOperator::Divide => {
+                    return Err(integer_unsupported(
+                        UnsupportedClass::IntegerDivision,
+                        path,
+                        "integer division is outside linear integer arithmetic",
+                    ))
+                }
+                NumericOperator::Remainder => {
+                    return Err(integer_unsupported(
+                        UnsupportedClass::IntegerRemainder,
+                        path,
+                        "integer remainder is outside linear integer arithmetic",
+                    ))
+                }
+                NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
+            }
+            let left = fold_integer(left, &path.child("left"), types, depth + 1, nodes)?;
+            let right = fold_integer(right, &path.child("right"), types, depth + 1, nodes)?;
+            reject_saturating(&left.value_type, path)?;
+            let tree = match (operator, left.tree, right.tree) {
+                (NumericOperator::Add, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
+                    IntegerTree::Constant(a.checked_add(b).ok_or_else(overflow)?)
+                }
+                (NumericOperator::Add, a, b) => IntegerTree::Add(Box::new(a), Box::new(b)),
+                (NumericOperator::Subtract, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
+                    IntegerTree::Constant(a.checked_sub(b).ok_or_else(overflow)?)
+                }
+                (NumericOperator::Subtract, a, b) => {
+                    IntegerTree::Subtract(Box::new(a), Box::new(b))
+                }
+                (NumericOperator::Multiply, IntegerTree::Constant(a), IntegerTree::Constant(b)) => {
+                    IntegerTree::Constant(a.checked_mul(b).ok_or_else(overflow)?)
+                }
+                (NumericOperator::Multiply, IntegerTree::Constant(factor), term)
+                | (NumericOperator::Multiply, term, IntegerTree::Constant(factor)) => {
+                    IntegerTree::Scale {
+                        factor,
+                        term: Box::new(term),
+                    }
+                }
+                _ => {
+                    return Err(integer_unsupported(
+                        UnsupportedClass::NonLinearArithmetic,
+                        path,
+                        "product of two non-constant terms",
+                    ))
+                }
+            };
+            Ok(FoldedInteger {
+                tree,
+                value_type: left.value_type,
+            })
+        }
+        _ => Err(unsupported(
+            &path.render(),
+            "construct is outside linear integer arithmetic",
+        )),
+    }
+}
+
+fn reject_saturating(value_type: &IntegerType, path: &ExprPath<'_>) -> Result<(), LoweringError> {
+    if value_type.overflow() == OverflowPolicy::Saturate {
+        Err(integer_unsupported(
+            UnsupportedClass::SaturatingArithmetic,
+            path,
+            "a saturating result has no exact encoding",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn unsupported(path: &str, message: &str) -> LoweringError {
@@ -997,7 +1374,9 @@ fn unsupported(path: &str, message: &str) -> LoweringError {
 
 fn construct_name(kind: &ExpressionKind) -> &'static str {
     match kind {
-        ExpressionKind::IntegerLiteral { .. } => "integer literals are unsupported",
+        ExpressionKind::IntegerLiteral { .. } => {
+            "integer literal outside a comparison is unsupported"
+        }
         ExpressionKind::RationalLiteral { .. } => "rational literals are unsupported",
         ExpressionKind::TextLiteral { .. } => "text literals are unsupported",
         ExpressionKind::EnumLiteral { .. } => "enum literals are unsupported",
@@ -1016,7 +1395,7 @@ fn construct_name(kind: &ExpressionKind) -> &'static str {
         }
         ExpressionKind::Call { .. } => "pure function calls are unsupported",
         ExpressionKind::Numeric { .. } | ExpressionKind::NumericNegate { .. } => {
-            "arithmetic is unsupported"
+            "rational arithmetic is unsupported"
         }
         ExpressionKind::Compare { .. } => "non-Boolean comparison is unsupported",
         ExpressionKind::BooleanLiteral { .. }
@@ -1275,4 +1654,101 @@ pub(crate) fn derive_query_digest(
         *slot = u8::from_str_radix(pair, 16).map_err(|_| "request digest is not hex".to_owned())?;
     }
     Ok(hash_fields("query", &[SMTLIB2_PROFILE.as_bytes(), &request, query]).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use quire_contract_model::{SourceDocumentId, SourceIdentity, SourceLocation, SourceRevision};
+
+    use super::*;
+
+    fn span() -> SourceSpan {
+        let source = SourceIdentity::new(
+            SourceDocumentId::new("unit").expect("source id"),
+            SourceRevision::new(1).expect("revision"),
+        );
+        SourceSpan::new(
+            SourceLocation::new(source.clone(), 1, 1, 0).expect("start"),
+            SourceLocation::new(source, 1, 2, 1).expect("end"),
+        )
+        .expect("span")
+    }
+
+    fn literal(value: i128, value_type: &IntegerType) -> Expression {
+        Expression::new(
+            ExpressionKind::IntegerLiteral {
+                value,
+                value_type: value_type.clone(),
+            },
+            span(),
+        )
+    }
+
+    fn binary(operator: NumericOperator, left: Expression, right: Expression) -> Expression {
+        Expression::new(
+            ExpressionKind::Numeric {
+                operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            span(),
+        )
+    }
+
+    fn fold(expression: &Expression) -> Result<FoldedInteger, LoweringError> {
+        fold_integer(expression, &ExprPath::ROOT, &|_| None, 1, &mut 0)
+    }
+
+    /// FR-010-AC-11: a constant fold outside the 128-bit signed range is refused, not wrapped.
+    #[ix_trace_rs::trace("TC-016", "FR-010-AC-11")]
+    #[test]
+    fn constant_fold_overflow_is_unsupported() {
+        let ty = IntegerType::new(
+            IntegerDomain::Signed,
+            i128::MIN,
+            i128::MAX,
+            OverflowPolicy::Reject,
+        )
+        .expect("type");
+        let cases = [
+            binary(
+                NumericOperator::Add,
+                literal(i128::MAX, &ty),
+                literal(1, &ty),
+            ),
+            binary(
+                NumericOperator::Subtract,
+                literal(i128::MIN, &ty),
+                literal(1, &ty),
+            ),
+            binary(
+                NumericOperator::Multiply,
+                literal(i128::MAX, &ty),
+                literal(2, &ty),
+            ),
+            Expression::new(
+                ExpressionKind::NumericNegate {
+                    operand: Box::new(literal(i128::MIN, &ty)),
+                },
+                span(),
+            ),
+        ];
+        for expression in &cases {
+            let error = fold(expression).err().expect("overflow");
+            assert_eq!(error.code(), LoweringErrorCode::UnsupportedConstruct);
+            assert_eq!(
+                error.unsupported_class(),
+                Some(UnsupportedClass::ConstantOverflow)
+            );
+        }
+        let exact = binary(
+            NumericOperator::Add,
+            literal(i128::MAX - 1, &ty),
+            literal(1, &ty),
+        );
+        assert_eq!(
+            fold(&exact).expect("in range").tree,
+            IntegerTree::Constant(i128::MAX)
+        );
+    }
 }
