@@ -1338,7 +1338,7 @@ enum Planned<'f> {
         quantifier: &'f RangeQuantifier,
         encoding: QuantifierEncoding,
         /// The literal bounds of an expanded range.
-        elements: Option<(i64, i64)>,
+        elements: Option<(i128, i128)>,
         body: Box<Planned<'f>>,
     },
 }
@@ -1412,7 +1412,11 @@ impl LowerState<'_> {
         };
         // A declared bound is only known to the solver, so only literal ranges can expand.
         let cost = literals.and_then(|(lower, upper)| {
-            expansion_cost(literal_width(lower, upper), enclosing, self.quantifiers.used)
+            expansion_cost(
+                literal_width(lower, upper),
+                enclosing,
+                self.quantifiers.used,
+            )
         });
         let (encoding, count) = match cost {
             Some(count) => (QuantifierEncoding::Expanded, count),
@@ -1497,7 +1501,9 @@ impl LowerState<'_> {
                     replay: ReplayExpression::Not(Box::new(operand.replay)),
                 })
             }
-            Planned::And(left, right) | Planned::Or(left, right) | Planned::Implies(left, right) => {
+            Planned::And(left, right)
+            | Planned::Or(left, right)
+            | Planned::Implies(left, right) => {
                 let left_lowered = self.lower_planned(left, depth + 1, &path.child("left"))?;
                 let right_lowered = self.lower_planned(right, depth + 1, &path.child("right"))?;
                 let (name, replay) = match planned {
@@ -1547,7 +1553,7 @@ impl LowerState<'_> {
     fn lower_expanded(
         &mut self,
         quantifier: &RangeQuantifier,
-        (lower, upper): (i64, i64),
+        (lower, upper): (i128, i128),
         body: &Planned<'_>,
         depth: usize,
         path: &ExprPath<'_>,
@@ -1558,7 +1564,7 @@ impl LowerState<'_> {
             self.scope.push(LocalBinding {
                 name: quantifier.local.clone(),
                 value_type: quantifier.local_type.clone(),
-                value: LocalValue::Element(i128::from(element)),
+                value: LocalValue::Element(element),
             });
             let instance = self.lower_planned(body, depth + 1, &path.child("body"));
             self.scope.pop();
@@ -1636,7 +1642,7 @@ impl LowerState<'_> {
     /// The query term of a finite range bound.
     fn bound_term(&mut self, bound: &RangeBound) -> Result<String, LoweringError> {
         match bound {
-            RangeBound::Literal(value) => Ok(numeral(i128::from(*value))),
+            RangeBound::Literal(value) => Ok(numeral(*value)),
             RangeBound::Declared(name) => self.reference(name, StateObservation::Current),
             RangeBound::Unbounded => Err(unsupported(
                 "expression.quantifier",
@@ -1646,7 +1652,10 @@ impl LowerState<'_> {
     }
 
     fn local(&self, name: &SymbolName) -> Option<&LocalBinding> {
-        self.scope.iter().rev().find(|binding| &binding.name == name)
+        self.scope
+            .iter()
+            .rev()
+            .find(|binding| &binding.name == name)
     }
 
     fn lower(
@@ -2814,21 +2823,13 @@ fn fold_integer(
         }
         ExpressionKind::LocalReference { name } => {
             let (tree, value_type) = (resolvers.locals)(name).ok_or_else(|| {
-                unsupported(
-                    &path.render(),
-                    "local reference outside a range quantifier",
-                )
+                unsupported(&path.render(), "local reference outside a range quantifier")
             })?;
             Ok(FoldedInteger { tree, value_type })
         }
         ExpressionKind::NumericNegate { operand } => {
-            let operand = fold_integer(
-                operand,
-                &path.child("operand"),
-                resolvers,
-                depth + 1,
-                nodes,
-            )?;
+            let operand =
+                fold_integer(operand, &path.child("operand"), resolvers, depth + 1, nodes)?;
             reject_saturating(&operand.value_type, path)?;
             let tree = match operand.tree {
                 IntegerTree::Constant(value) => {
@@ -3516,6 +3517,38 @@ mod tests {
             logic_of("(set-logic QF_LIA)\n(declare-fun |x () Bool)\n"),
             None
         );
+    }
+
+    /// FR-032-AC-6 and FR-005-AC-6: a solver quantifier removes the quantifier-free prefix of the
+    /// required logic, read from commands, so comments, quoted symbols and strings cannot fake it.
+    #[ix_trace_rs::trace("TC-030", "FR-032-AC-6", "FR-005-AC-6")]
+    #[test]
+    fn logic_derivation_reads_solver_quantifiers() {
+        let quantified = "(set-logic LIA)\n(assert (forall ((q Int)) (=> (<= 0 q) (<= 0 q))))\n";
+        assert_eq!(logic_of(quantified), Some(("LIA", "LIA".to_owned())));
+        let existential =
+            "(set-logic UFDTLIA)\n(declare-datatype S ((a)))\n(assert (exists ((q Int)) true))\n";
+        assert_eq!(
+            logic_of(existential),
+            Some(("UFDTLIA", "UFDTLIA".to_owned()))
+        );
+        assert_eq!(
+            logic_of("(set-logic QF_LIA)\n(assert (forall ((q Int)) true))\n"),
+            Some(("LIA", "QF_LIA".to_owned()))
+        );
+        for hidden in [
+            "; (assert (forall ((q Int)) true))\n",
+            "(declare-fun |(forall | () Bool)\n",
+            "(set-info :note \"(exists\")\n",
+            "(set-info :note forall)\n",
+        ] {
+            let query = format!("(set-logic QF_LIA)\n{hidden}");
+            assert_eq!(
+                logic_of(&query),
+                Some(("QF_LIA", "QF_LIA".to_owned())),
+                "{hidden}"
+            );
+        }
     }
 
     fn unchecked_statement(

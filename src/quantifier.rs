@@ -49,7 +49,7 @@ pub struct QuantifierRefusal {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RangeBound {
     /// An integer literal.
-    Literal(i64),
+    Literal(i128),
     /// The declared bounds of a bounded integer input, read at the current observation.
     Declared(SymbolName),
     /// A bound that is not provably finite.
@@ -72,7 +72,7 @@ pub struct RangeQuantifier {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnalysisFormula {
     /// A quantifier-free contract expression.
-    Term(Expression),
+    Term(Box<Expression>),
     Not(Box<AnalysisFormula>),
     And(Box<AnalysisFormula>, Box<AnalysisFormula>),
     Or(Box<AnalysisFormula>, Box<AnalysisFormula>),
@@ -173,11 +173,11 @@ pub struct QuantifierEntry {
 
 /// The width of an inclusive literal range, or `None` when it is not representable. An empty
 /// range has width zero.
-pub(crate) fn literal_width(lower: i64, upper: i64) -> Option<u128> {
+pub(crate) fn literal_width(lower: i128, upper: i128) -> Option<u128> {
     if lower > upper {
         return Some(0);
     }
-    u128::from(i128::from(upper).abs_diff(i128::from(lower))).checked_add(1)
+    upper.abs_diff(lower).checked_add(1)
 }
 
 /// Picks the encoding for a literal range from the remaining budget. `enclosing` is the product
