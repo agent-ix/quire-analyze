@@ -20,8 +20,8 @@ use std::{
 };
 
 use common::{
-    cycle_document, id, integer_cycle_document, not_chain, product_document, with_identity,
-    Document, Sized, TempDir, AND, NOT,
+    cycle_document, id, integer_cycle_document, labels, not_chain, option_value, product_document,
+    record_field, with_identity, Document, Sized, TempDir, AND, ENUM_EQ, NOT,
 };
 use ix_trace_rs::trace;
 use quire_analyze::{
@@ -1489,4 +1489,175 @@ fn integer_refusals_exit_two_naming_the_node_through_the_runner() {
         assert!(fixture.requests().is_empty());
         fixture.assert_no_report();
     }
+}
+
+/// `role = Admin or role = Auditor` and `role = Guest`: contradictory over the three roles.
+fn guest_membership() -> Vec<u8> {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Auditor", "Guest"]);
+    let r = document.parameter_of(&role);
+    let admin = document.enum_literal(&role, "Admin");
+    let auditor = document.enum_literal(&role, "Auditor");
+    let guest = document.enum_literal(&role, "Guest");
+    let is_admin = document.op(ENUM_EQ, &[&r, &admin]);
+    let is_auditor = document.op(ENUM_EQ, &[&r, &auditor]);
+    let member = document.op("quire.op.boolean.or", &[&is_admin, &is_auditor]);
+    let is_guest = document.op(ENUM_EQ, &[&r, &guest]);
+    let first = document.claim(&member);
+    let second = document.claim(&is_guest);
+    document.bytes(&[&first, &second])
+}
+
+#[trace("FR-022-AC-1", "TC-020")]
+#[test]
+fn a_contradictory_enum_membership_exits_one_through_the_runner() {
+    let bytes = guest_membership();
+    let fixture = Fixture::new(&bytes);
+    fixture.both("unsat\n", "unsat\n");
+    let run = fixture.run();
+    assert_eq!(run.code, Some(1), "{}", run.stderr);
+    assert_eq!(fixture.report()["differential"]["agreedStatus"], "refuted");
+    fixture.assert_no_leftovers();
+}
+
+/// A satisfiable enum model is not verified until datatype replay exists, so it is inconclusive.
+#[trace("FR-022-AC-1", "TC-020")]
+#[test]
+fn a_satisfiable_enum_model_is_not_verified_and_exits_three() {
+    let bytes = guest_membership();
+    let fixture = Fixture::new(&bytes);
+    fixture.both("sat\n(model)\n", "sat\n(model)\n");
+    let run = fixture.run();
+    assert_eq!(run.code, Some(3), "{}", run.stderr);
+    let report = fixture.report();
+    assert_eq!(report["differential"]["disposition"], "inconclusive");
+    assert_eq!(report["differential"]["agreedStatus"], Value::Null);
+    for engine in report["engines"].as_array().expect("engines") {
+        assert_eq!(engine["status"], "satisfied");
+        assert_eq!(engine["explanation"], "incomplete");
+    }
+}
+
+/// Datatype refusals exit `2` naming the node, write no report and invoke no solver.
+#[trace("FR-022-AC-3", "FR-022-AC-5", "TC-020")]
+#[test]
+fn datatype_refusals_exit_two_through_the_runner_without_a_solver() {
+    let mut cases: Vec<(Vec<u8>, String)> = Vec::new();
+
+    // A record nesting text.
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let text = document.unsupported_type("text");
+    let user = document.record_type("User", &[("role", &role), ("name", &text)]);
+    let u = document.parameter_of(&user);
+    let projected = document.project(&user, "role", &u, &role);
+    let admin = document.enum_literal(&role, "Admin");
+    let is_admin = document.op(ENUM_EQ, &[&projected, &admin]);
+    let claim = document.claim(&is_admin);
+    cases.push((document.bytes(&[&claim]), text));
+
+    // An identity the table does not hold.
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let r = document.parameter_of(&role);
+    let admin = document.enum_literal(&role, "Admin");
+    let is_admin = document.op(ENUM_EQ, &[&r, &admin]);
+    let claim = document.claim(&is_admin);
+    let bytes = with_identity(
+        &document.bytes(&[&claim]),
+        &is_admin,
+        "quire.op.collection.contains",
+    );
+    cases.push((bytes, is_admin));
+
+    // A shared enum chain far over the node bound.
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let r = document.parameter_of(&role);
+    let admin = document.enum_literal(&role, "Admin");
+    let mut top = document.op(ENUM_EQ, &[&r, &admin]);
+    for _ in 0..60 {
+        top = document.op("quire.op.boolean.or", &[&top, &top]);
+    }
+    let claim = document.claim(&top);
+    let bytes = document.bytes(&[&claim]);
+    for (bytes, label) in cases
+        .into_iter()
+        .chain(std::iter::once((bytes, String::new())))
+    {
+        let fixture = Fixture::new(&bytes);
+        let started = std::time::Instant::now();
+        let run = fixture.run();
+        assert_eq!(run.code, Some(2), "{label}: {}", run.stderr);
+        if label.is_empty() {
+            assert!(
+                run.stderr.contains("semantic_graph.nodes["),
+                "{}",
+                run.stderr
+            );
+        } else {
+            let node = format!("semantic_graph.nodes[{}]", node_index(&bytes, &label));
+            assert!(
+                run.stderr.contains(&node),
+                "{label}: {node}: {}",
+                run.stderr
+            );
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
+        assert!(fixture.requests().is_empty());
+        fixture.assert_no_report();
+    }
+}
+
+/// An unguarded `quire.op.option.value` exits `2` naming the clause and the validator's path.
+#[trace("FR-022-AC-3", "TC-020")]
+#[test]
+fn an_unguarded_option_value_exits_two_naming_the_clause_through_the_runner() {
+    let mut document = Document::new();
+    let role = document.enum_type("Role", &["Admin", "Guest"]);
+    let maybe = document.option_type("MaybeRole", &role);
+    let o = document.parameter_of(&maybe);
+    let value = document.option_value(&o, &role);
+    let admin = document.enum_literal(&role, "Admin");
+    let is_admin = document.op(ENUM_EQ, &[&value, &admin]);
+    let claim = document.claim(&is_admin);
+    let bytes = document.bytes(&[&claim]);
+    let fixture = Fixture::new(&bytes);
+    let run = fixture.run();
+    assert_eq!(run.code, Some(2), "{}", run.stderr);
+    let clause = format!("claim-{}", node_index(&bytes, &claim));
+    assert!(run.stderr.contains(&clause), "{clause}: {}", run.stderr);
+    let expected = format!("{clause} at expression: option presence is not established");
+    assert!(run.stderr.contains(&expected), "{expected}: {}", run.stderr);
+    assert!(fixture.requests().is_empty());
+    fixture.assert_no_report();
+}
+
+/// FR-022-AC-1 fixtures 3 to 5 need the record and option lowering.
+#[trace("FR-022-AC-1", "TC-020")]
+#[test]
+fn record_and_option_fixtures_have_their_fixed_exits_through_the_runner() {
+    let satisfiable = "sat\n(model)\n";
+    let cases: [(Vec<u8>, &str, i32); 3] = [
+        (bytes_of(record_field(false)), satisfiable, 3),
+        (bytes_of(record_field(true)), "unsat\n", 1),
+        (
+            {
+                let (document, claims, _) = option_value(true);
+                document.bytes(&labels(&claims))
+            },
+            satisfiable,
+            3,
+        ),
+    ];
+    for (bytes, answer, code) in cases {
+        let fixture = Fixture::new(&bytes);
+        fixture.both(answer, answer);
+        let run = fixture.run();
+        assert_eq!(run.code, Some(code), "{}", run.stderr);
+    }
+}
+
+fn bytes_of((document, claims): (Document, Vec<String>)) -> Vec<u8> {
+    document.bytes(&labels(&claims))
 }

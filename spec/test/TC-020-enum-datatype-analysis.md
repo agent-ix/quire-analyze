@@ -28,13 +28,13 @@ installed. Parse hand-written model text in the spelling of each solver for ever
 for invalid values (unknown constructor, wrong arity, wrong sort, abstract element, malformed
 text), and replay them. Permute environment, variant, field and statement order. Exceed each
 NFR-020 bound by one. Build contract-package fixtures at test time for an enum-membership claim, a
-record-field claim, and each refused term, and run `run-package` as a child process.
+record-field claim, an option-access claim under a `quire.op.option.present` guard, and each refused term, and run `run-package` as a child process.
 
 ## Expected Results
 
 Supported fixtures are decided correctly, with identical queries under permutation. Invalid models
 and unsupported or over-bound constructs produce explicit non-conclusive outcomes or exit `2`, never
-an approximate query. Real-solver cases run where Z3 and cvc5 are installed and are reported as not
+an approximate query. A satisfiable datatype fixture run through `run-package` exits `3` (witness incomplete with `sort_not_replayable`, differential inconclusive) while the FR-020 "Replay until FR-021" rule applies to a kind it declares, and `0` once FR-021 replay of that kind lands; an unsatisfiable one exits `1`. Real-solver cases run where Z3 and cvc5 are installed and are reported as not
 run elsewhere; the model-parsing, lowering and translation cases need no solver.
 
 ## Limitations
