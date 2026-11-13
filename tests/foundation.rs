@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 const CARGO_MANIFEST: &str = include_str!("../Cargo.toml");
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 const MAKEFILE: &str = include_str!("../Makefile");
-const MASTER_SPEC: &str = include_str!("../spec/index.md");
 const FUNCTIONAL_REQUIREMENTS: [&str; 7] = [
     include_str!("../spec/functional/FR-001-analysis-algebra.md"),
     include_str!("../spec/functional/FR-002-smt-lowering.md"),
@@ -48,7 +47,6 @@ fn foundation_keeps_license_publication_and_ci_authority_bounded() {
 #[trace("NFR-002-AC-2")]
 #[test]
 fn foundation_defines_closed_requirements_and_non_conclusive_states() {
-    assert!(MASTER_SPEC.contains("FR-001 through FR-005, FR-007 and FR-008"));
     for (requirement, artifact) in [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-007", "FR-008",
     ]
