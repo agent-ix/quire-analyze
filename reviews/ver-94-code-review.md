@@ -46,3 +46,13 @@ Examined every test, the oracle, `assert_sound`, `exceeds_i64`, `exact_hull`, an
 Rust lane: imports grouped std/external/crate, no `unwrap` in non-test helpers
 beyond documented `expect`, ignore reasons carry finding ids. No hash, SHA or
 pin ceremony and no roadmap or standard text in the diff.
+
+## Dispositions
+
+Round 1, verified against commit 0b18e9c on the PR branch.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | The invariant-dropping test is removed; `fr040_ac7_request_type_carries_no_invariant` passes and pins the absence of an invariant field with an exhaustive struct literal. |
+| FND-002 | fixed | The tautological `matches!` is replaced by `assert_eq!(terminal, expected)`, where `expected` is mapped from the native outcome independently. |
+| FND-003 | fixed | The test is rewritten as `nfr040_ac2_large_horizon_is_cut_by_a_crate_limit_not_iterated` with a bounded 1,000,000 horizon and no spawned thread. |

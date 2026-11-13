@@ -64,3 +64,24 @@ conditional switch.
 FR-040-AC-1..12, FR-041-AC-1..7, NFR-040-AC-1..3 and TC-040 examined. Oracle is
 independent of src/hybrid_synthesis.rs and correct. src/hybrid_synthesis.rs is
 unchanged by the PR.
+
+## Dispositions
+
+Round 1, verified against commit 0b18e9c and the reworked findings draft.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | The draft records exactly one disposition, delegate-and-remove with PHAVer (SpaceEx PHAVer/SX), under FR-041-AC-4 case (1), with no conditional wording. |
+| FND-002 | fixed | The ignored test `nfr040_ac1_no_crate_limits_on_steps_transitions_modes` is added and F10 is recorded. |
+| FND-003 | fixed | F6 is withdrawn and AC-7 is recorded clean. |
+| FND-004 | fixed | The missing semantics field is recorded with F4. |
+| FND-005 | accepted-no-change | No request can carry an invariant, so a reset leaving one cannot be built; the test module records FR-041-AC-1's clause as not applicable and the AC-7 test pins the absence. |
+| FND-006 | fixed | The F1 row now says MIN-1 is below the clamped value. |
+| FND-007 | fixed | The draft states IR-1469 is in Backlog and not recorded, and that the application ticket re-checks agreement under FR-042-AC-6. |
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-008 | low | F9 is classed "unsound (non-termination in practice)". It omits no reachable state and reports no unreached horizon as reached, so under FR-041-AC-2 it is an NFR-040 violation, not an unsound finding. Criterion 1 already counts it apart, so the disposition is unaffected. | `ver-94-findings.md:22` |
+| FND-009 | medium | The disposition states the tool facts as established, but they come from literature and docs only. No tool was run, the one-clock encoding was not exercised, and the JuliaReach docs show continuous-time hybrid automata and discrete-time systems only separately. The draft does not say these facts are unverified in practice, or that the application ticket must confirm them with the TC-040 enumeration as a differential. | `ver-94-findings.md:41` |
