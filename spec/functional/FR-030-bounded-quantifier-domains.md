@@ -33,7 +33,9 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
     Boolean, enum and bounded integer. It has no SMT collection sort and is consumed only as a
     quantifier domain. Its members are the elements in the order and with the duplicate rule of
     [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md). A collection that is a reference to
-    a parameter, has a non-literal element, or has any other element sort is not a finite collection;
+    a parameter, has a non-literal element, or has any other element sort is not a finite collection.
+    The element sort is checked even for an empty literal and is limited to Boolean, enum and
+    bounded integer;
   - a bounded integer range: an inclusive range whose lower and upper bounds are integer literals or
     declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). The
     analysis model carries it as the `RangeQuantifier` input of
@@ -55,8 +57,13 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   instance count. The map is the observable of admission; entries appear in canonical quantifier
   order, independent of host maps and paths. Canonical order is statements in ascending
   assertion-symbol order and, within a statement, depth-first pre-order with siblings left to
-  right; the map records the lower and upper bound of a range, and for an enum or collection the
-  element of each instance in instance order.
+  right. A `QuantifierEntry` records `source: String`, `kind: QuantifierKind`,
+  `encoding: QuantifierEncoding`, `instance_count: u128` and `domain_data`; its domain class is
+  derived from `domain_data`. `domain_data` is exactly one of
+  `Range { lower, upper }`, `Enum { elements }` or `Collection { elements }`. The range variant
+  holds two `RangeBound`s, while the enum and collection variants hold typed `DomainElement`s in
+  instance order. The representation cannot pair range bounds with enum or collection members,
+  and it preserves each member's type.
 - A universal quantifier over an empty domain is true and an existential quantifier over an empty
   domain is false.
 - Nested admitted quantifiers are admitted; one refused quantifier at any depth refuses the whole
@@ -77,6 +84,7 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
 | FR-030-AC-3 | An unbounded quantifier nested inside admitted quantifiers refuses the whole request; no partial query is emitted. | Test (TC-030) |
 | FR-030-AC-4 | A universal quantifier over an empty domain evaluates to true and an existential quantifier over an empty domain to false in the lowered query, in replay and in the controlled-solver result. | Test (TC-030) |
 | FR-030-AC-5 | An enum or collection quantifier whose expansion exceeds the budget returns `unsupported` with reason `expansion-ceiling`. | Test (TC-030) |
+| FR-030-AC-6 | A domain quantifier has a non-empty source identity and a local type matching its enum domain or an encodable collection element sort; each collection member fits that sort. A collection with a text, rational, record, option or nested-collection element sort is rejected even when empty. | Test (TC-030) |
 
 ## Dependencies
 

@@ -14,9 +14,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::datatype_replay::{ReplayDatum, ReplayItem, ReplayShape, ReplayValue};
 use crate::quantifier::{
-    expansion_cost, literal_width, AnalysisFormula, DomainElement, DomainQuantifier,
-    QuantifierDomain, QuantifierDomainClass, QuantifierEncoding, QuantifierEntry, QuantifierReason,
-    QuantifierRefusal, RangeBound, RangeQuantifier,
+    AnalysisFormula, DomainElement, DomainQuantifier, QuantifierDomain, QuantifierEncoding,
+    QuantifierEntry, QuantifierEntryDomain, QuantifierReason, QuantifierRefusal, RangeBound,
+    RangeQuantifier, expansion_cost, literal_width,
 };
 
 /// The accepted engine-neutral analysis model profile.
@@ -475,7 +475,11 @@ impl BindingGroup {
             .skip(1)
             .any(|member| !members[0].compatible_with(member))
         {
-            return Err(LoweringError::new(LoweringErrorCode::InvalidBinding, "binding.members", "binding members differ in package, kind, observation, execution point, or type shape"));
+            return Err(LoweringError::new(
+                LoweringErrorCode::InvalidBinding,
+                "binding.members",
+                "binding members differ in package, kind, observation, execution point, or type shape",
+            ));
         }
         Ok(Self { id, members })
     }
@@ -1546,11 +1550,12 @@ impl LowerState<'_> {
         self.quantifiers.entries.push(QuantifierEntry {
             source: quantifier.identity.clone(),
             kind: quantifier.kind,
-            domain: QuantifierDomainClass::Range,
             encoding,
             instance_count: count,
-            bounds: Some((quantifier.lower.clone(), quantifier.upper.clone())),
-            elements: Vec::new(),
+            domain_data: QuantifierEntryDomain::Range {
+                lower: quantifier.lower.clone(),
+                upper: quantifier.upper.clone(),
+            },
         });
         let body_path = path.child("body");
         Ok(match expansion {
@@ -1586,7 +1591,7 @@ impl LowerState<'_> {
         path: &ExprPath<'_>,
         enclosing: u128,
     ) -> Result<Planned<'f>, LoweringError> {
-        let (class, elements) = self.domain_members(quantifier, path)?;
+        let (domain_data, elements) = self.domain_members(quantifier, path)?;
         let width = u128::try_from(elements.len()).ok();
         let Some(count) = expansion_cost(width, enclosing, self.quantifiers.used) else {
             return Err(refused(
@@ -1601,11 +1606,9 @@ impl LowerState<'_> {
         self.quantifiers.entries.push(QuantifierEntry {
             source: quantifier.identity.clone(),
             kind: quantifier.kind,
-            domain: class,
             encoding: QuantifierEncoding::Expanded,
             instance_count: count,
-            bounds: None,
-            elements: elements.iter().map(DomainElement::label).collect(),
+            domain_data,
         });
         let members = elements
             .into_iter()
@@ -1634,7 +1637,7 @@ impl LowerState<'_> {
         &self,
         quantifier: &DomainQuantifier,
         path: &ExprPath<'_>,
-    ) -> Result<(QuantifierDomainClass, Vec<DomainElement>), LoweringError> {
+    ) -> Result<(QuantifierEntryDomain, Vec<DomainElement>), LoweringError> {
         match &quantifier.domain {
             QuantifierDomain::Unbounded(class) => Err(refused(
                 path,
@@ -1645,7 +1648,7 @@ impl LowerState<'_> {
             QuantifierDomain::Enum(name) => {
                 let declaration = enum_declaration(&self.statement.environment, name)
                     .ok_or_else(|| invalid_domain(path, "enum domain does not resolve"))?;
-                let members = declaration
+                let members: Vec<DomainElement> = declaration
                     .variants()
                     .iter()
                     .map(|variant| DomainElement::Enum {
@@ -1653,7 +1656,12 @@ impl LowerState<'_> {
                         variant: variant.name().clone(),
                     })
                     .collect();
-                Ok((QuantifierDomainClass::Enum, members))
+                Ok((
+                    QuantifierEntryDomain::Enum {
+                        elements: members.clone(),
+                    },
+                    members,
+                ))
             }
             QuantifierDomain::Collection { kind, elements } => {
                 let mut keyed = Vec::with_capacity(elements.len());
@@ -1671,11 +1679,16 @@ impl LowerState<'_> {
                     let mut seen = BTreeSet::new();
                     keyed.retain(|(key, _)| seen.insert(*key));
                 }
-                let members = keyed
+                let members: Vec<DomainElement> = keyed
                     .into_iter()
                     .map(|(_, element)| element.clone())
                     .collect();
-                Ok((QuantifierDomainClass::Collection, members))
+                Ok((
+                    QuantifierEntryDomain::Collection {
+                        elements: members.clone(),
+                    },
+                    members,
+                ))
             }
         }
     }
@@ -2631,10 +2644,12 @@ impl LowerState<'_> {
                 sort: self.sort_of(value_type, 1, "")?.sort,
                 payload: Box::new(self.replay_shape(value)?),
             },
-            _ => return Err(unsupported(
-                "expression.value_reference",
-                "only Boolean, integer, enum, record and option parts have an exact replay shape",
-            )),
+            _ => {
+                return Err(unsupported(
+                    "expression.value_reference",
+                    "only Boolean, integer, enum, record and option parts have an exact replay shape",
+                ));
+            }
         })
     }
 
@@ -2873,10 +2888,12 @@ impl LowerState<'_> {
                 datatype_value = Some(datatype);
                 None
             }
-            _ => return Err(unsupported(
-                "expression.value_reference",
-                "only Boolean, integer, enum, record and option value references are exact in quire.smtlib2/v2",
-            )),
+            _ => {
+                return Err(unsupported(
+                    "expression.value_reference",
+                    "only Boolean, integer, enum, record and option value references are exact in quire.smtlib2/v2",
+                ));
+            }
         };
         let kind = declaration_kind(declaration.kind());
         let point = execution_point_key(&statement.execution_point);
@@ -3241,14 +3258,14 @@ fn fold_integer(
                         UnsupportedClass::IntegerDivision,
                         path,
                         "integer division is outside linear integer arithmetic",
-                    ))
+                    ));
                 }
                 NumericOperator::Remainder => {
                     return Err(integer_unsupported(
                         UnsupportedClass::IntegerRemainder,
                         path,
                         "integer remainder is outside linear integer arithmetic",
-                    ))
+                    ));
                 }
                 NumericOperator::Add | NumericOperator::Subtract | NumericOperator::Multiply => {}
             }
@@ -3281,7 +3298,7 @@ fn fold_integer(
                         UnsupportedClass::NonLinearArithmetic,
                         path,
                         "product of two non-constant terms",
-                    ))
+                    ));
                 }
             };
             Ok(FoldedInteger {
@@ -3453,6 +3470,20 @@ fn validate_domain(
             }
         }
         QuantifierDomain::Collection { elements, .. } => {
+            let sort_fits = match &quantifier.local_type {
+                ValueType::Boolean | ValueType::Integer { .. } => true,
+                ValueType::Enum { name } => enum_declaration(environment, name).is_some(),
+                ValueType::Rational { .. }
+                | ValueType::Text
+                | ValueType::Record { .. }
+                | ValueType::Option { .. }
+                | ValueType::Collection { .. } => false,
+            };
+            if !sort_fits {
+                errors.push(invalid(format!(
+                    "collection element sort is not encodable for bound variable {local}"
+                )));
+            }
             for element in elements {
                 let fits = match (element, &quantifier.local_type) {
                     (DomainElement::Boolean(_), ValueType::Boolean) => true,

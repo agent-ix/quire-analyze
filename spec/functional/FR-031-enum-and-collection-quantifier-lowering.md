@@ -32,6 +32,18 @@ universal and by disjunction for an existential quantifier.
 - Each instance substitutes the element for the bound variable. The substitution is capture-avoiding:
   an element never binds a free variable of the body, and an inner quantifier that reuses the bound
   variable's name shadows it.
+- The analysis model exposes a closed `DomainQuantifier` with `identity: String`, `kind:
+  QuantifierKind`, `local: SymbolName`, `local_type: ValueType`, `domain: QuantifierDomain` and
+  `body: AnalysisFormula`. `QuantifierDomain` is `Enum(SymbolName)`, `Collection { kind:
+  CollectionKind, elements: Vec<DomainElement> }` or `Unbounded(UnboundedDomain)`.
+  `DomainElement` is `Boolean(bool)`, `Enum { enumeration: SymbolName, variant: SymbolName }` or
+  `Integer(i128)`. `CollectionKind` is the closed set `Set`, `OrderedSet`, `Sequence` and `Bag`.
+  `UnboundedDomain` is the closed set `Integer`, `Text`, `Rational`, `UnfixedCollection` and
+  `UnencodableElement`. The `AnalysisFormula` tree admits `Domain` nodes alongside terms, Boolean
+  operators and `Range` quantifiers. `StatementInput.with_formula` rejects an empty source
+  identity, an undeclared or mismatched enum, and a collection member that does not fit its local
+  type; [FR-030-AC-6](./FR-030-bounded-quantifier-domains.md) defines the permitted empty collection
+  element sorts.
 - Instances appear in domain order. An enum domain uses declaration order. For a collection, a
   `quire.op.collection.set` and a `quire.op.collection.bag` are enumerated in ascending canonical
   element order (false before true, enum declaration order, ascending integer), and a
@@ -40,10 +52,11 @@ universal and by disjunction for an existential quantifier.
   `sequence` every occurrence is an instance. The instance count is the number of elements after this
   rule, and an empty collection is an empty domain.
 - Assertion names, symbol names and metadata are stable and independent of host maps and paths.
-- Each instance retains the quantifier's source identity and the element, so a counterexample maps
-  back to the instance that failed. The quantifier-map entry of an enum or collection quantifier
-  lists the element of each instance in instance order, so the position of a failing instance names
-  its element and the entry names its source identity.
+- Each quantifier-map entry retains the source identity and domain data. Range data is a lower and
+  upper bound pair; enum and collection data is a typed list of elements in instance order. This
+  map describes lowering and does not claim to identify which expanded instance failed. Replay
+  reports the first failing instance, its element and source identity under
+  [FR-033](./FR-033-quantified-assertion-replay.md).
 - Expansion consumes the instance budget defined in
   [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md); this requirement states no
   separate ceiling.
@@ -57,7 +70,7 @@ universal and by disjunction for an existential quantifier.
 | FR-031-AC-2 | The same holds for a universal and an existential fixture over a finite collection literal; a `set` with a repeated literal yields the same query as the `set` without the repeat, a `sequence` with a repeated literal yields one instance per occurrence, and each of `set`, `ordered_set`, `sequence` and `bag` enumerates in the order stated above. | Test (TC-030; real solvers where installed) |
 | FR-031-AC-3 | The query for a quantified fixture contains no `forall` or `exists` token and one body instance per domain element, in domain order. | Test (TC-030) |
 | FR-031-AC-4 | Lowering the same quantified package twice, in separate processes, yields byte-identical SMT-LIB2 output. | Test (TC-030) |
-| FR-031-AC-5 | A counterexample for a failed universal quantifier names the failing element and the quantifier's source identity. | Test (TC-030) |
+| FR-031-AC-5 | The quantifier-map entry for an enum or collection quantifier records its source identity and typed elements in instance order. It does not identify a failed instance; replay does that under FR-033. | Test (TC-030) |
 | FR-031-AC-6 | A body that mentions a free variable whose name equals the bound variable of a nested inner quantifier lowers so that the free variable is not captured; the golden query shows distinct symbols. | Test (TC-030) |
 
 ## Dependencies

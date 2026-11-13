@@ -15,14 +15,14 @@ use std::{
 };
 
 use quire_analyze::{
-    classify_analysis, compare_solver_records, execute_solver, lower_analysis_request,
-    lower_boolean_statements, render_differential_report, validate_differential_report,
-    validate_report_document, AdapterLimits, AnalysisFormula, AnalysisRequest, AnalysisStatus,
+    AdapterLimits, AnalysisFormula, AnalysisRequest, AnalysisStatus, CAPABILITY_CONTRACT,
     CancellationToken, CollectionKind, DifferentialDisposition, DomainElement, DomainQuantifier,
     ExplanationState, LoweringError, LoweringErrorCode, QuantifierDomain, QuantifierDomainClass,
-    QuantifierEncoding, QuantifierReason, QueryBundle, RangeBound, RangeQuantifier,
-    ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome, StatementInput,
-    UnboundedDomain, CAPABILITY_CONTRACT,
+    QuantifierEncoding, QuantifierEntryDomain, QuantifierReason, QueryBundle, RangeBound,
+    RangeQuantifier, ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome,
+    StatementInput, UnboundedDomain, classify_analysis, compare_solver_records, execute_solver,
+    lower_analysis_request, lower_boolean_statements, render_differential_report,
+    validate_differential_report, validate_report_document,
 };
 use quire_contract_model::{
     AnchorName, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
@@ -156,7 +156,7 @@ fn below_x() -> AnalysisFormula {
 }
 
 fn roles() -> TypeDeclaration {
-    let variants = ["Admin", "Guest"]
+    let variants = ["Guest", "Admin"]
         .iter()
         .map(|variant| EnumVariantDeclaration::new(symbol(variant), span()))
         .collect();
@@ -332,12 +332,15 @@ fn literal_range_within_budget_is_expanded_to_the_golden_query() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].source, "Q-all");
     assert_eq!(entries[0].kind, QuantifierKind::ForAll);
-    assert_eq!(entries[0].domain, QuantifierDomainClass::Range);
+    assert_eq!(entries[0].domain(), QuantifierDomainClass::Range);
     assert_eq!(entries[0].encoding, QuantifierEncoding::Expanded);
     assert_eq!(entries[0].instance_count, 3);
     assert_eq!(
-        entries[0].bounds,
-        Some((RangeBound::Literal(1), RangeBound::Literal(3)))
+        entries[0].domain_data,
+        QuantifierEntryDomain::Range {
+            lower: RangeBound::Literal(1),
+            upper: RangeBound::Literal(3),
+        }
     );
     assert_eq!(entries[1].source, "Q-any");
     assert_eq!(entries[1].kind, QuantifierKind::Exists);
@@ -355,8 +358,11 @@ fn declared_bound_range_lowers_to_a_guarded_bounded_quantifier() {
     assert_eq!(entry.encoding, QuantifierEncoding::Bounded);
     assert_eq!(entry.instance_count, 0);
     assert_eq!(
-        entry.bounds,
-        Some((RangeBound::Literal(0), RangeBound::Declared(symbol("n"))))
+        entry.domain_data,
+        QuantifierEntryDomain::Range {
+            lower: RangeBound::Literal(0),
+            upper: RangeBound::Declared(symbol("n")),
+        }
     );
 }
 
@@ -449,10 +455,11 @@ fn budget_boundary_is_exactly_1024_instances() {
         ])
     };
     let fits = pair(24);
-    assert!(fits
-        .quantifiers()
-        .iter()
-        .all(|entry| entry.encoding == QuantifierEncoding::Expanded));
+    assert!(
+        fits.quantifiers()
+            .iter()
+            .all(|entry| entry.encoding == QuantifierEncoding::Expanded)
+    );
     let over = pair(25);
     let bounded = over
         .quantifiers()
@@ -744,9 +751,11 @@ fn declared_bound_is_a_query_variable_with_a_finite_declared_range() {
 #[trace("TC-030")]
 #[test]
 fn capability_contract_lists_the_range_quantifier() {
-    assert!(CAPABILITY_CONTRACT
-        .exact_constructs
-        .contains(&"range_quantifier"));
+    assert!(
+        CAPABILITY_CONTRACT
+            .exact_constructs
+            .contains(&"range_quantifier")
+    );
 }
 
 /// FR-031-AC-6 (shared expansion): a free variable named like a quantifier's bound variable is
@@ -1016,9 +1025,11 @@ fn an_invalid_formula_is_refused_when_attached() {
         wide_declared,
     ] {
         let errors = base().with_formula(invalid).expect_err("refused");
-        assert!(errors
-            .iter()
-            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
+        );
     }
 }
 
@@ -1753,11 +1764,15 @@ fn enum_domains_lower_to_the_golden_query() {
     let entries = query.quantifiers();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].source, "Q-roles-all");
-    assert_eq!(entries[0].domain, QuantifierDomainClass::Enum);
+    assert_eq!(entries[0].domain(), QuantifierDomainClass::Enum);
     assert_eq!(entries[0].encoding, QuantifierEncoding::Expanded);
     assert_eq!(entries[0].instance_count, 2);
-    assert_eq!(entries[0].bounds, None);
-    assert_eq!(entries[0].elements, ["Admin", "Guest"]);
+    assert_eq!(
+        entries[0].domain_data,
+        QuantifierEntryDomain::Enum {
+            elements: vec![member("Guest"), member("Admin")],
+        }
+    );
     assert_eq!(entries[1].kind, QuantifierKind::Exists);
 }
 
@@ -1785,10 +1800,12 @@ fn collection_domains_lower_to_the_golden_query() {
     ];
     reversed.reverse();
     assert_eq!(lower(&reversed).query(), query.query());
-    assert!(query
-        .quantifiers()
-        .iter()
-        .all(|entry| entry.domain == QuantifierDomainClass::Collection));
+    assert!(
+        query
+            .quantifiers()
+            .iter()
+            .all(|entry| entry.domain() == QuantifierDomainClass::Collection)
+    );
 }
 
 /// FR-031-AC-3: a domain fixture's query has no solver quantifier token and one body instance
@@ -1880,13 +1897,32 @@ fn collections_enumerate_in_canonical_or_written_order_with_the_duplicate_rule()
         boolean_query(Set, &[false, true])
     );
     assert_eq!(
+        body_of(&boolean_query(Set, &[true, false])),
+        body_of(&boolean_query(Sequence, &[false, true]))
+    );
+    // A bag keeps repeated occurrences but orders the Boolean values false before true.
+    assert_eq!(
+        body_of(&boolean_query(Bag, &[true, false, true])),
+        body_of(&boolean_query(Sequence, &[false, true, true]))
+    );
+    assert_eq!(
         role_query(Set, &["Guest", "Admin"]),
         role_query(Set, &["Admin", "Guest"])
+    );
+    assert_eq!(
+        body_of(&role_query(Set, &["Admin", "Guest"])),
+        body_of(&role_query(Sequence, &["Guest", "Admin"]))
     );
     // bag: every occurrence is an instance, in canonical order.
     assert_eq!(
         body_of(&integer_query(Bag, &[3, 1, 3])),
         body_of(&integer_query(Sequence, &[1, 3, 3]))
+    );
+    // Role declares Guest before Admin. The bag's order must follow declaration order rather
+    // than variant-name order.
+    assert_eq!(
+        body_of(&role_query(Bag, &["Admin", "Guest"])),
+        body_of(&role_query(Sequence, &["Guest", "Admin"]))
     );
     assert_ne!(integer_query(Bag, &[3, 1, 3]), integer_query(Bag, &[1, 3]));
     // sequence: every occurrence, as written.
@@ -1904,17 +1940,15 @@ fn collections_enumerate_in_canonical_or_written_order_with_the_duplicate_rule()
     assert!(ordered.find("(<= 3 ") < ordered.find("(<= 1 "));
     assert_ne!(body_of(&ordered), body_of(&integer_query(Set, &[3, 1])));
     assert_ne!(
-        body_of(&role_query(OrderedSet, &["Guest", "Admin"])),
-        body_of(&role_query(Set, &["Guest", "Admin"]))
+        body_of(&role_query(OrderedSet, &["Admin", "Guest"])),
+        body_of(&role_query(Set, &["Admin", "Guest"]))
     );
 }
 
-/// FR-031-AC-5: a universal quantifier's failing instance maps back to its element and to the
-/// quantifier's source identity through the quantifier-map entry, whose elements are in instance
-/// order.
+/// FR-031-AC-5: the quantifier map retains the source identity and typed members in instance order.
 #[trace("TC-030", "FR-031-AC-5")]
 #[test]
-fn a_failing_universal_instance_maps_to_its_element_and_source() {
+fn quantifier_map_retains_typed_members_in_instance_order() {
     let formula = over_integers(
         "Q-source",
         QuantifierKind::ForAll,
@@ -1925,23 +1959,12 @@ fn a_failing_universal_instance_maps_to_its_element_and_source() {
     let query = lower_one("failing", formula.clone());
     let entry = &query.quantifiers()[0];
     assert_eq!(entry.source, "Q-source");
-    assert_eq!(entry.elements, ["2", "7", "4"]);
-    let inputs = Inputs {
-        x: 5,
-        role: "Admin",
-        flag: false,
-    };
-    let AnalysisFormula::Domain(quantifier) = &formula else {
-        panic!("domain quantifier");
-    };
-    let failing = [2_i128, 7, 4]
-        .iter()
-        .position(|element| {
-            let mut scope = vec![("i".to_owned(), Value::Integer(*element))];
-            !holds(&quantifier.body, &inputs, &mut scope)
-        })
-        .expect("a failing instance");
-    assert_eq!(entry.elements[failing], "7");
+    assert_eq!(
+        entry.domain_data,
+        QuantifierEntryDomain::Collection {
+            elements: integers(&[2, 7, 4]),
+        }
+    );
 }
 
 /// FR-031-AC-6: an inner quantifier that reuses the bound variable's name shadows it, and a free
@@ -1991,7 +2014,7 @@ fn domain_expansion_is_capture_avoiding() {
 #[trace("TC-030", "FR-030-AC-4")]
 #[test]
 fn an_empty_domain_is_true_for_universal_and_false_for_existential() {
-    let all = lower_one(
+    let all = analysis_query(vec![statement(
         "empty-all",
         over_integers(
             "Q-all",
@@ -2000,10 +2023,31 @@ fn an_empty_domain_is_true_for_universal_and_false_for_existential() {
             &[],
             below_x(),
         ),
-    );
+    )]);
     assert!(all.query().contains("(assert (! true :named"));
     assert_eq!(encodings(&all), [(QuantifierEncoding::Expanded, 0)]);
-    let any = lower_one(
+    let inputs = Inputs {
+        x: 5,
+        role: "Guest",
+        flag: false,
+    };
+    let model = model_for(&all, &inputs);
+    let all_record = response_record(&all, &model, SolverEngine::Z3);
+    assert_eq!(
+        all_record.outcome(),
+        SolverOutcome::Sat,
+        "stdout={} stderr={} diagnostic={:?}",
+        String::from_utf8_lossy(all_record.stdout()),
+        String::from_utf8_lossy(all_record.stderr()),
+        all_record.diagnostic()
+    );
+    let all_conclusion = classify_analysis(&all, &all_record);
+    assert_eq!(all_conclusion.status(), AnalysisStatus::Satisfied);
+    assert!(all_conclusion.verified_model().is_some());
+    let all_cvc5 = response_record(&all, &model, SolverEngine::Cvc5);
+    let all_run = compare_solver_records(&all, &all_record, &all_cvc5);
+    assert_eq!(all_run.agreed_status(), Some(AnalysisStatus::Satisfied));
+    let any = analysis_query(vec![statement(
         "empty-any",
         over_integers(
             "Q-any",
@@ -2012,9 +2056,13 @@ fn an_empty_domain_is_true_for_universal_and_false_for_existential() {
             &[],
             below_x(),
         ),
-    );
+    )]);
     assert!(any.query().contains("(assert (! false :named"));
     assert_eq!(any.logic(), "QF_LIA");
+    let any_z3 = response_record(&any, "unsat\n", SolverEngine::Z3);
+    let any_cvc5 = response_record(&any, "unsat\n", SolverEngine::Cvc5);
+    let any_run = compare_solver_records(&any, &any_z3, &any_cvc5);
+    assert_eq!(any_run.agreed_status(), Some(AnalysisStatus::Refuted));
 }
 
 /// FR-030-AC-2 and ticket acceptance: a domain with no finite exact members is refused as
@@ -2175,9 +2223,50 @@ fn a_domain_inside_a_bounded_range_counts_from_its_own_width() {
     assert_eq!(query.logic(), "UFDTLIA");
 }
 
-/// FR-031: a domain formula is validated when attached: a local type that does not fit the
-/// domain, an undeclared enum, an element outside the type and an empty identity are refused.
-#[trace("TC-030", "FR-031-AC-1")]
+/// FR-030-AC-6: a collection's element sort must be encodable even when its literal is empty.
+#[trace("TC-030", "FR-030-AC-6")]
+#[test]
+fn empty_collection_domains_with_unencodable_sorts_are_refused_when_attached() {
+    let invalid_empty_sorts = [
+        ValueType::Text,
+        ValueType::Rational {
+            value: quire_contract_model::RationalType::new(-1, 1, 2).expect("rational type"),
+        },
+        ValueType::Record {
+            name: symbol("Record"),
+        },
+        ValueType::option(ValueType::Boolean),
+        ValueType::collection(
+            quire_contract_model::CollectionType::new(ValueType::Boolean, 4)
+                .expect("collection type"),
+        ),
+    ];
+    for local_type in invalid_empty_sorts {
+        let formula = domain_quantifier(
+            "Q-empty-invalid",
+            QuantifierKind::ForAll,
+            "value",
+            local_type,
+            QuantifierDomain::Collection {
+                kind: CollectionKind::Set,
+                elements: vec![],
+            },
+            term(node(ExpressionKind::BooleanLiteral { value: true })),
+        );
+        let errors = statement_without_formula()
+            .with_formula(formula)
+            .expect_err("unencodable empty domain refused");
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
+        );
+    }
+}
+
+/// FR-030-AC-6: a domain's local type, enum declaration and every member are validated when
+/// a domain formula is attached.
+#[trace("TC-030", "FR-030-AC-6")]
 #[test]
 fn an_invalid_domain_formula_is_refused_when_attached() {
     let invalid = [
@@ -2234,9 +2323,11 @@ fn an_invalid_domain_formula_is_refused_when_attached() {
         let errors = statement_without_formula()
             .with_formula(formula)
             .expect_err("refused");
-        assert!(errors
-            .iter()
-            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
+        );
     }
 }
 
@@ -2271,7 +2362,7 @@ fn an_unsat_response_on_a_domain_fixture_is_a_refutation() {
 
 /// FR-031-AC-1 and FR-031-AC-2: real solvers decide each domain fixture as its recorded status;
 /// run only where installed.
-#[trace("TC-030", "FR-031-AC-1", "FR-031-AC-2", "NFR-032-AC-3")]
+#[trace("TC-030", "FR-031-AC-1", "FR-031-AC-2")]
 #[test]
 #[ignore = "requires official Z3 and cvc5 executables at QUIRE_Z3 and QUIRE_CVC5"]
 fn real_z3_cvc5_decide_domain_fixtures() {

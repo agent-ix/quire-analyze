@@ -330,15 +330,36 @@ impl QuantifierEncoding {
 pub struct QuantifierEntry {
     pub source: String,
     pub kind: QuantifierKind,
-    pub domain: QuantifierDomainClass,
     pub encoding: QuantifierEncoding,
     /// Instances expansion produced; zero for a bounded quantifier, which consumes no budget.
     pub instance_count: u128,
-    /// The lower and upper bound of a range quantifier; `None` for an enum or collection.
-    pub bounds: Option<(RangeBound, RangeBound)>,
-    /// For an enum or collection quantifier, the element of each instance in instance order, so
-    /// a failing instance maps back to its element and to `source`. Empty for a range.
-    pub elements: Vec<String>,
+    /// The range bounds or typed expanded members, matching the quantifier's domain class.
+    pub domain_data: QuantifierEntryDomain,
+}
+
+/// Domain-specific data retained in a quantifier-map entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QuantifierEntryDomain {
+    /// Bounds of a range quantifier, including solver-bound forms.
+    Range {
+        lower: RangeBound,
+        upper: RangeBound,
+    },
+    /// Typed members of an enum quantifier in declaration order.
+    Enum { elements: Vec<DomainElement> },
+    /// Typed members of a collection quantifier in expansion order.
+    Collection { elements: Vec<DomainElement> },
+}
+
+impl QuantifierEntry {
+    /// The quantifier's domain class, derived from its domain-specific entry data.
+    pub const fn domain(&self) -> QuantifierDomainClass {
+        match &self.domain_data {
+            QuantifierEntryDomain::Range { .. } => QuantifierDomainClass::Range,
+            QuantifierEntryDomain::Enum { .. } => QuantifierDomainClass::Enum,
+            QuantifierEntryDomain::Collection { .. } => QuantifierDomainClass::Collection,
+        }
+    }
 }
 
 /// The width of an inclusive literal range, or `None` when it is not representable. An empty
