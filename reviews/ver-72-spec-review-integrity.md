@@ -30,3 +30,17 @@ FAIL: FND-001 and FND-002 are contradictions that a coder cannot resolve without
 decision. The exit classes (`0` satisfied, `1` refuted, `2` usage or input, `3`
 non-conclusive, `4` publication) match `publish-report` in `src/main.rs`, and the
 "retain both engine records" and publication rules match FR-005.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-004 | medium | FR-009 now runs over a quire-contract-ir executable projection and states that QSL does not emit it. VER-72's outcome is an analysis runner from the QSL package, and VER-73's ACs ask for a fixture QSL package and invocation through producer-execute; neither is testable from this spec. Report for a fixture package and exit status reflects pass/fail are testable (FR-009-AC-1 to AC-3, TC-015). Fix: an owner decision, either accepting the re-scope and amending VER-73, or specifying a QSL-to-projection path. | spec/functional/FR-009-package-runner.md Dependencies |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in 9e07114 |
+| FND-002 | fixed | verified in 9e07114 |
+| FND-003 | fixed | verified in 9e07114 |

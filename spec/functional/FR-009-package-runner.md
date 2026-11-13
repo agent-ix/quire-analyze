@@ -47,13 +47,13 @@ assumption selection and binding groups are out of scope.
 - The runner shall lower the request, execute the differential run with the configured solvers, and
   render the report with the library renderer.
 - The runner shall not build report JSON by any other means.
-- When the exit status is `0`, the report shall record a conclusive agreement on `satisfied`.
+- When the agreed status is `satisfied`, the runner shall exit `0` and record `satisfied` in the report.
 - When the report records a conclusive agreement on `refuted`, the runner shall exit `1`.
 - If the differential disposition is not agreement, the runner shall publish the report retaining both
   engine records and exit `3`.
 - When an argument is unknown, repeated, missing or lacks a value, the runner shall exit `2`, print the
   usage on stderr and write no report.
-- When the package file is unreadable, exceeds the bounded size, or is refused by the decoder, or a
+- When the package file is unreadable, exceeds the 16,777,216-byte `MAX_CONFORMANCE_FILE_BYTES` bound of `quire-contract-model`, or is refused by the decoder, or a
   solver path is invalid for `SolverConfig::new`, the runner shall exit `2`, name the cause on stderr and
   write no report.
 - When the package binds no executable clause, the runner shall exit `2` and write no report.
@@ -77,14 +77,14 @@ assumption selection and binding groups are out of scope.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-009-AC-1 | With stub solvers that both answer `sat` over a projection of consistent clauses, `run-package` exits `0` and writes a report that `validate_report_document` accepts with agreed status `satisfied`. | Test |
+| FR-009-AC-1 | With stub solvers that both answer `sat` and emit a model that replays against the assertions of a projection of consistent clauses, `run-package` exits `0` and writes a report that `validate_report_document` accepts with agreed status `satisfied`. | Test |
 | FR-009-AC-2 | With stub solvers that both answer `unsat` over a projection of contradictory clauses, `run-package` exits `1` and the report records agreed status `refuted`. | Test |
 | FR-009-AC-3 | With one stub answering `sat` and the other `unsat`, with one solver absent, and with one stalled solver, `run-package` exits `3` and the report retains both engine records. | Test |
-| FR-009-AC-4 | A missing package file, a file the decoder refuses, an oversized file and a projection with no executable clause each exit `2`, write no report file and name the cause on stderr. | Test |
+| FR-009-AC-4 | A missing package file, a file the decoder refuses, a file over 16,777,216 bytes and a projection with no executable clause each exit `2`, write no report file and name the cause on stderr. | Test |
 | FR-009-AC-5 | An unknown argument, a repeated argument, a missing required argument and an option without a value each exit `2` with the usage on stderr and no report. | Test |
-| FR-009-AC-6 | A nonexistent solver path, an empty solver path and a path longer than the `AdapterLimits` path bound each exit `2` and write no report; an omitted `--z3` or `--cvc5` is an argument error under FR-009-AC-5. | Test |
+| FR-009-AC-6 | A relative solver path, an empty solver path, a non-UTF-8 path and a path longer than the `AdapterLimits` path bound each exit `2` and write no report; an absolute path naming no executable is not a configuration error and takes the unavailable route of FR-009-AC-3 (exit `3`); an omitted `--z3` or `--cvc5` is an argument error under FR-009-AC-5. | Test |
 | FR-009-AC-7 | An existing `--output` file, a missing parent directory and an unwritable parent directory each exit `4`; an existing destination keeps its bytes. | Test |
-| FR-009-AC-8 | A directory-sync failure after rename, injected through the publication seam of [TC-008](../test/TC-008-library-cli-atomic.md), exits `4`, prints `published-durability-unknown` on stderr and leaves the complete report in place. | Test |
+| FR-009-AC-8 | A unit test of the runner function, injecting a directory-sync failure after rename through the publication seam of [TC-008](../test/TC-008-library-cli-atomic.md), shows the runner maps the `published-durability-unknown` publication error to exit `4` with that state named on stderr. | Test |
 | FR-009-AC-9 | Two runs over the same package bytes and solver executables write byte-identical report files. | Test |
 | FR-009-AC-10 | After a run the package file and its directory hold no added, removed or modified entry, and no file outside the report destination directory is created. | Test |
 | FR-009-AC-11 | `run-package --help` lists the four arguments and the exit classes `0` to `4`. | Inspection |

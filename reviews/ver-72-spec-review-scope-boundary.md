@@ -27,3 +27,11 @@ Its only testable content duplicates NFR-003 and FR-009-AC-8.
 FAIL as written. The underlying intent is consistent with FR-005: the runner is spawned by
 a caller and Quire and Quoin only consume the published report. That intent is better
 stated as the runner's own interface, with no new term.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in 9e07114 |
+| FND-002 | fixed | verified in 9e07114 |
+| FND-003 | fixed | verified in 9e07114 |

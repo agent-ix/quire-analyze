@@ -28,3 +28,18 @@ in FR-009.
 FAIL on FND-001 and FND-002, both of which are quick rewordings. The non-conclusive bullet
 (an unwanted-behaviour `If ... shall`) and the load-failure bullet (an event `When ...
 shall`) conform.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-005 | low | When the exit status is 0, the report shall record... triggers on the runner's own output and only states that exit 0 implies satisfied. No Behavior statement requires exit 0 when the agreement is satisfied (refuted has the converse). Fix: when the report records a conclusive agreement on satisfied, the runner shall exit 0. | spec/functional/FR-009-package-runner.md Behavior |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in 9e07114 |
+| FND-002 | fixed | verified in 9e07114 |
+| FND-003 | fixed | verified in 9e07114 |
+| FND-004 | fixed | verified in 9e07114 |

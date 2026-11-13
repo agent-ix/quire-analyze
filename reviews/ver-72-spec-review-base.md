@@ -35,3 +35,24 @@ criterion.
 FAIL: not mergeable until FND-001 is fixed. ID formats, sequential AC and CON numbering,
 the index update and the TC-to-FR/NFR links are correct. FR-009-AC-5, AC-6 and AC-7 and
 NFR-003-AC-1 are falsifiable and well targeted.
+
+## New findings (disposition pass 1)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-008 | high | FR-009-AC-6 says a nonexistent solver path exits 2, but FR-009-AC-3 says an absent solver exits 3, and FR-005 says a missing engine is unavailable. SolverConfig::new only rejects relative, non-UTF-8 or over-long paths (src/solver.rs:203-240); a nonexistent absolute path passes and yields SolverOutcome::MissingExecutable, so the disposition is unavailable and the exit is 3. Fix: drop nonexistent from AC-6 (relative, empty and over-long paths stay exit 2) and keep absent solver as exit 3 under AC-3, or define a pre-flight existence check and remove absent from AC-3. | spec/functional/FR-009-package-runner.md AC-6 |
+| FND-009 | medium | With stub solvers that only answer sat, the run cannot reach agreement: a consistency sat needs a model that replays (classify_analysis, src/analysis.rs:510-527; verified_if_required in src/report.rs), otherwise the disposition is inconclusive and the exit is 3. As written, AC-1 and TC-015 case 1 fail against correct code. Fix: the stubs answer sat and emit a model that replays against the consistent fixture. | spec/functional/FR-009-package-runner.md AC-1 |
+| FND-010 | medium | FR-009-AC-8 and TC-015 case 8 inject a directory-sync failure into the spawned binary through the TC-008 seam, but that seam (the fault PublicationIo and publication_test_termination) is cfg(test) in the library (src/report.rs:617-625, 865+) and is not compiled into the built binary. Fix: verify the mapping of publication error to exit 4 and stderr state with a unit test of the runner function using the fault IO, not through the child process. | spec/functional/FR-009-package-runner.md AC-8 |
+| FND-011 | low | The oversized-file case and exceeds the bounded size name no bound. Fix: cite the decoder's limit (quire-contract-model MAX_CONFORMANCE_FILE_BYTES, 16,777,216 bytes) so the test sits just over it. | spec/functional/FR-009-package-runner.md AC-4 |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | verified in 9e07114 |
+| FND-002 | fixed | verified in 9e07114 |
+| FND-003 | fixed | verified in 9e07114 |
+| FND-004 | fixed | verified in 9e07114 |
+| FND-005 | fixed | verified in 9e07114 |
+| FND-006 | fixed | verified in 9e07114 |
+| FND-007 | fixed | verified in 9e07114 |
