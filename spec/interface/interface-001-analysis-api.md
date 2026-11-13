@@ -14,7 +14,7 @@ status: accepted under IR-1294; callable library stages and publication-only CLI
 input:
   package: typed statements and clause identities from quire-contract-model in the quire-contract-ir repository
   request: closed analysis kind, kind-specific ordered statement groups and explicit bindings; statements carry execution points
-  profiles_and_limits: lowering uses fixed Boolean-v1 profiles and ceilings; execution receives caller-supplied SolverConfig
+  profiles_and_limits: lowering uses fixed `quire.smtlib2/v2` profile and ceilings; execution receives caller-supplied SolverConfig
 analysis_kinds: [consistency, contradiction, implication, redundancy, dead-antecedent]
 operations:
   - name: prepare
@@ -24,7 +24,7 @@ operations:
     semantics: constructors validate required groups and duplicate identities; lowering performs remaining checks before solver execution
   - name: lower
     entry_point: src/analysis.rs lower_analysis_request; src/smt.rs lower_boolean_statements
-    current: implemented library Boolean-v1 lowering
+    current: implemented library `quire.smtlib2/v2` lowering
     output: "Result<QueryBundle, Vec<LoweringError>>"
     semantics: canonical exact SMT-LIB2 plus assertion and symbol maps; approximation is non-conclusive
   - name: execute
@@ -65,12 +65,13 @@ exit_classes:
 resource_limits:
   lowering: [statement_count, expression_depth, expression_nodes, query_bytes]
   adapter: [wall_time_ms, cleanup_time_ms, graceful_cleanup_ms, monitor_interval_ms, stdin_bytes, stdout_bytes, stderr_bytes, model_bytes, version_bytes, path_bytes]
-lowering_v1:
+lowering_v2:
   request_kind: boolean_conjunction
-  logic: QF_UF
+  profile: quire.smtlib2/v2
+  logic: QF_LIA for queries without datatype declarations; the logic the query's feature set requires otherwise
   identities: [binding_set_digest, analysis_request_digest, query_digest]
   maps: [named_assertion_to_clause_and_span, variable_to_complete_origins_and_binding]
-  unsupported: [arithmetic, quantification, non_boolean_data, calls, accessors]
+  unsupported: [non_linear_arithmetic, quantification, non_integer_non_boolean_data, calls, accessors]
 compatibility:
   unknown_schema_major: reject
   source_release: requires the human PGM-02 Wave 4 decision
@@ -80,7 +81,7 @@ compatibility:
 
 | Feature | Kind |
 |---|---|
-| Boolean-v1 analysis stages | Library API |
+| `quire.smtlib2/v2` analysis stages | Library API |
 | Differential evidence and existing-report publication | Library API and publish-only CLI |
 
 ## Invariants

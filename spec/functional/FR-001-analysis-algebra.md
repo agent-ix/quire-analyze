@@ -52,10 +52,11 @@ digests.
   dependency kind, observation,
   non-identical execution point, unresolved member, duplicate member, or member assigned to two
   groups. V0.1 reports cross-execution-point binding unsupported.
-- The v0.1 analysis surface accepts exactly the Boolean constructs supported by
-  `quire.smtlib2/v1`. It preserves contract-IR short-circuit/total Boolean and observation identity;
-  every arithmetic, option, record, collection, or other unsupported construct rejects before a
-  query instead of being approximated.
+- The analysis surface accepts exactly the Boolean and linear integer constructs supported by
+  `quire.smtlib2/v2` ([FR-010](./FR-010-linear-integer-arithmetic.md)). It preserves contract-IR
+  short-circuit/total Boolean and observation identity; every non-linear arithmetic, rational, option,
+  record, collection, or other unsupported construct rejects before a query instead of being
+  approximated.
 - Five dedicated constructors make group roles unambiguous. Assumptions may be empty. Consistency
   requires a non-empty selected group; contradiction requires non-empty left and right groups;
   implication requires non-empty antecedents and exactly one consequent; redundancy requires
