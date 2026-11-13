@@ -15,12 +15,14 @@ use std::{
 use quire_contract_model::{
     BooleanOperator, BoundedDomainForm, CheckedJson, CheckedLiteralValue, CheckedNodeId,
     CheckedNodeKind, CheckedSemanticNodeV2, CheckedTerm, ClaimForm, Clause, ClauseId, ClauseKind,
-    ComparisonOperator, ContractPackage, ContractPackageV1, DeclarationEnvironment, Diagnostic,
-    ExecutionPoint, ExecutionPointName, Expression, ExpressionKind, IntegerDomain, IntegerType,
-    NumericOperator, OverflowPolicy, PackageId, Requirement, RequirementId, RequirementRef,
-    RequirementRevision, ScalarTypeForm, SchemaVersion, SourceDocumentId, SourceIdentity,
-    SourceLocation, SourceRevision, SourceSpan, StateObservation, SymbolName, TypedExpression,
-    ValueDeclaration, ValueDeclarationKind, ValueForm, ValueType, MAX_EXPRESSION_NODES,
+    ComparisonOperator, CompositeTypeForm, ContractPackage, ContractPackageV1,
+    DeclarationEnvironment, Diagnostic, EnumDeclaration, EnumVariantDeclaration, ExecutionPoint,
+    ExecutionPointName, Expression, ExpressionKind, IntegerDomain, IntegerType, NumericOperator,
+    OverflowPolicy, PackageId, RecordDeclaration, RecordFieldDeclaration, Requirement,
+    RequirementId, RequirementRef, RequirementRevision, ScalarTypeForm, SchemaVersion,
+    SourceDocumentId, SourceIdentity, SourceLocation, SourceRevision, SourceSpan, StateObservation,
+    SymbolName, TypeDeclaration, TypedExpression, ValueDeclaration, ValueDeclarationKind,
+    ValueForm, ValueType, MAX_EXPRESSION_NODES,
 };
 
 use crate::{lower_boolean_statements, smt::MAX_EXPRESSION_DEPTH, AnalysisRequest, StatementInput};
@@ -51,6 +53,13 @@ const OP_INT_GE: &str = "quire.op.integer.ge";
 const OP_INT_DIV: &str = "quire.op.integer.div";
 const OP_INT_REM: &str = "quire.op.integer.rem";
 const OP_INT_MOD: &str = "quire.op.integer.mod";
+const OP_ENUM_EQ: &str = "quire.op.enum.eq";
+const OP_ENUM_NE: &str = "quire.op.enum.ne";
+const OP_STRUCTURAL_EQ: &str = "quire.op.structural.eq";
+const OP_STRUCTURAL_NE: &str = "quire.op.structural.ne";
+const OP_RECORD_PROJECT: &str = "quire.op.record.project";
+const OP_OPTION_PRESENT: &str = "quire.op.option.present";
+const OP_OPTION_VALUE: &str = "quire.op.option.value";
 
 /// Why a package cannot be translated. Each kind is a distinct, stable cause.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,7 +185,7 @@ impl AnalysisTranslation {
         &self.package
     }
 
-    /// The declarations of the Boolean and integer parameters the clauses reach.
+    /// The declarations of the parameters and the enum and record types the clauses reach.
     pub fn environment(&self) -> &DeclarationEnvironment {
         &self.environment
     }
@@ -260,6 +269,9 @@ pub fn translate_analysis_claims(
     };
 
     let mut walker = Walker {
+        spans: &spans,
+        types: BTreeMap::new(),
+        declaring: BTreeSet::new(),
         nodes,
         terms: nodes
             .iter()
@@ -298,7 +310,8 @@ pub fn translate_analysis_claims(
     let requirement_id = RequirementId::new(REQUIREMENT_ID).map_err(|d| construction(&d))?;
     let revision = RequirementRevision::new(1).map_err(|d| construction(&d))?;
     let owner = RequirementRef::new(package_id.clone(), requirement_id.clone(), revision);
-    let environment = DeclarationEnvironment::new(owner, vec![], declarations, vec![])
+    let types = std::mem::take(&mut walker.types).into_values().collect();
+    let environment = DeclarationEnvironment::new(owner, types, declarations, vec![])
         .map_err(|diagnostics| first_construction(&diagnostics))?;
     let anchor = ExecutionPoint::Handler {
         name: ExecutionPointName::new(ANCHOR_NAME).map_err(|d| construction(&d))?,
@@ -431,6 +444,11 @@ impl SpanSource<'_> {
 
 /// The recursive translation of one claim at a time.
 struct Walker<'a> {
+    spans: &'a SpanSource<'a>,
+    /// The enum and record declarations of the types reached, by type node, in node order.
+    types: BTreeMap<usize, TypeDeclaration>,
+    /// Record type nodes whose fields are being declared, to refuse a cycle.
+    declaring: BTreeSet<usize>,
     nodes: &'a [CheckedSemanticNodeV2<CheckedJson>],
     terms: Vec<Option<&'a CheckedTerm>>,
     kinds: &'a [Option<CheckedNodeKind>],
@@ -505,6 +523,10 @@ impl<'a> Walker<'a> {
             | CheckedNodeKind::BoundedDomain(BoundedDomainForm::IntegerRange) => {
                 Some(Class::Integer)
             }
+            CheckedNodeKind::ScalarType(ScalarTypeForm::Enum)
+            | CheckedNodeKind::CompositeType(
+                CompositeTypeForm::Record | CompositeTypeForm::Option,
+            ) => Some(Class::Datatype),
             _ => None,
         }
     }
@@ -531,6 +553,163 @@ impl<'a> Walker<'a> {
             OverflowPolicy::Reject,
         )
         .map_err(|diagnostic| cannot_lower(node, diagnostic.message))
+    }
+
+    /// The datatype of the type node `id`: an enum, a record or an option over a supported
+    /// payload. The enum and record declarations it needs are recorded for the environment.
+    fn datatype(
+        &mut self,
+        id: &CheckedNodeId,
+        node: usize,
+        depth: usize,
+    ) -> Result<ValueType, TranslationError> {
+        let Some(type_node) = self.lookup(id) else {
+            return Err(cannot_lower(node, "the type is not a node"));
+        };
+        if depth > MAX_EXPRESSION_DEPTH {
+            return Err(cannot_lower(
+                type_node,
+                format!("the type nests deeper than {MAX_EXPRESSION_DEPTH}"),
+            ));
+        }
+        match self.kind(type_node) {
+            Some(CheckedNodeKind::ScalarType(ScalarTypeForm::Enum)) => self
+                .enum_type(type_node)
+                .map(|name| ValueType::Enum { name }),
+            Some(CheckedNodeKind::CompositeType(CompositeTypeForm::Record)) => self
+                .record_type(type_node, depth)
+                .map(|name| ValueType::Record { name }),
+            Some(CheckedNodeKind::CompositeType(CompositeTypeForm::Option)) => {
+                let payload = match self.terms[type_node] {
+                    Some(CheckedTerm::Aggregate { members }) => match members.as_slice() {
+                        [CheckedTerm::Reference { target }] => target,
+                        _ => return Err(cannot_lower(type_node, "the option has no payload")),
+                    },
+                    _ => return Err(cannot_lower(type_node, "the option has no payload")),
+                };
+                Ok(ValueType::option(self.payload(
+                    payload,
+                    type_node,
+                    depth + 1,
+                )?))
+            }
+            _ => Err(cannot_lower(
+                type_node,
+                "the type is not an enum, a record or an option",
+            )),
+        }
+    }
+
+    /// The type of a record field or option payload: a Boolean, an integer, or a datatype.
+    fn payload(
+        &mut self,
+        id: &CheckedNodeId,
+        owner: usize,
+        depth: usize,
+    ) -> Result<ValueType, TranslationError> {
+        let Some(type_node) = self.lookup(id) else {
+            return Err(cannot_lower(owner, "the type is not a node"));
+        };
+        match self.class_of_type(id) {
+            Some(Class::Boolean) => Ok(ValueType::Boolean),
+            Some(Class::Integer) => Ok(ValueType::integer(self.integer_type(id, type_node)?)),
+            Some(Class::Datatype) => self.datatype(id, owner, depth),
+            None => Err(cannot_lower(
+                type_node,
+                "a record field or option payload of this type is not supported",
+            )),
+        }
+    }
+
+    /// The field named by the `field` member of the `quire.op.record.project` application at
+    /// `node`. A package read by `ContractPackageWireV1::read` carries no admitted operation
+    /// views, so the member is read from the wire body.
+    fn projected_field(&self, node: usize) -> Result<SymbolName, TranslationError> {
+        let body = serde_json::to_value(&self.nodes[node].body)
+            .map_err(|error| cannot_lower(node, error.to_string()))?;
+        let name = body["operation"]["member"]["name"]
+            .as_str()
+            .ok_or_else(|| cannot_lower(node, "the projection names no field"))?;
+        SymbolName::new(name).map_err(|diagnostic| cannot_lower(node, diagnostic.message))
+    }
+
+    fn type_symbol(type_node: usize) -> Result<SymbolName, TranslationError> {
+        SymbolName::new(format!("t{type_node}"))
+            .map_err(|diagnostic| cannot_lower(type_node, diagnostic.message))
+    }
+
+    fn enum_type(&mut self, type_node: usize) -> Result<SymbolName, TranslationError> {
+        let name = Self::type_symbol(type_node)?;
+        if self.types.contains_key(&type_node) {
+            return Ok(name);
+        }
+        let Some(CheckedTerm::NominalBody(body)) = self.terms[type_node] else {
+            return Err(cannot_lower(type_node, "the enum has no declaration body"));
+        };
+        let Some((_, members)) = body.enum_details() else {
+            return Err(cannot_lower(type_node, "the enum has no declaration body"));
+        };
+        let span = self.spans.node(type_node)?;
+        let variants = members
+            .iter()
+            .map(|member| {
+                SymbolName::new(&**member)
+                    .map(|variant| EnumVariantDeclaration::new(variant, span.clone()))
+                    .map_err(|diagnostic| cannot_lower(type_node, diagnostic.message))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let declaration = EnumDeclaration::new(name.clone(), span, variants)
+            .map_err(|diagnostics| first_cannot_lower(type_node, &diagnostics))?;
+        self.types
+            .insert(type_node, TypeDeclaration::Enum { declaration });
+        Ok(name)
+    }
+
+    fn record_type(
+        &mut self,
+        type_node: usize,
+        depth: usize,
+    ) -> Result<SymbolName, TranslationError> {
+        let name = Self::type_symbol(type_node)?;
+        if self.types.contains_key(&type_node) {
+            return Ok(name);
+        }
+        if !self.declaring.insert(type_node) {
+            return Err(cannot_lower(type_node, "the record type contains itself"));
+        }
+        let result = self.record_fields(type_node, &name, depth);
+        self.declaring.remove(&type_node);
+        let declaration = result?;
+        self.types
+            .insert(type_node, TypeDeclaration::Record { declaration });
+        Ok(name)
+    }
+
+    fn record_fields(
+        &mut self,
+        type_node: usize,
+        name: &SymbolName,
+        depth: usize,
+    ) -> Result<RecordDeclaration, TranslationError> {
+        let Some(CheckedTerm::Aggregate { members }) = self.terms[type_node] else {
+            return Err(cannot_lower(type_node, "the record has no field list"));
+        };
+        let span = self.spans.node(type_node)?;
+        let mut fields = Vec::with_capacity(members.len());
+        for member in members {
+            let CheckedTerm::Binding { name: field, value } = member else {
+                return Err(cannot_lower(type_node, "the record field is not a binding"));
+            };
+            let CheckedTerm::Reference { target } = &**value else {
+                return Err(cannot_lower(type_node, "the record field has no type"));
+            };
+            let field = SymbolName::new(field.as_ref())
+                .map_err(|diagnostic| cannot_lower(type_node, diagnostic.message))?;
+            let value_type = self.payload(target, type_node, depth + 1)?;
+            fields.push(RecordFieldDeclaration::new(field, value_type, span.clone()));
+        }
+        RecordDeclaration::new(name.clone(), span, fields)
+            .map_err(|diagnostics| first_cannot_lower(type_node, &diagnostics))
     }
 
     fn range_bounds(
@@ -595,7 +774,8 @@ impl<'a> Walker<'a> {
             };
             match self.kind(target_node) {
                 Some(
-                    CheckedNodeKind::Expression(_) | CheckedNodeKind::Value(ValueForm::Literal),
+                    CheckedNodeKind::Expression(_)
+                    | CheckedNodeKind::Value(ValueForm::Literal | ValueForm::EnumValue),
                 ) => {
                     if !self.in_progress.insert(target_node) {
                         return Err(cannot_lower(target_node, "reference cycle"));
@@ -606,8 +786,10 @@ impl<'a> Walker<'a> {
                     node = target_node;
                 }
                 Some(CheckedNodeKind::Value(ValueForm::Parameter)) => {
-                    let semantic = &self.nodes[target_node].semantic_type;
+                    let nodes = self.nodes;
+                    let semantic = &nodes[target_node].semantic_type;
                     let value_type = match want {
+                        Class::Datatype => self.datatype(semantic, target_node, 1)?,
                         Class::Boolean if self.is_boolean_type(semantic) => ValueType::Boolean,
                         Class::Boolean => {
                             return Err(cannot_lower(target_node, "the parameter is not Boolean"))
@@ -672,6 +854,23 @@ impl<'a> Walker<'a> {
                             value_type: self.integer_type(type_id, node)?,
                         }
                     }
+                    (Some(CheckedLiteralValue::Enum(variant)), Class::Datatype) => {
+                        let ValueType::Enum { name } = self.datatype(type_id, node, 1)? else {
+                            return Err(cannot_lower(node, "the enum literal is not of an enum"));
+                        };
+                        ExpressionKind::EnumLiteral {
+                            enumeration: name,
+                            variant: SymbolName::new(variant)
+                                .map_err(|diagnostic| cannot_lower(node, diagnostic.message))?,
+                        }
+                    }
+                    (Some(CheckedLiteralValue::None), Class::Datatype) => {
+                        let value_type = self.datatype(type_id, node, 1)?;
+                        if !matches!(value_type, ValueType::Option { .. }) {
+                            return Err(cannot_lower(node, "the none literal is not of an option"));
+                        }
+                        ExpressionKind::OptionNone { value_type }
+                    }
                     _ => {
                         return Err(cannot_lower(
                             node,
@@ -691,7 +890,7 @@ impl<'a> Walker<'a> {
                 let Some(identity) = operation.identity() else {
                     return Err(cannot_lower(node, "the operation has no catalog identity"));
                 };
-                let Some(operation) = Operation::from_identity(identity) else {
+                let Some(operation_kind) = Operation::from_identity(identity) else {
                     let message = match identity {
                         OP_INT_DIV | OP_INT_REM | OP_INT_MOD => {
                             format!("operation {identity} is not linear integer arithmetic")
@@ -700,24 +899,32 @@ impl<'a> Walker<'a> {
                     };
                     return Err(cannot_lower(node, message));
                 };
-                if operation.result() != want
-                    || self.class_of_type(result_type) != Some(operation.result())
-                {
+                let declared = self.class_of_type(result_type);
+                let yields = operation_kind.result().or(declared);
+                if yields != Some(want) || declared != Some(want) {
                     return Err(cannot_lower(
                         node,
                         format!(
                             "operation {identity} yields {} where {} is required",
-                            operation.result().name(),
+                            yields.map_or("an unsupported type", Class::name),
                             want.name()
                         ),
                     ));
                 }
-                if arguments.len() != operation.arity() {
+                if arguments.len() != operation_kind.arity() {
                     return Err(cannot_lower(
                         node,
-                        format!("operation {identity} takes {} arguments", operation.arity()),
+                        format!(
+                            "operation {identity} takes {} arguments",
+                            operation_kind.arity()
+                        ),
                     ));
                 }
+                let field = if matches!(operation_kind, Operation::Project) {
+                    Some(self.projected_field(node)?)
+                } else {
+                    None
+                };
                 self.count(node, depth)?;
                 let outer = std::mem::replace(&mut self.saw_parameter, false);
                 let mut operands = Vec::with_capacity(arguments.len());
@@ -728,19 +935,19 @@ impl<'a> Walker<'a> {
                         argument,
                         node,
                         depth + 1,
-                        operation.operand(),
+                        operation_kind.operand(),
                     )?);
                     parametric += usize::from(self.saw_parameter);
                 }
                 self.saw_parameter = outer || parametric > 0;
-                if operation.is_product() && parametric > 1 {
+                if operation_kind.is_product() && parametric > 1 {
                     return Err(cannot_lower(
                         node,
                         "a product of two terms that contain parameters is not linear",
                     ));
                 }
-                let kind = operation
-                    .build(operands)
+                let kind = operation_kind
+                    .build(operands, field)
                     .ok_or_else(|| cannot_lower(node, "the operand count is wrong"))?;
                 Ok(self.make(kind))
             }
@@ -781,15 +988,28 @@ impl<'a> Walker<'a> {
     }
 }
 
+fn first_cannot_lower(node: usize, diagnostics: &[Diagnostic]) -> TranslationError {
+    cannot_lower(
+        node,
+        diagnostics
+            .first()
+            .map_or("the declaration is refused", |diagnostic| {
+                diagnostic.message.as_str()
+            }),
+    )
+}
+
 fn cannot_lower(node: usize, message: impl Into<String>) -> TranslationError {
     TranslationError::at_node(TranslationErrorKind::CannotLower, node, message)
 }
 
-/// The class of a term: what a Boolean or an integer operation takes and yields.
+/// The class of a term: what a Boolean, integer or datatype operation takes and yields.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Class {
     Boolean,
     Integer,
+    /// An enum, a record or an option.
+    Datatype,
 }
 
 impl Class {
@@ -798,6 +1018,7 @@ impl Class {
         match self {
             Self::Boolean => "a Boolean",
             Self::Integer => "an integer",
+            Self::Datatype => "a datatype",
         }
     }
 }
@@ -808,6 +1029,12 @@ enum Operation {
     Not,
     Negate,
     Binary(Binary),
+    /// `quire.op.record.project`: the field of a record.
+    Project,
+    /// `quire.op.option.present`.
+    Present,
+    /// `quire.op.option.value`.
+    Value,
 }
 
 #[derive(Clone, Copy)]
@@ -820,7 +1047,7 @@ enum Binary {
 
 impl Operation {
     fn from_identity(identity: &str) -> Option<Self> {
-        use Class::{Boolean, Integer};
+        use Class::{Boolean, Datatype, Integer};
         Some(match identity {
             OP_NOT => Self::Not,
             OP_AND => Self::Binary(Binary::Boolean(BooleanOperator::TotalAnd)),
@@ -828,6 +1055,15 @@ impl Operation {
             OP_IMPLIES => Self::Binary(Binary::Boolean(BooleanOperator::Implication)),
             OP_EQ => Self::Binary(Binary::Compare(ComparisonOperator::Equal, Boolean)),
             OP_NE => Self::Binary(Binary::Compare(ComparisonOperator::NotEqual, Boolean)),
+            OP_ENUM_EQ | OP_STRUCTURAL_EQ => {
+                Self::Binary(Binary::Compare(ComparisonOperator::Equal, Datatype))
+            }
+            OP_ENUM_NE | OP_STRUCTURAL_NE => {
+                Self::Binary(Binary::Compare(ComparisonOperator::NotEqual, Datatype))
+            }
+            OP_RECORD_PROJECT => Self::Project,
+            OP_OPTION_PRESENT => Self::Present,
+            OP_OPTION_VALUE => Self::Value,
             OP_INT_NEGATE => Self::Negate,
             OP_INT_ADD => Self::Binary(Binary::Numeric(NumericOperator::Add)),
             OP_INT_SUB => Self::Binary(Binary::Numeric(NumericOperator::Subtract)),
@@ -844,16 +1080,17 @@ impl Operation {
 
     const fn arity(self) -> usize {
         match self {
-            Self::Not | Self::Negate => 1,
+            Self::Not | Self::Negate | Self::Project | Self::Present | Self::Value => 1,
             Self::Binary(_) => 2,
         }
     }
 
-    /// The class of the result.
-    const fn result(self) -> Class {
+    /// The class of the result; `None` where it is the declared type of the application.
+    const fn result(self) -> Option<Class> {
         match self {
-            Self::Negate | Self::Binary(Binary::Numeric(_)) => Class::Integer,
-            _ => Class::Boolean,
+            Self::Negate | Self::Binary(Binary::Numeric(_)) => Some(Class::Integer),
+            Self::Project | Self::Value => None,
+            _ => Some(Class::Boolean),
         }
     }
 
@@ -863,6 +1100,7 @@ impl Operation {
             Self::Not | Self::Binary(Binary::Boolean(_)) => Class::Boolean,
             Self::Negate | Self::Binary(Binary::Numeric(_)) => Class::Integer,
             Self::Binary(Binary::Compare(_, class)) => class,
+            Self::Project | Self::Present | Self::Value => Class::Datatype,
         }
     }
 
@@ -874,8 +1112,25 @@ impl Operation {
     }
 
     /// The expression over the translated operands, `None` for a wrong operand count.
-    fn build(self, mut operands: Vec<Expression>) -> Option<ExpressionKind> {
+    fn build(
+        self,
+        mut operands: Vec<Expression>,
+        field: Option<SymbolName>,
+    ) -> Option<ExpressionKind> {
+        let single = |operands: &mut Vec<Expression>| -> Option<Box<Expression>> {
+            Some(Box::new(operands.pop().filter(|_| operands.is_empty())?))
+        };
         match self {
+            Self::Project => Some(ExpressionKind::FieldAccess {
+                base: single(&mut operands)?,
+                field: field?,
+            }),
+            Self::Present => Some(ExpressionKind::IsPresent {
+                option: single(&mut operands)?,
+            }),
+            Self::Value => Some(ExpressionKind::Unwrap {
+                option: single(&mut operands)?,
+            }),
             Self::Not => Some(ExpressionKind::BooleanNot {
                 operand: Box::new(operands.pop().filter(|_| operands.is_empty())?),
             }),

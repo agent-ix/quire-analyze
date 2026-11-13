@@ -218,6 +218,235 @@ impl Document {
         label
     }
 
+    /// An enum `scalar_type` named `name` (also its node label), with its member nodes
+    /// `{name}/{member}`. An unordered enum lists its members sorted.
+    pub fn enum_type(&mut self, name: &str, members: &[&str]) -> String {
+        let mut sorted = members.to_vec();
+        sorted.sort_unstable();
+        let body = json!({"term": "enum", "ordered": false, "members": sorted});
+        self.node(name, "scalar_type", "declaration", "enum", name, &[], body);
+        let node = self.nodes.last_mut().expect("enum node");
+        node["declaration"] = json!({"qualified_name": [name]});
+        node["owner"] = json!({"kind": "source", "authority": "agent-ix",
+            "identity": "quire.fixture.source/v1"});
+        for member in sorted {
+            let label = format!("{name}/{member}");
+            let body = literal(name, "enum", json!(member));
+            self.node(
+                &label,
+                "value",
+                "expression",
+                "enum_value",
+                name,
+                &[name],
+                body,
+            );
+        }
+        name.to_owned()
+    }
+
+    /// A `composite_type/record` named `name` whose fields are `(field, type label)` pairs.
+    pub fn record_type(&mut self, name: &str, fields: &[(&str, &str)]) -> String {
+        let label = format!("composite_type/{name}");
+        let members = fields
+            .iter()
+            .map(|(field, ty)| json!({"term": "binding", "name": field, "value": reference(ty)}))
+            .collect::<Vec<_>>();
+        let dependencies = fields.iter().map(|(_, ty)| *ty).collect::<Vec<_>>();
+        let body = json!({"term": "aggregate", "members": members});
+        self.node(
+            &label,
+            "composite_type",
+            "type",
+            "record",
+            &label,
+            &dependencies,
+            body,
+        );
+        label
+    }
+
+    /// A `composite_type/option` named `name` over the type `inner`.
+    pub fn option_type(&mut self, name: &str, inner: &str) -> String {
+        let label = format!("composite_type/{name}");
+        let body = json!({"term": "aggregate", "members": [reference(inner)]});
+        self.node(
+            &label,
+            "composite_type",
+            "type",
+            "option",
+            &label,
+            &[inner],
+            body,
+        );
+        label
+    }
+
+    /// A bounded type the translation does not support, of the `kind` `text`, `rational` or
+    /// `sequence`, so that the lowering of the package accepts it.
+    pub fn unsupported_type(&mut self, kind: &str) -> String {
+        let bounds = json!({"term": "aggregate", "members": [
+            {"term": "binding", "name": "min",
+                "value": literal("scalar_type/integer", "integer", json!("0"))},
+            {"term": "binding", "name": "max",
+                "value": literal("scalar_type/integer", "integer", json!("8"))},
+        ]});
+        let empty = json!({"term": "aggregate", "members": []});
+        let profile = json!({"term": "binding", "name": "text_profile",
+            "value": literal("scalar_type/text", "text", json!("nfc"))});
+        let (base, domain, form, body) = match kind {
+            "text" => {
+                let base = "scalar_type/text/profiled";
+                let profiled = json!({"term": "aggregate", "members": [profile.clone()]});
+                self.node(base, "scalar_type", "type", "text", base, &[], profiled);
+                let mut body = bounds;
+                body["members"]
+                    .as_array_mut()
+                    .expect("members")
+                    .push(profile);
+                (base.to_owned(), "bounded_domain/text", "text_bounds", body)
+            }
+            "rational" => {
+                let base = "scalar_type/rational";
+                self.node(
+                    base,
+                    "scalar_type",
+                    "type",
+                    "rational",
+                    base,
+                    &[],
+                    empty.clone(),
+                );
+                (
+                    base.to_owned(),
+                    "bounded_domain/rational",
+                    "rational_range",
+                    empty,
+                )
+            }
+            _ => {
+                let element = self.range_between("element", 0, 3);
+                let base = "composite_type/sequence";
+                let items = json!({"term": "aggregate", "members": [reference(&element)]});
+                self.node(
+                    base,
+                    "composite_type",
+                    "type",
+                    "sequence",
+                    base,
+                    &[&element],
+                    items,
+                );
+                (
+                    base.to_owned(),
+                    "bounded_domain/sequence",
+                    "collection_bounds",
+                    bounds,
+                )
+            }
+        };
+        self.node(
+            domain,
+            "bounded_domain",
+            "generated",
+            form,
+            &base,
+            &[&base],
+            body,
+        );
+        domain.to_owned()
+    }
+
+    /// An enum literal of the enum type `ty`.
+    pub fn enum_literal(&mut self, ty: &str, variant: &str) -> String {
+        let label = self.fresh("value/literal");
+        let body = literal(ty, "enum", json!(variant));
+        self.node(&label, "value", "expression", "literal", ty, &[], body);
+        label
+    }
+
+    /// The `none` literal of the option type `ty`.
+    pub fn none_literal(&mut self, ty: &str) -> String {
+        let label = self.fresh("value/literal");
+        let body = literal(ty, "none", Value::Null);
+        self.node(&label, "value", "expression", "literal", ty, &[], body);
+        label
+    }
+
+    /// An application of `identity` with the given operator, form and member.
+    pub fn shaped(
+        &mut self,
+        identity: &str,
+        operator: &str,
+        form: &str,
+        member: Value,
+        arguments: &[&str],
+        extra: &[&str],
+        result: &str,
+    ) -> String {
+        let label = self.fresh("expression/application");
+        let body = json!({
+            "term": "application",
+            "operator": operator,
+            "operation": {"identity": identity, "laws": [], "mode": null,
+                "member": member, "leaves": []},
+            "result_type": id(result),
+            "arguments": arguments.iter().map(|argument| reference(argument)).collect::<Vec<_>>(),
+        });
+        let dependencies = [arguments, extra].concat();
+        self.node(
+            &label,
+            "expression",
+            "expression",
+            form,
+            result,
+            &dependencies,
+            body,
+        );
+        label
+    }
+
+    /// `operand.field`, a `quire.op.record.project` over a record of type `record`.
+    pub fn project(&mut self, record: &str, field: &str, operand: &str, result: &str) -> String {
+        let member = json!({"kind": "field", "declaration": id(record), "name": field});
+        self.shaped(
+            "quire.op.record.project",
+            "query",
+            "query",
+            member,
+            &[operand],
+            &[record],
+            result,
+        )
+    }
+
+    /// `quire.op.option.present` of `option`.
+    pub fn present(&mut self, option: &str) -> String {
+        let result = "scalar_type/boolean";
+        self.shaped(
+            "quire.op.option.present",
+            "present",
+            "presence_read",
+            Value::Null,
+            &[option],
+            &[],
+            result,
+        )
+    }
+
+    /// `quire.op.option.value` of `option`, typed `result`.
+    pub fn option_value(&mut self, option: &str, result: &str) -> String {
+        self.shaped(
+            "quire.op.option.value",
+            "value",
+            "value_read",
+            Value::Null,
+            &[option],
+            &[],
+            result,
+        )
+    }
+
     pub fn op(&mut self, identity: &str, arguments: &[&str]) -> String {
         self.application(identity, arguments, "scalar_type/boolean")
     }
