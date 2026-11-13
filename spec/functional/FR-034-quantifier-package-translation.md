@@ -30,22 +30,27 @@ that [FR-030](./FR-030-bounded-quantifier-domains.md) admits.
   existential quantifier with its domain classified by FR-030, its bound variable, its Boolean body
   and its source span. The quantifier is a Boolean term that Boolean operations may combine. Its
   operation row extends the Terms table of FR-009 and uses the same operation-identity rule.
-- **Types.** An enum domain uses the enum type mapping of [FR-022](./FR-022-datatype-package-translation.md);
-  a range domain uses the `integer_range` mapping of
-  [FR-012](./FR-012-integer-claim-translation.md), whose bounds and overflow rule it inherits: a range
-  bound outside the signed 64-bit range is refused by the IR, and the saturating overflow policy
-  stays unsupported. A bound variable of an integer range has the integer type whose minimum and
-  maximum are the range bounds.
 - **Quantifier identities.** The checked operation catalog (`quire-verification-contracts`) defines
-  `quire.op.collection.forall` and `quire.op.collection.exists`, each with a collection-kind first
-  operand and a Boolean-bodied binder as second operand. They are the identities of the universal
-  and existential quantifier. The catalog names no separate enum-domain or range-domain quantifier
-  identity: an enum or `integer_range` domain is the first operand of the same two identities when the
-  checked reading of the package admits it as a domain operand, and a package whose first operand is
-  not admitted never reaches the translation.
+  `quire.op.collection.forall` and `quire.op.collection.exists`, each with a first operand typed
+  `collection_kind` (`sequence`, `set`, `bag` or `ordered_set`) and a Boolean-bodied binder as second
+  operand; `quire-contract-model` holds them as a quantifier over a collection expression with an
+  elements or indices domain. They are the identities of the universal and existential quantifier.
+  The catalog has no enum-domain or range-domain quantifier identity, so the package path has no
+  separate enum or range domain.
+- **Enum domains.** An enum domain is the finite-collection case: a collection literal whose elements
+  are the enum's literals. It lowers as in [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md)
+  with the enum type mapping of [FR-022](./FR-022-datatype-package-translation.md).
+- **Range domains.** A bounded integer range reaches the translation only as a literal integer
+  collection, whose elements have the `integer_range` mapping of
+  [FR-012](./FR-012-integer-claim-translation.md) and inherit its bounds and overflow rule (an element
+  outside the signed 64-bit range is refused by the IR; the saturating overflow policy stays
+  unsupported). It is expanded under the budget of [NFR-030](../nonfunctional/NFR-030-quantifier-expansion-bound.md);
+  over the budget it exits `2` with reason `expansion-ceiling` and is never turned into a solver
+  quantifier. A range-domain operand or identity needs an upstream form that does not exist; a
+  quantifier with a range-domain operand that no upstream form supplies exits `2` naming the node.
 - **Collection domains.** A first operand that is an `Application` of `quire.op.collection.set`,
   `quire.op.collection.ordered_set`, `quire.op.collection.sequence` or `quire.op.collection.bag`
-  whose arguments are all `Literal` terms of Boolean, enum or integer-range type translates to a
+  whose arguments are all `Literal` terms of Boolean, enum or integer-range type (an enum's literals for an enum domain, integer literals for a range) translates to a
   finite-collection domain with those elements and no collection value or sort; the collection exists
   only as the quantifier's domain. A first operand that is a `Reference` to a parameter, a
   collection with a non-literal element or an element of another type (text, rational, record,
@@ -73,13 +78,14 @@ that [FR-030](./FR-030-bounded-quantifier-domains.md) admits.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-034-AC-1 | A package holding an enum-domain, a collection-domain (one fixture per constructor `set`, `ordered_set`, `sequence` and `bag`, with Boolean, enum and integer elements) and a range-domain quantifier translates to the matching bounded quantifiers with source spans preserved, and the quantifier map of its lowered query holds one entry for each. | Test (TC-030) |
+| FR-034-AC-1 | Packages holding a universal and an existential quantifier over a collection literal translate to the matching bounded quantifiers: one fixture per constructor (`set`, `ordered_set`, `sequence`, `bag`), one enum-literal collection and one integer-literal collection, each with source spans preserved, and the quantifier map of its lowered query holds one entry for each. | Test (TC-030) |
 | FR-034-AC-2 | A package holding a quantifier over an unbounded or text domain exits `2` naming `semantic_graph.nodes[N]` of the quantifier node, with the reason class and span on stderr and no report. | Test (TC-030) |
 | FR-034-AC-3 | Two quantifiers reusing one variable name in one claim produce distinct, non-colliding symbols. | Test (TC-030) |
 | FR-034-AC-4 | A quantified package run through `run-package` yields the same report bytes, except `elapsedMs`, on repeated runs. | Test (TC-030) |
 | FR-034-AC-5 | For the fixtures of FR-009-AC-21 and FR-012-AC-4, which hold no quantifier node, the lowered queries equal their golden queries. | Test (TC-030) |
-| FR-034-AC-6 | A quantifier whose body is a 10,000-node tree is not refused for size and one whose body is 10,001 nodes exits `2`, as FR-009-AC-23 states for other trees; a literal range of width 1,024 translates, and its 1,024 expanded instances do not count toward that node bound. | Test (TC-030) |
+| FR-034-AC-6 | A quantifier whose body is a 10,000-node tree is not refused for size and one whose body is 10,001 nodes exits `2`, as FR-009-AC-23 states for other trees; an integer-literal collection of 1,024 elements translates, and its 1,024 expanded instances do not count toward that node bound. | Test (TC-030) |
 | FR-034-AC-7 | A collection with a non-literal element, a collection of text, rational, record or nested-collection elements, a `Reference` to a collection parameter, `quire.op.collection.contains`, `size` or `index` applied to a literal collection, and a collection literal outside a quantifier domain each exit `2` naming `semantic_graph.nodes[N]`, with no report. | Test (TC-030) |
+| FR-034-AC-8 | An integer-literal collection of 1,025 elements exits `2` with reason `expansion-ceiling` and emits no solver quantifier, and a quantifier with a range-domain operand for which no upstream form exists exits `2` naming `semantic_graph.nodes[N]` with no report. | Test (TC-030) |
 
 ## Dependencies
 

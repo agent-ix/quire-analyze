@@ -31,7 +31,7 @@ and that every unbounded quantifier and every exhausted limit is non-conclusive.
 ## Test Procedure
 
 1. Admission and refusal: universal and existential fixtures over each admitted domain (enum, each
-   collection constructor, integer range), an empty domain, and refused fixtures (unbounded integer,
+   collection constructor, enum-literal collection, integer-literal collection, and an integer range at the lowering layer), an empty domain, and refused fixtures (unbounded integer,
    text, rational, unfixed collection, collection with an unencodable element, non-finite bound,
    nested refused quantifier, and an enum or collection expansion one above the budget refused as
    `expansion-ceiling`).
@@ -46,7 +46,7 @@ and that every unbounded quantifier and every exhausted limit is non-conclusive.
 5. Resources: instance budget and replay limit at and one above their values, a 2^64-wide range,
    the nested width-100 fixture, a stalled solver and a solver answering `unknown` on a quantified
    query.
-6. Package: a QSL contract package with admitted and refused quantifiers through `run-package`, and the Boolean and integer fixtures with no quantifier.
+6. Package: a QSL contract package with admitted and refused quantifiers through `run-package`, including an integer-literal collection one above the budget and a range-domain operand with no upstream form (both exit `2`), and the Boolean and integer fixtures with no quantifier.
 
 ## Expected Results
 

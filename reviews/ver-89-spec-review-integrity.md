@@ -50,3 +50,22 @@ FAIL on FND-001 and FND-002 (high): the new requirements are unreachable under t
 | FND-008 | still-open | New in disposition pass 1 on eb95c03; not yet fixed. |
 | FND-009 | still-open | New in disposition pass 1 on eb95c03; not yet fixed. |
 | FND-010 | still-open | New in disposition pass 1 on eb95c03; not yet fixed. |
+
+## Dispositions (round 2)
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-008 | fixed | verified in 7bef72d, 1124135 |
+| FND-009 | fixed | verified in 7bef72d, 1124135 |
+| FND-010 | fixed | verified in 7bef72d, 1124135 |
+| FND-011 | still-open | New in disposition pass 2 on 1124135; not yet fixed. |
+| FND-012 | still-open | New in disposition pass 2 on 1124135; not yet fixed. |
+| FND-013 | still-open | New in disposition pass 2 on 1124135; not yet fixed. |
+
+## New findings (disposition pass 2)
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-011 | high | Enum-domain and range-domain quantifiers cannot come from a package. FR-034 says an enum or `integer_range` domain is the first operand of `quire.op.collection.forall`/`exists` 'when the checked reading of the package admits it', but the checked operation catalog (quire-verification-contracts main, contracts/checked-operation-catalog-v1.json) types that operand as `collection_kind`, which is exactly [sequence, set, bag, ordered_set]; the catalog has no other `quantify` identity. The upstream analysis model (quire-contract-model `ExpressionKind::Quantifier`) also quantifies only over `collection: Box<Expression>` with domain `Elements` or `Indices`. So the checked reading never admits an enum or range operand, FR-034-AC-1's enum- and range-domain fixtures cannot be written, and FR-030/FR-032 enum and range domains have no model form. Fix: say that enum and range domains reach the analyzer only as literal collections (or only from the analysis-model API), and scope FR-034-AC-1 to match; or name the upstream catalog/model change as a blocking dependency. | spec/functional/FR-034-quantifier-package-translation.md:Behavior, Quantifier identities bullet |
+| FND-012 | high | The bounded-quantifier logics `LIA` and `UFDTLIA` contradict main's report validation and logic tables, which this PR does not amend. FR-005-AC-6 requires the report `logic` to be `QF_LIA` for a query without datatype declarations, otherwise the logic FR-020 specifies; FR-020's Logic table and FR-020-AC-9 allow only `QF_LIA` and `QF_UFDTLIA` and refuse 'a logic other than the one the feature set requires'; FR-010's Profile bullet says `QF_LIA` for every query without datatypes. Report validation as written refuses a `LIA` or `UFDTLIA` report, so no bounded-quantifier run can produce a valid report. The names themselves are valid SMT-LIB logics (`LIA` is a standard logic, `UFDTLIA` is an SMT-LIB benchmark logic, quantified counterparts of `QF_LIA` and `QF_UFDTLIA`). Fix: amend FR-005-AC-6, the FR-010 Profile bullet and the FR-020 Logic table and AC-9 with the bounded-quantifier rows in this PR. | spec/functional/FR-032-bounded-integer-range-quantifier-lowering.md:Behavior, Logic bullet; FR-032-AC-6 |
+| FND-013 | low | Main's FR-020-AC-8 ('a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`') and FR-022-AC-3 (a collection term exits `2`) are unconditional and are not amended; FR-030 and FR-034 only assert they 'stay true for every other use'. Read literally, both ACs are false for a collection literal in domain position. The FR-030 bullet also lists 'the `quire.op.option.value` exit on `claim-N`' among the collection refusals, which is unrelated to collections. Fix: qualify FR-020-AC-8 and FR-022-AC-3 with 'outside a quantifier domain (FR-030)' and drop the option.value clause. | spec/functional/FR-030-bounded-quantifier-domains.md:Behavior, collection-domain bullet |

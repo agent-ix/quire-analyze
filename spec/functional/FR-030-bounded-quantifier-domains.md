@@ -25,7 +25,8 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
 - Admitted domains (amending [FR-002](./FR-002-smt-lowering.md), which lists quantifiers as
   unsupported, under the same profile `quire.smtlib2/v2`):
   - an enum domain: every declared member of the enum, in declaration order. Enum sorts are those of
-    [FR-020](./FR-020-datatype-lowering.md);
+    [FR-020](./FR-020-datatype-lowering.md). From a QSL package an enum domain is a finite collection
+    whose elements are enum literals ([FR-034](./FR-034-quantifier-package-translation.md));
   - a finite collection: a collection literal whose elements are literals fixed at translation time
     (the catalog constructors `quire.op.collection.set`, `quire.op.collection.ordered_set`,
     `quire.op.collection.sequence` and `quire.op.collection.bag`), with element sorts limited to
@@ -34,7 +35,10 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
     [FR-031](./FR-031-enum-and-collection-quantifier-lowering.md). A collection that is a reference to
     a parameter, has a non-literal element, or has any other element sort is not a finite collection;
   - a bounded integer range: an inclusive range whose lower and upper bounds are integer literals or
-    declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). When
+    declared bounds of bounded integer inputs of [FR-010](./FR-010-linear-integer-arithmetic.md). This
+    is the target design for the analysis model. The checked operation catalog and `quire-contract-model`
+    currently have no range-domain quantifier form, so a QSL package supplies an integer range only
+    as a literal integer collection ([FR-034](./FR-034-quantifier-package-translation.md)); When
     the lower bound exceeds the upper bound the range is empty.
 - Closed set of reason classes for `unsupported` on a quantifier: `unbounded-domain` (an integer with
   no finite declared bounds), `non-finite-bound`, `text-domain`, `rational-domain`,
@@ -54,7 +58,7 @@ expanded or enumerated over a finite bound; the analyzer never approximates an u
   request.
 - The collection domain is the only admitted use of a collection. The collection refusals of
   [FR-020](./FR-020-datatype-lowering.md) and [FR-022](./FR-022-datatype-package-translation.md)
-  (including FR-020-AC-8, FR-022-AC-3 and the `quire.op.option.value` exit on `claim-N`) hold unchanged for
+  (including FR-020-AC-8 and FR-022-AC-3) hold unchanged for
   every other use of a collection term; a collection literal in domain position is consumed by this
   requirement before expression lowering and never reaches the `CollectionLiteral` refusal.
 - Admission is decided from the analysis model alone, before any solver is invoked.
