@@ -55,3 +55,11 @@ symbol names, not pins.
 | FND-001 | medium | Not all the spec was amended for the new public analysis-model input. In interface-001, `range_quantifier_input` lists only `AnalysisFormula, RangeQuantifier, RangeBound`, `quantification_note` says only "the range quantifier input above is admitted", and the quantifier map is `..._instances_and_bounds` with no elements. FR-032 says the formula nodes are `Not`, `And`, `Or`, `Implies` and `Range`. `DomainQuantifier`, `QuantifierDomain`, `DomainElement`, `CollectionKind`, `UnboundedDomain`, the new `QuantifierEntry` shape (`bounds` + `elements`) and the `with_formula` domain checks are specified nowhere. | `spec/interface/interface-001-analysis-api.md:73-75`, `spec/functional/FR-032-bounded-integer-range-quantifier-lowering.md:37`, `src/quantifier.rs:133-184` |
 | FND-002 | low | `validate_domain` checks the bound variable's type only against the collection's elements, so an empty collection is admitted whatever its `local_type` (text, record, option). FR-030 limits finite-collection element sorts to Boolean, enum and bounded integer, and a Text-typed empty collection should be refused, not lowered to `true`. | `src/smt.rs:3455-3480` |
 | FND-003 | low | `QuantifierEntry` stores a two-way choice as two independent fields: `bounds: Option<(RangeBound, RangeBound)>` and `elements: Vec<String>`. A range with elements, or an enum with bounds, can be represented. `elements` is also a string list even though the typed public `DomainElement` exists. One `enum` (range bounds, or `Vec<DomainElement>` members) would make the invalid states unrepresentable and keep element types. | `src/quantifier.rs:330-342` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | - |
+| FND-002 | fixed | - |
+| FND-003 | fixed | - |

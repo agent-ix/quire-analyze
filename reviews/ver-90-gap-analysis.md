@@ -52,3 +52,13 @@ FR-031-AC-5 is met by test-side computation rather than by product output.
 | FND-003 | low | `an_invalid_domain_formula_is_refused_when_attached` is tagged FR-031-AC-1, but it checks `with_formula` validation errors. AC-1 is about enum goldens and oracle status. No AC states the domain validation rules, so the binding is wrong (see SR-17060 FND-001). | `tests/range_quantifier_lowering.rs:2180-2241` |
 | FND-004 | low | `real_z3_cvc5_decide_domain_fixtures` is tagged NFR-032-AC-3. That AC needs a fixture that a solver cannot decide to be reported `timeout`/`unknown`. This test asserts that every expanded fixture is decided `sat`/`unsat`. | `tests/range_quantifier_lowering.rs:2274-2302` |
 | FND-005 | low | FR-030-AC-4 requires the empty-domain result in the lowered query, in replay and in the controlled-solver result. `an_empty_domain_is_true_for_universal_and_false_for_existential` checks only the query text and the instance count. | `tests/range_quantifier_lowering.rs:1991-2018` |
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | - |
+| FND-002 | fixed | - |
+| FND-003 | fixed | - |
+| FND-004 | fixed | - |
+| FND-005 | fixed | - |
