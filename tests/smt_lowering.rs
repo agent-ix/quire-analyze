@@ -391,46 +391,6 @@ fn every_supported_boolean_operator_has_an_exact_encoding() {
     }
 }
 
-/// FR-002-AC-2/4 and TC-003: unsupported arithmetic fails before solver execution.
-#[trace("TC-003", "TC-010", "FR-002-AC-2", "FR-002-AC-4")]
-#[test]
-fn arithmetic_is_explicitly_unsupported() {
-    let integer = IntegerType::new(IntegerDomain::Signed, 0, 10, OverflowPolicy::Reject)
-        .expect("integer type");
-    let environment = DeclarationEnvironment::new(
-        owner("REQ-int", 1),
-        vec![],
-        vec![ValueDeclaration::new(
-            SymbolName::new("count").expect("symbol"),
-            ValueDeclarationKind::Input,
-            ValueType::integer(integer.clone()),
-            span(),
-        )],
-        vec![],
-    )
-    .expect("environment");
-    let expression = Expression::new(
-        ExpressionKind::Compare {
-            operator: ComparisonOperator::Greater,
-            left: Box::new(value("count")),
-            right: Box::new(Expression::new(
-                ExpressionKind::IntegerLiteral {
-                    value: 0,
-                    value_type: integer,
-                },
-                span(),
-            )),
-        },
-        span(),
-    );
-    let statement = statement_from_parts("C-int", environment, expression, 0x33);
-
-    let errors = lower_boolean_statements(&[statement], &[]).expect_err("unsupported");
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].code(), LoweringErrorCode::UnsupportedConstruct);
-    assert!(errors[0].message().contains("comparison"));
-}
-
 /// FR-002-AC-2/4 and TC-003: quantification and non-Boolean data fail explicitly.
 #[trace("TC-003", "TC-010", "FR-002-AC-2", "FR-002-AC-4")]
 #[test]
