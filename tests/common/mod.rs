@@ -596,3 +596,53 @@ pub fn cycle_document() -> (Document, String, [String; 2]) {
     let claim = document.claim(&second);
     (document, claim, [first, second])
 }
+
+/// A claim over a two-node cycle of integer sums; returns the document, the claim and the cycle.
+pub fn integer_cycle_document() -> (Document, String, [String; 2]) {
+    const ADD: &str = "quire.op.integer.add";
+    let mut document = Document::new();
+    let range = document.range();
+    let a = document.parameter_of(&range);
+    let zero = document.int_literal(&range, 0);
+    let first = document.int_op(ADD, &[&a, &zero], &range);
+    let second = document.int_op(ADD, &[&first, &zero], &range);
+    document.set_body(
+        &first,
+        json!({
+            "term": "application",
+            "operator": "binary",
+            "operation": {"identity": ADD, "laws": [], "mode": null, "member": null, "leaves": []},
+            "result_type": id(&range),
+            "arguments": [reference(&second), reference(&zero)],
+        }),
+        &[&second, &zero],
+    );
+    for label in [&first, &second] {
+        let node = document
+            .nodes
+            .iter_mut()
+            .find(|node| node["node_id"] == id(label))
+            .expect("node");
+        node["recursion_group"] = json!("loop");
+    }
+    let compare = document.int_op("quire.op.integer.le", &[&second, &a], "scalar_type/boolean");
+    let claim = document.claim(&compare);
+    (document, claim, [first, second])
+}
+
+/// A claim bounding the product of two parameters; returns the document, the claim and the product.
+pub fn product_document() -> (Document, String, String) {
+    let mut document = Document::new();
+    let range = document.range();
+    let a = document.parameter_of(&range);
+    let b = document.parameter_of(&range);
+    let product = document.int_op("quire.op.integer.mul", &[&a, &b], &range);
+    let c = document.parameter_of(&range);
+    let compare = document.int_op(
+        "quire.op.integer.le",
+        &[&product, &c],
+        "scalar_type/boolean",
+    );
+    let claim = document.claim(&compare);
+    (document, claim, product)
+}

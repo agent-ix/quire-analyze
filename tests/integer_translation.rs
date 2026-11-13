@@ -63,40 +63,49 @@ fn operands(expression: &Expression) -> (&Expression, &Expression) {
     }
 }
 
+/// The ten integer operations of the FR-012 Terms table.
+const TABLE: [&str; 10] = [
+    "negate", "add", "sub", "mul", "eq", "ne", "lt", "le", "gt", "ge",
+];
+
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn each_integer_operation_translates_to_its_expression_kind() {
+    // Under the reject policy the IR admits an operation only when its result interval lies in
+    // the type, so the operands are of the one-point range [0, 0].
     let numeric = [
         (ADD, NumericOperator::Add),
         (SUB, NumericOperator::Subtract),
         (MUL, NumericOperator::Multiply),
     ];
+    let mut exercised = vec!["negate"];
     for (identity, expected) in numeric {
+        exercised.push(identity.strip_prefix("quire.op.integer.").expect("prefix"));
         let mut document = Document::new();
-        let range = document.range();
+        let range = document.range_between("point", 0, 0);
         let a = document.parameter_of(&range);
-        let unit = document.int_literal(&range, 1);
-        let application = document.int_op(identity, &[&a, &unit], &range);
+        let zero = document.int_literal(&range, 0);
+        let application = document.int_op(identity, &[&a, &zero], &range);
         let b = document.parameter_of(&range);
         let compare = document.int_op("quire.op.integer.le", &[&application, &b], BOOLEAN);
         let claim = document.claim(&compare);
         let (package, translation) = translate(&document, &[&claim]);
-        let (sum, _) = operands(expression(&translation, 0));
+        let (numeric, _) = operands(expression(&translation, 0));
         let ExpressionKind::Numeric {
             operator,
             left,
             right,
-        } = sum.kind()
+        } = numeric.kind()
         else {
-            panic!("{identity} translated to {:?}", sum.kind());
+            panic!("{identity} translated to {:?}", numeric.kind());
         };
         assert_eq!(*operator, expected, "{identity}");
         assert_eq!(left.kind(), &value_reference(&package, &a));
         let ExpressionKind::IntegerLiteral { value, value_type } = right.kind() else {
             panic!("literal translated to {:?}", right.kind());
         };
-        assert_eq!(*value, 1);
+        assert_eq!(*value, 0);
         assert_eq!(
             (
                 value_type.domain(),
@@ -104,7 +113,7 @@ fn each_integer_operation_translates_to_its_expression_kind() {
                 value_type.maximum(),
                 value_type.overflow()
             ),
-            (IntegerDomain::Signed, 0, 100, OverflowPolicy::Reject)
+            (IntegerDomain::Signed, 0, 0, OverflowPolicy::Reject)
         );
     }
 
@@ -123,21 +132,84 @@ fn each_integer_operation_translates_to_its_expression_kind() {
         }
         other => panic!("negate translated to {other:?}"),
     }
+
+    // The comparisons are covered by `each_integer_comparison_translates_to_its_operator`.
+    exercised.extend(COMPARISONS.map(|(name, _)| name));
+    exercised.sort_unstable();
+    let mut table = TABLE.to_vec();
+    table.sort_unstable();
+    assert_eq!(
+        exercised, table,
+        "every operation of the table is exercised"
+    );
 }
 
+#[trace("FR-012-AC-9")]
+#[test]
+fn an_addition_over_a_wider_range_is_refused_by_the_ir_naming_the_claim() {
+    // `x + 1` over [0, 100] may leave its type under `Reject`; this is the upstream limitation.
+    let mut document = Document::new();
+    let range = document.range();
+    let a = document.parameter_of(&range);
+    let one = document.int_literal(&range, 1);
+    let sum = document.int_op(ADD, &[&a, &one], &range);
+    let compare = document.int_op("quire.op.integer.le", &[&sum, &a], BOOLEAN);
+    let claim = document.claim(&compare);
+    let (package, error) = refusal(&document, &[&claim]);
+    assert_eq!(
+        error.kind(),
+        TranslationErrorKind::ClauseRejected,
+        "{error}"
+    );
+    let node = index(&package, &claim);
+    assert_eq!(error.clause(), Some(format!("claim-{node}").as_str()));
+}
+
+#[trace("FR-012-AC-9")]
+#[ignore = "needs VER-71 lowering (PR #92)"]
+#[test]
+fn a_literal_of_the_bare_integer_type_has_the_signed_128_bit_range() {
+    let mut document = Document::new();
+    let five = document.int_literal("scalar_type/integer", 5);
+    let also_five = document.int_literal("scalar_type/integer", 5);
+    let compare = document.int_op("quire.op.integer.eq", &[&five, &also_five], BOOLEAN);
+    let claim = document.claim(&compare);
+    let (_, translation) = translate(&document, &[&claim]);
+    let (left, _) = operands(expression(&translation, 0));
+    let ExpressionKind::IntegerLiteral { value, value_type } = left.kind() else {
+        panic!("literal translated to {:?}", left.kind());
+    };
+    assert_eq!(*value, 5);
+    assert_eq!(
+        (
+            value_type.domain(),
+            value_type.minimum(),
+            value_type.maximum(),
+            value_type.overflow()
+        ),
+        (
+            IntegerDomain::Signed,
+            i128::MIN,
+            i128::MAX,
+            OverflowPolicy::Reject
+        )
+    );
+}
+
+const COMPARISONS: [(&str, ComparisonOperator); 6] = [
+    ("eq", ComparisonOperator::Equal),
+    ("ne", ComparisonOperator::NotEqual),
+    ("lt", ComparisonOperator::Less),
+    ("le", ComparisonOperator::LessEqual),
+    ("gt", ComparisonOperator::Greater),
+    ("ge", ComparisonOperator::GreaterEqual),
+];
+
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn each_integer_comparison_translates_to_its_operator() {
-    let comparisons = [
-        ("eq", ComparisonOperator::Equal),
-        ("ne", ComparisonOperator::NotEqual),
-        ("lt", ComparisonOperator::Less),
-        ("le", ComparisonOperator::LessEqual),
-        ("gt", ComparisonOperator::Greater),
-        ("ge", ComparisonOperator::GreaterEqual),
-    ];
-    for (name, expected) in comparisons {
+    for (name, expected) in COMPARISONS {
         let mut document = Document::new();
         let range = document.range();
         let a = document.parameter_of(&range);
@@ -161,7 +233,7 @@ fn each_integer_comparison_translates_to_its_operator() {
 }
 
 #[trace("FR-012-AC-4")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn a_comparison_nests_under_a_boolean_operation() {
     let mut document = Document::new();
@@ -258,7 +330,7 @@ fn a_product_of_two_parameters_is_refused_at_the_product() {
 }
 
 #[trace("FR-012-AC-3")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn a_product_with_a_constant_operand_is_linear() {
     let mut document = Document::new();
@@ -294,33 +366,7 @@ fn division_remainder_and_modulus_are_refused_at_the_application() {
 #[trace("FR-012-AC-3")]
 #[test]
 fn an_integer_reference_cycle_is_refused() {
-    let mut document = Document::new();
-    let range = document.range();
-    let a = document.parameter_of(&range);
-    let zero = document.int_literal(&range, 0);
-    let first = document.int_op(ADD, &[&a, &zero], &range);
-    let second = document.int_op(ADD, &[&first, &zero], &range);
-    document.set_body(
-        &first,
-        serde_json::json!({
-            "term": "application",
-            "operator": "binary",
-            "operation": {"identity": ADD, "laws": [], "mode": null, "member": null, "leaves": []},
-            "result_type": id(&range),
-            "arguments": [reference(&second), reference(&zero)],
-        }),
-        &[&second, &zero],
-    );
-    for label in [&first, &second] {
-        let node = document
-            .nodes
-            .iter_mut()
-            .find(|node| node["node_id"] == id(label))
-            .expect("node");
-        node["recursion_group"] = serde_json::json!("loop");
-    }
-    let compare = document.int_op("quire.op.integer.le", &[&second, &a], BOOLEAN);
-    let claim = document.claim(&compare);
+    let (document, claim, [first, second]) = integer_cycle_document();
     let (package, error) = refusal(&document, &[&claim]);
     assert_eq!(error.kind(), TranslationErrorKind::CannotLower, "{error}");
     assert!(error.message().contains("cycle"), "{error}");
@@ -329,7 +375,7 @@ fn an_integer_reference_cycle_is_refused() {
 }
 
 #[trace("FR-012-AC-5")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn integer_parameters_are_declared_once_with_their_bounds() {
     let mut document = Document::new();
@@ -368,7 +414,7 @@ fn integer_parameters_are_declared_once_with_their_bounds() {
 }
 
 #[trace("FR-012-AC-6")]
-#[ignore = "needs VER-71 lowering"]
+#[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
 fn two_translations_of_the_same_integer_bytes_agree() {
     let mut document = Document::new();

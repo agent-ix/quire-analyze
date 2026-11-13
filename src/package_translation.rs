@@ -675,7 +675,7 @@ impl<'a> Walker<'a> {
                     _ => {
                         return Err(cannot_lower(
                             node,
-                            format!("the literal is not a {} literal", want.name()),
+                            format!("the literal is not {} literal", want.name()),
                         ))
                     }
                 };
@@ -706,7 +706,7 @@ impl<'a> Walker<'a> {
                     return Err(cannot_lower(
                         node,
                         format!(
-                            "operation {identity} yields a {} where a {} is required",
+                            "operation {identity} yields {} where {} is required",
                             operation.result().name(),
                             want.name()
                         ),
@@ -793,10 +793,11 @@ enum Class {
 }
 
 impl Class {
+    /// The class named with its article, for messages.
     const fn name(self) -> &'static str {
         match self {
-            Self::Boolean => "Boolean",
-            Self::Integer => "integer",
+            Self::Boolean => "a Boolean",
+            Self::Integer => "an integer",
         }
     }
 }

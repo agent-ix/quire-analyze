@@ -41,8 +41,33 @@ contract package, and the runner adds no source language and no solver.
 | `Application` of `quire.op.integer.gt` | `ExpressionKind::Compare` with `ComparisonOperator::Greater` |
 | `Application` of `quire.op.integer.ge` | `ExpressionKind::Compare` with `ComparisonOperator::GreaterEqual` |
 
+- **Integer types of terms.** The IR (FR-014 of `quire-contract-ir`) gives every integer expression one
+  complete `IntegerType` and requires the operands of a numeric operation or a comparison to carry equal
+  types. The translation assigns types as follows.
+  - A `Reference` to an `integer_range` parameter has the integer type of that range:
+    `IntegerDomain::Signed`, `minimum` and `maximum` the `min` and `max` of the `integer_range`, and
+    `OverflowPolicy::Reject`. An `integer_range` carries only `min` and `max`, so the domain and the
+    policy are fixed here. `Reject` is the only overflow policy FR-010 encodes exactly.
+  - A `Literal` whose type is an `integer_range` has that same integer type. A `Literal` whose type is
+    the bare `scalar_type` `integer` has `Signed`, the 128-bit signed bounds `i128::MIN` and
+    `i128::MAX`, and `Reject`; a literal of a value outside 128 bits is refused naming the node.
+  - An `Application` has no type of its own in the translation: `ExpressionKind` carries none, and the
+    IR derives the result type from the operands. The `result_type` of the package is used to decide
+    that the operation yields an integer or a Boolean, and not as a type.
+  - Operand types that differ, such as a bare-integer literal beside an `integer_range` parameter,
+    are refused by the IR check, not by the walk.
+  - **Upstream limitation.** Under `Reject`, the IR refuses a numeric result whose interval may leave the
+    range of its type. An operation passes the check only when its result interval lies inside the
+    range: any operation over a range of one point, `x + 0`, `x * 1` and negation over a symmetric
+    range pass; `x + 1`, `x + y`, `x - y` and `5 * x` over a wider range do not. Admitting linear
+    arithmetic over a wider range needs an upstream `quire-contract-ir` capability (operands of
+    different ranges with a stated result type, or range facts supplied to `check_expression`); the
+    runner does not work around it. Until that capability exists, a claim that needs it exits `2`
+    naming `claim-N` and the IR message (a clause-level refusal of FR-009, not
+    `semantic_graph.nodes[N]`), with no report.
 - **Parameters.** A parameter node yields one `ValueDeclaration` of kind `Input` named by the node
-  index, with the integer type (domain, minimum, maximum and overflow policy) of its `integer_range`; the 128-bit signed bounds of the IR apply. Claims that reference the same
+  index, with the integer type of its `integer_range` defined above; the 128-bit signed bounds of the IR
+  apply. Claims that reference the same
   node share one declaration, as FR-009 states for Boolean parameters.
 - **Non-linear and other integer terms.** A multiplication whose operands both contain a parameter, a
   `quire.op.integer.div`, `quire.op.integer.rem` or `quire.op.integer.mod` application, and any integer operation not listed above
@@ -59,14 +84,15 @@ contract package, and the runner adds no source language and no solver.
 
 | ID | Criteria | Verification |
 |---|---|---|
-| FR-012-AC-1 | A package fixture whose `analysis_claim` bounds a dose by a maximum for a weight (a linear inequality over two integer parameters, for example `dose <= 5 * weight`) runs end to end with controlled solver results and exits `0` with a report that `validate_report_document` accepts. | Test (TC-018) |
+| FR-012-AC-1 | A package fixture whose `analysis_claims` bound a dose by a maximum and the maximum by a weight (`dose <= max` and `max <= 1 * weight` over three integer parameters of one `integer_range`, the form the upstream limitation admits) runs end to end with controlled solver results and exits `0` with a report that `validate_report_document` accepts. | Test (TC-018) |
 | FR-012-AC-2 | The same fixture with contradictory claims exits `1` with agreed status `refuted`. | Test (TC-018) |
-| FR-012-AC-3 | A claim whose body multiplies two parameters, one that applies `quire.op.integer.div`, `.rem` or `.mod`, and one with a reference cycle each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report. | Test (TC-018) |
+| FR-012-AC-3 | A claim whose body multiplies two parameters, one that applies `quire.op.integer.div`, `.rem` or `.mod`, and one with a reference cycle each exit `2` naming `semantic_graph.nodes[N]` of the node where translation stopped, with no report; the library refusal and the spawned `run-package` binary both show it. | Test (TC-018) |
 | FR-012-AC-4 | Each row of the Terms added table translates to the stated expression kind and operator, a comparison nests under a Boolean operation, and an integer operand of a Boolean operation exits `2` naming the node. | Test (TC-018) |
 | FR-012-AC-5 | Two claims that reference the same integer parameter node yield one declaration with the integer bounds of its type; two distinct parameter nodes yield two. | Test (TC-018) |
 | FR-012-AC-6 | Two translations of the same package bytes yield equal clause order, identifiers, declarations, bounds and spans. | Test (TC-018) |
 | FR-012-AC-7 | The 10,000/10,001 node bound, the depth 128/129 bound and the shared-subterm chain of FR-009-AC-23, rebuilt over integer sums, behave as in FR-009-AC-23. | Test (TC-018) |
 | FR-012-AC-8 | With real solvers, the fixtures of FR-012-AC-1 and AC-2 yield the same exit statuses and agreed statuses as the controlled run. | Test (TC-018, real solvers) |
+| FR-012-AC-9 | A literal of the bare integer type translates to an `IntegerLiteral` with the signed 128-bit bounds and `Reject`; an addition over an `integer_range` of more than one point exits `2` naming `claim-N`, as the upstream limitation states. | Test (TC-018) |
 
 ## Dependencies
 
