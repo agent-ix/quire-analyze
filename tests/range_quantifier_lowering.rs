@@ -735,7 +735,7 @@ fn declared_bound_is_a_query_variable_with_a_finite_declared_range() {
 }
 
 /// Capability contract: the range quantifier is an exact construct.
-#[trace("TC-030", "FR-032-AC-1")]
+#[trace("TC-030")]
 #[test]
 fn capability_contract_lists_the_range_quantifier() {
     assert!(CAPABILITY_CONTRACT
@@ -778,7 +778,7 @@ fn a_free_variable_named_like_a_bound_variable_is_not_captured() {
 /// NFR-030-AC-1 and FR-030 canonical order: the budget is spent in assertion-map order, then in
 /// depth-first pre-order inside a statement, so a contested budget gives the same encodings
 /// whatever order the caller lists the statements in.
-#[trace("TC-030", "NFR-030-AC-1", "FR-032-AC-8")]
+#[trace("TC-030", "NFR-030-AC-1", "FR-032-AC-9")]
 #[test]
 fn a_contested_budget_is_spent_in_canonical_order() {
     let build = |reversed: bool| {

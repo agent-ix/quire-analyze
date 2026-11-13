@@ -82,3 +82,19 @@ PR #98 (VER-87) conflict zones in `src/smt.rs`, for FND-001:
 | FND-007 | low | `AnalysisFormula::canonical` builds statement identity text from `{:?}` Debug output, which is not a stable encoding. It also uses `serde_json::to_string(..).unwrap_or_default()`, so a serialization failure collapses distinct terms to one identity. | `src/quantifier.rs:85-112` |
 | FND-008 | low | Formula nodes count twice against `MAX_EXPRESSION_NODES`, once in `plan` and again in `lower_planned`/`lower`, so the node bound is over-counted for a range formula (conservative, never unsound). | `src/smt.rs:1366-1373`, `src/smt.rs:1485-1494` |
 | FND-009 | low | `RangeQuantifier::local_type` is never checked against the range. A range of 0..300 over a local type of 0..255 lowers elements outside the bound variable's type, and the bounded `bv_k` is limited only by the guard. The field feeds only the saturating check. | `src/smt.rs:1400-1447`, `src/quantifier.rs:58-67` |
+
+## Dispositions
+
+Round 1, verified against fix commit df9923b and merge 225bf9a (origin/main with PR #98) on the PR branch.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | `ReplayFault::QuantifierUnreplayed`, `ReplayTerm::QuantifierUnreplayed` and `ReplayExpression::QuantifierUnreplayed` are separate variants. `replay_assertions` maps the fault to the new `ReplayFailureReason::QuantifierNotReplayable` (`quantifier_not_replayable`). After the merge no `DatatypeUnreplayed` or `SortNotReplayable` name remains, and the quantifier path does not touch datatype replay. A `UFDTLIA` test checks that a replayable enum model fails only on the quantifier. |
+| FND-002 | fixed | The timeout test now loops over Z3 and cvc5 and accepts only `Timeout` or `Unknown`. |
+| FND-003 | fixed | The FR-031-AC-6 tag is removed from the shadowing test. The new `a_free_variable_named_like_a_bound_variable_is_not_captured` checks input `i` against bound `i` in both forms, against the golden `range-free-variable-v2.smt2`. |
+| FND-004 | still-open | The capability-contract test was retagged from FR-030-AC-1 to FR-032-AC-1. It still checks only a string in `exact_constructs`, not the golden or the oracle status that FR-032-AC-1 states. The binding is still wrong; a fitting tag is FR-010-AC-1 (TC-016), or no AC tag at all. |
+| FND-005 | fixed | `a_contested_budget_is_spent_in_canonical_order` lowers a 1,000 + 25 contested pair in both statement orders and asserts the same query and which quantifier is bounded. It also asserts the pre-order case A(100), B(500), C bounded. |
+| FND-006 | fixed | `Planned` is split into `Expanded`/`Bounded`. `FiniteBound` removes the unreachable `Unbounded` arm and `unreachable!`. The inner enclosing count is `count`, and `used += count` carries a comment that it is bounded. |
+| FND-007 | fixed | `identity_text` is a serde_json value tree with explicit tags. A serialization error now refuses `with_formula` as `InvalidStatement` instead of collapsing to an empty string. |
+| FND-008 | fixed | `plan` counts only structural nodes and returns `Term` uncounted; `lower_planned` no longer counts, so each node is counted once. |
+| FND-009 | fixed | `validate_formula` refuses a non-empty literal range, or a declared bound whose input type lies outside `local_type`, as `InvalidStatement`. Tested in `an_invalid_formula_is_refused_when_attached`. |

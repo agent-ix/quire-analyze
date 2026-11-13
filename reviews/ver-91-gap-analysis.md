@@ -47,3 +47,24 @@ specified nowhere, and FR-031's per-instance identity is not carried by range ex
 | FND-004 | low | Spec ambiguity: NFR-030 "outermost first in canonical order" and FR-030 "canonical quantifier order" are not defined. The code plans depth-first pre-order per statement, in assertion-name order, so in `And(A{B}, C)` it charges B before C. A breadth-first reading charges C first, and the two readings give different encodings when the budget is contested. | `spec/nonfunctional/NFR-030-quantifier-expansion-bound.md`, `src/smt.rs:1366-1447` |
 | FND-005 | low | Spec ambiguity: FR-030 "declared bounds of bounded integer inputs" can mean the input type's min/max constants. The code, and the FR-032 rule that a declared bound forces the bounded form, read it as the input's value, finite because its type is bounded. The spec should state that reading. No spec reason exists for an interim unreplayed bounded quantifier, so the code borrows `sort_not_replayable` (SR-17058 FND-001). | `spec/functional/FR-030-bounded-quantifier-domains.md`, `spec/functional/FR-032-bounded-integer-range-quantifier-lowering.md`, `src/smt.rs:1451-1483` |
 | FND-006 | low | NFR-030-AC-3's nested-product case never reaches the overflow branch of `checked_mul` in `expansion_cost`. The test's outer range is already bounded on its own, so the enclosing count stays 1. A width near 2^128 nested under an expanded outer of width 2 or more is untested. | `tests/range_quantifier_lowering.rs:561-591`, `src/quantifier.rs:183-187` |
+
+## New findings (disposition pass 1)
+
+Found in fix commit df9923b.
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-007 | low | FR-032-AC-8 is compound: it joins the interim replay reason and the statement-order independence of a contested budget, two unrelated behaviours. Its clause "a datatype-free query never reports a datatype reason" is vacuous after PR #98, which removed `sort_not_replayable`; the merge rightly dropped the matching test assert, so the clause has no test and can never fail. | `spec/functional/FR-032-bounded-integer-range-quantifier-lowering.md:113` |
+
+## Dispositions
+
+Round 1, verified against fix commit df9923b and merge 225bf9a on the PR branch.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | `enumeration_oracle_decides_expanded_fixtures_without_a_solver` (src/smt.rs tests) runs seven expanded fixtures with no solver: forall, exists, both refuted, both empty, nested. An independent evaluator enumerates each range from the formula and is compared, at every x in -1000..=1000, with the lowered query's replay and with a hand-recorded expected status. It runs everywhere and can fail. |
+| FND-002 | fixed | FR-032 now specifies the analysis-model input (`AnalysisFormula`, `RangeQuantifier`, `RangeBound`, `local_type`, `with_formula` and its refusals, `QueryBundle::quantifiers`) and the attribution to the host clause, with new FR-032-AC-7. interface-001 `lowering_v2` names the input, the quantifier map and `LIA`/`UFDTLIA`, and notes that only contract-IR quantifier nodes stay unsupported. |
+| FND-003 | deferred | Deferred to FR-033 (VER-92). FR-032 now states that the per-instance identity and element of FR-031 and the counterexample naming a failing instance (FR-031-AC-5) come from FR-033 quantified replay. Until then the assertion map names the failing assertion and the quantifier map records the source identity. |
+| FND-004 | fixed | FR-030, FR-032 and NFR-030 define canonical order: statements in ascending assertion-symbol order and, within a statement, depth-first pre-order with siblings left to right. A test pins the pre-order case. |
+| FND-005 | fixed | FR-032 defines a declared bound as the input's value at the current observation, not its min or max. FR-011 adds the ninth reason `quantifier_not_replayable` as interim until FR-033. The reason counts agree: "nine" in FR-011 (twice), FR-020 and FR-021, with the list's precedence text updated to "the last three reasons". |
+| FND-006 | fixed | `a_nested_count_that_overflows_is_bounded_not_wrapped` nests a width-(2^128 - 1) range under an expanded width-2 outer. The `expansion_cost_is_checked` unit test also covers the product and sum overflow branches directly. |

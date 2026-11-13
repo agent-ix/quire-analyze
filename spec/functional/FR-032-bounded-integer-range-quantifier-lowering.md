@@ -110,7 +110,8 @@ solver quantifier.
 | FR-032-AC-5 | Lowering a range-quantified package twice yields byte-identical SMT-LIB2 output. | Test (TC-030) |
 | FR-032-AC-6 | A bounded quantifier whose body mentions an enum declares `UFDTLIA`, and one whose body is integer-only declares `LIA`. | Test (TC-030) |
 | FR-032-AC-7 | `with_formula` refuses an empty quantifier identity, a bound-variable reference with no enclosing quantifier, a non-empty literal range outside `local_type` and a declared bound outside `local_type`, each as `InvalidStatement`. | Test (TC-030) |
-| FR-032-AC-8 | A satisfiable model of a query that holds a bounded solver quantifier is incomplete with reason `quantifier_not_replayable`, never verified, and a datatype-free query never reports a datatype reason; the contested budget gives the same encodings for any statement order. | Test (TC-030) |
+| FR-032-AC-8 | A satisfiable model of a query that holds a bounded solver quantifier is incomplete with reason `quantifier_not_replayable`, never verified, and the solver's logical response is unchanged. | Test (TC-030) |
+| FR-032-AC-9 | A contested budget gives the same encodings and the same quantifier map for any order of the caller's statements, and spends the budget in depth-first pre-order within a statement. | Test (TC-030) |
 
 ## Dependencies
 
