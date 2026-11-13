@@ -56,3 +56,15 @@ FR-012 and upstream, not in this PR's code.
   passes, and `a_dose_bounded_by_a_maximum_runs_end_to_end` exits 3.
 - Semantic review: run, scoped to FR-012 at the caller's request.
 - Real solvers: Z3 and cvc5 are absent, so AC-8 is not assessable.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-012 gains an "Integer types of terms" bullet covering parameter, range literal, bare-integer literal and Application typing, with `result_type` used only to tell integer from Boolean. It also states the upstream limitation plainly: wider-range arithmetic exits 2 naming `claim-N`, and the fix needs a quire-contract-ir capability. The AC-1 example is now admissible: `max <= 1 * weight` passed `check_expression` and reached both solvers with #92 merged. |
+| FND-002 | fixed | The bullet fixes Signed, `min`/`max` and Reject, and notes that an `integer_range` carries only `min` and `max`. |
+| FND-003 | fixed | The new FR-012-AC-9 owns the rule for bare-integer literals, and `a_literal_of_the_bare_integer_type_has_the_signed_128_bit_range` passes with #92 merged. |
+| FND-004 | fixed | FR-009-AC-25 now states that an integer claim can reach IR errors and exits 2 naming `claim-N`. |
+| FND-005 | fixed | A gated FR-012-AC-8 test was added and skips with an eprintln when the executables are absent, as the FR-009-AC-14 test does. It cannot yet pass where solvers exist: see SR-17052 FND-004. |
+| FND-006 | fixed | The fixture now bounds dose by max and max by `1 * weight`, the form the limitation admits, and AC-1 is reworded to match. |
+| FND-007 | fixed | `integer_refusals_exit_two_naming_the_node_through_the_runner` spawns the runner for the product, div/rem/mod and cycle cases and asserts exit 2 and no report. Its node naming is weak: see SR-17052 FND-005. |

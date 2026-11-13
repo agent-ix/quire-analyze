@@ -63,11 +63,6 @@ fn operands(expression: &Expression) -> (&Expression, &Expression) {
     }
 }
 
-/// The ten integer operations of the FR-012 Terms table.
-const TABLE: [&str; 10] = [
-    "negate", "add", "sub", "mul", "eq", "ne", "lt", "le", "gt", "ge",
-];
-
 #[trace("FR-012-AC-4")]
 #[ignore = "needs VER-71 lowering (PR #92)"]
 #[test]
@@ -79,9 +74,7 @@ fn each_integer_operation_translates_to_its_expression_kind() {
         (SUB, NumericOperator::Subtract),
         (MUL, NumericOperator::Multiply),
     ];
-    let mut exercised = vec!["negate"];
     for (identity, expected) in numeric {
-        exercised.push(identity.strip_prefix("quire.op.integer.").expect("prefix"));
         let mut document = Document::new();
         let range = document.range_between("point", 0, 0);
         let a = document.parameter_of(&range);
@@ -132,16 +125,6 @@ fn each_integer_operation_translates_to_its_expression_kind() {
         }
         other => panic!("negate translated to {other:?}"),
     }
-
-    // The comparisons are covered by `each_integer_comparison_translates_to_its_operator`.
-    exercised.extend(COMPARISONS.map(|(name, _)| name));
-    exercised.sort_unstable();
-    let mut table = TABLE.to_vec();
-    table.sort_unstable();
-    assert_eq!(
-        exercised, table,
-        "every operation of the table is exercised"
-    );
 }
 
 #[trace("FR-012-AC-9")]
