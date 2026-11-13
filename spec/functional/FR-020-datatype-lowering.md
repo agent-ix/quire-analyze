@@ -71,9 +71,11 @@ follows the feature set of the query, and this requirement owns the datatype cas
 |---|---|
 | No datatype declaration (including a Boolean-only query) | `QF_LIA` (FR-010) |
 | Declares at least one datatype (enum, record or option), with or without integer terms | `QF_UFDTLIA` |
+| Holds a bounded solver quantifier ([FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md)) and declares no datatype | `LIA` |
+| Holds a bounded solver quantifier and declares at least one datatype | `UFDTLIA` |
 
-The logic is determined by whether the query declares a datatype, never by a solver or host. A report
-for a datatype query names `quire.smtlib2/v2` and `QF_UFDTLIA`, and report validation
+The logic is determined by whether the query declares a datatype and whether it holds a bounded solver quantifier, never by a solver or host. A report
+for a datatype query without a bounded solver quantifier names `quire.smtlib2/v2` and `QF_UFDTLIA`, and report validation
 ([FR-005](./FR-005-evidence-cli.md)) accepts exactly the logic the query's feature set requires and
 refuses `quire.smtlib2/v1` and `QF_UF`.
 
@@ -131,8 +133,8 @@ refuses `quire.smtlib2/v1` and `QF_UF`.
 | FR-020-AC-5 | A record or option nesting a collection or text returns `UnsupportedType`, an enum ordering comparison and a mixed-sort comparison return `UnsupportedConstruct`, and a self-containing record fails at `DeclarationEnvironment::new` with `RecursiveType`. None yields a query. | Test |
 | FR-020-AC-6 | The capability contract of `quire.smtlib2/v2` lists the constructs above as exact and `collection`, `collection_access` and `text` as unsupported, and no construct appears in both lists. | Test |
 | FR-020-AC-7 | Permuting environment type order, variant order, field order and statement order yields byte-identical queries and maps, and two enums with identical variant names produce distinct sorts. | Test |
-| FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`. | Test |
-| FR-020-AC-9 | The `(set-logic ...)` of a query declaring no datatype is `QF_LIA` and of a query declaring at least one datatype is `QF_UFDTLIA`, in both cases under `quire.smtlib2/v2`, and a report naming `quire.smtlib2/v1`, `QF_UF`, or a logic other than the one the feature set requires is refused by validation. | Test |
+| FR-020-AC-8 | A membership disjunction with a repeated literal is lowered as written, and a `CollectionLiteral` or any other collection expression returns `UnsupportedConstruct`, except a collection literal consumed as a quantifier domain per [FR-030](./FR-030-bounded-quantifier-domains.md) and [FR-034](./FR-034-quantifier-package-translation.md). | Test |
+| FR-020-AC-9 | The `(set-logic ...)` of a query declaring no datatype is `QF_LIA` and of a query declaring at least one datatype is `QF_UFDTLIA`, in both cases under `quire.smtlib2/v2`, that of a query holding a bounded solver quantifier is `LIA` without and `UFDTLIA` with a datatype, and a report naming `quire.smtlib2/v1`, `QF_UF`, or a logic other than the one the feature set requires is refused by validation. | Test |
 
 ## Dependencies
 

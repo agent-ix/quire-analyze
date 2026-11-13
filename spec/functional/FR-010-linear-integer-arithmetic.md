@@ -31,7 +31,7 @@ solver and no decision procedure of its own.
 - **Profile.** The capability contract of `src/smt.rs` ([FR-002](./FR-002-smt-lowering.md)) gains an
   integer profile, `quire.smtlib2/v2`, with SMT-LIB version 2.6. Its logic is determined by the feature set of the query: `QF_LIA` for a query
   without datatype declarations, including a Boolean-only query; a query that declares datatypes declares
-  the logic FR-020 specifies. It replaces the
+  the logic FR-020 specifies; a query that holds a bounded solver quantifier ([FR-032](./FR-032-bounded-integer-range-quantifier-lowering.md)) declares `LIA` without datatypes and `UFDTLIA` with them. It replaces the
   Boolean-only `quire.smtlib2/v1`; every Boolean construct of FR-002 keeps its exact encoding under
   it, and a Boolean-only query declares `QF_LIA`. No query is emitted under two profiles
   and no fallback to the Boolean-only profile exists. Reports name `quire.smtlib2/v2` and the logic of the query
