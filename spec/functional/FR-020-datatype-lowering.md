@@ -58,10 +58,14 @@ unsupported.
   [FR-021](./FR-021-datatype-witness-replay.md) uses to read models. A user-chosen name equal to an
   SMT-LIB reserved word or to a name used by another encoded symbol cannot collide.
 - For every datatype-sorted variable the query asserts the declared range of each integer part
-  through one non-recursive range predicate per datatype sort (a record field through its selector;
-  an option payload guarded by `(=> ((_ is some) x) ...)`), as one unnamed assertion per variable
-  outside the assertion map and report assertions[], following the FR-010 integer range block,
-  ordered by ascending variable symbol.
+  through one non-recursive range predicate (define-fun) per typed shape, a datatype sort together
+  with the integer ranges of its parts (two options over integer payloads of different ranges
+  share a sort but not a predicate). A record predicate is the conjunction of its integer field
+  ranges and of the predicates of its record and option fields; an option predicate is `(=> ((_ is
+  some) x) <payload range or payload predicate>)`. The definitions follow the datatype
+  declarations in dependency order, ties broken by the predicate symbol. Each variable gets one
+  unnamed assertion of its predicate, outside the assertion map and report assertions[], following
+  the FR-010 integer range block, ordered by ascending variable symbol.
 - Datatype declarations appear before every use, in dependency order with ties broken by the encoded
   symbol, and variants and fields are emitted in ascending name order. Order of declaration in the
   environment does not change the query bytes.

@@ -3247,7 +3247,7 @@ mod tests {
     /// NFR-001: an integer read out of a datatype counts once against the expression node bound.
     /// Each comparison below is four nodes (compare, field access, its base, the literal), so 20,000
     /// joined by 19,999 conjunctions is 99,999 nodes and 20,001 is 100,004.
-    #[ix_trace_rs::trace("TC-020", "NFR-020-AC-1")]
+    #[ix_trace_rs::trace("TC-010", "NFR-001-AC-3")]
     #[test]
     fn integer_datatype_reads_count_once_against_the_node_bound() {
         fn join(items: &mut Vec<Expression>) -> Expression {

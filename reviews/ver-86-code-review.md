@@ -70,3 +70,23 @@ datatype arm, `IntegerTree::Datatype` emission, `reference`, `verify_model` in `
 `tests/record_option_lowering.rs` and the two new unit tests. Rust lane: no `unwrap` outside
 tests, indexing `records[&sort]` is guarded by a preceding insert, errors are typed, the
 exhaustive `ExpressionKind` match is kept.
+
+## New findings (disposition pass 1)
+
+Found in fix commit 32c1a3a.
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-005 | high | `record_fixture_lowers_to_the_golden_query` now runs `std::fs::write("tests/golden/option-sat-v2.smt2", lower(option_sat_fixture()).query()).unwrap()` on every run. A leftover regeneration hook makes the option golden rewrite itself from production output, so after the next build `option_fixture_lowers_to_the_golden_query` (its `include_str!`) can no longer catch a regression. Every `cargo test` also rewrites a tracked source file. | `tests/record_option_lowering.rs:466-470` |
+| FND-006 | low | `integer_datatype_reads_count_once_against_the_node_bound` is tagged `NFR-020-AC-1`, but the bound it tests is `MAX_EXPRESSION_NODES` (NFR-001 and TC-010, not a datatype bound in NFR-020). The bound-breach tag that fits is NFR-001-AC-3. | `src/smt.rs:3247-3248` |
+
+## Dispositions
+
+Round 1, verified against commit 32c1a3a on the PR branch.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | Range checks are now one non-recursive `define-fun` predicate per typed shape, plus one `(assert (p v))` per variable. A 64 x 64 x 64 integer-leaf shape is admitted with 3 predicates and a query under 100,000 bytes (test `nested_wide_records_keep_the_range_encoding_linear`). The `type.ranges` ResourceLimit is gone. |
+| FND-002 | fixed | `range_checked` memoizes the predicate by shape identity, so a later reference does a map lookup instead of a walk. |
+| FND-003 | fixed | `emit` decrements `self.nodes` before re-lowering an `IntegerTree::Datatype` node. The 20,000 / 20,001 test separates the fixed count (99,999 admitted) from the old double count (119,999 refused). |
+| FND-004 | fixed | An option-typed value now reports `value.<name>.some` (test expects `value.v.some`). |

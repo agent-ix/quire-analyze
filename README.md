@@ -56,10 +56,14 @@ disjunction of equalities), plus records and options: record literals, field acc
 option `none`, `some`, presence and `Unwrap` (only under a presence proof), and equality and
 inequality of both. Models of datatype-sorted queries are not replayed yet and stay unverified.
 For every datatype-sorted variable the query asserts the declared range of each integer part
-through one non-recursive range predicate per datatype sort (a record field through its selector;
-an option payload guarded by `(=> ((_ is some) x) ...)`), as one unnamed assertion per variable
-outside the assertion map and report assertions[], following the FR-010 integer range block,
-ordered by ascending variable symbol.
+through one non-recursive range predicate (define-fun) per typed shape, a datatype sort together
+with the integer ranges of its parts (two options over integer payloads of different ranges share
+a sort but not a predicate). A record predicate is the conjunction of its integer field ranges and
+of the predicates of its record and option fields; an option predicate is `(=> ((_ is some) x)
+<payload range or payload predicate>)`. The definitions follow the datatype declarations in
+dependency order, ties broken by the predicate symbol. Each variable gets one unnamed assertion of
+its predicate, outside the assertion map and report assertions[], following the FR-010 integer
+range block, ordered by ascending variable symbol.
 Declared integer ranges are asserted as unnamed assertions after the declarations.
 Any other construct is refused when the request is lowered, with a typed error
 naming it: non-linear products, integer division and remainder, saturating

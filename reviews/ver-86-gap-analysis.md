@@ -49,3 +49,22 @@ Definitions, AC-1, AC-2), FR-010 Declared domain, FR-005-AC-6 (unnamed ranges st
 `assertions[]`: they are emitted as plain `assert`s and the record and option reports validate)
 and TC-020. Context only: FR-020-AC-1 and AC-8 (enum and collection, on main), NFR-020-AC-3
 (model parsing, VER-87).
+
+## New findings (disposition pass 1)
+
+Found in fix commit 32c1a3a.
+
+| ID | Severity | Summary | Refs |
+| --- | --- | --- | --- |
+| FND-004 | medium | The new FR-020 Encoding bullet (copied into the README) says "one non-recursive range predicate per datatype sort". The code keys predicates by typed shape. Options over integer payloads share one sort whatever the range, so `Option<Int 0..5>` and `Option<Int 0..9>` get two predicates on one sort, which that wording forbids. The bullet also leaves out where the definitions go and in what order. Wording fix: "through one non-recursive range predicate (`define-fun`) per typed shape, a datatype sort together with the integer ranges of its parts (two options over integer payloads of different ranges share a sort but not a predicate). A record predicate is the conjunction of its integer field ranges and of the predicates of its record and option fields; an option predicate is `(=> ((_ is some) x) <payload range or payload predicate>)`. The definitions follow the datatype declarations in dependency order, ties broken by the predicate symbol." | `spec/functional/FR-020-datatype-lowering.md:60-64`, `README.md:58-62` |
+| FND-005 | low | No test covers the case that motivates per-shape keying: two option-typed variables over the same `Int` sort with different ranges, which should give one `declare-datatypes` and two predicates with their own bounds. A regression to per-sort keying would merge them unnoticed and lose one range. | `tests/record_option_lowering.rs` |
+
+## Dispositions
+
+Round 1, verified against commit 32c1a3a on the PR branch.
+
+| FND | Outcome | Reason |
+| --- | --- | --- |
+| FND-001 | fixed | FR-020 Encoding and the README now state the datatype range assertions: unnamed, outside the assertion map and report `assertions[]`, after the FR-010 block, in ascending variable-symbol order. The query emits them in that order (`variable_predicates` is a BTreeMap). The predicate wording issue is new finding FND-004. |
+| FND-002 | fixed | FR-020-AC-10 now reads "any datatype (enum, record or option) ... naming the first datatype-sorted variable". |
+| FND-003 | fixed | The `RecordLiteral` bullet now reads "in ascending field-name order (the order of the datatype's constructor)". |

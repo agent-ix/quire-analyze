@@ -463,11 +463,6 @@ fn capability_contract_lists_record_and_option_constructs_as_exact() {
 #[test]
 fn record_fixture_lowers_to_the_golden_query() {
     let query = lower(record_sat_fixture());
-    std::fs::write(
-        "tests/golden/option-sat-v2.smt2",
-        lower(option_sat_fixture()).query(),
-    )
-    .unwrap();
     assert_eq!(query.profile(), "quire.smtlib2/v2");
     assert_eq!(query.logic(), "QF_UFDTLIA");
     assert_eq!(query.query(), include_str!("golden/record-sat-v2.smt2"));
@@ -664,6 +659,50 @@ fn integer_parts_of_datatype_variables_are_range_constrained() {
         "Bool (=> ((_ is {}) x) (and (<= 0 ({} x)) (<= ({} x) 100))))\n",
         sort.some, sort.selector, sort.selector
     )));
+}
+
+/// FR-020-AC-3: two options over the same `Int` sort with different integer ranges share one
+/// datatype but each variable keeps the range predicate of its own range.
+#[trace("TC-020", "FR-020-AC-3")]
+#[test]
+fn options_with_different_integer_ranges_keep_their_own_predicates() {
+    let narrow = ValueType::option(ValueType::integer(
+        IntegerType::new(IntegerDomain::Signed, 0, 5, OverflowPolicy::Reject).expect("integer"),
+    ));
+    let wide = ValueType::option(ValueType::integer(
+        IntegerType::new(IntegerDomain::Signed, 0, 9, OverflowPolicy::Reject).expect("integer"),
+    ));
+    let query = lower_boolean_statements(
+        &statements(
+            "ranges",
+            vec![],
+            vec![input("narrow", narrow), input("wide", wide)],
+            vec![boolean(
+                BooleanOperator::TotalOr,
+                present(var("narrow")),
+                present(var("wide")),
+            )],
+        ),
+        &[],
+    )
+    .expect("lower");
+    assert_eq!(query.option_sorts().len(), 1);
+    let text = query.query();
+    assert_eq!(text.matches("(define-fun p_").count(), 2);
+    assert!(text.contains(" 5))"), "{text}");
+    assert!(text.contains(" 9))"), "{text}");
+    let predicates: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("(assert (p_"))
+        .collect();
+    assert_eq!(predicates.len(), 2);
+    let name = |line: &str| {
+        line.split_whitespace()
+            .next()
+            .expect("predicate")
+            .to_owned()
+    };
+    assert_ne!(name(predicates[0]), name(predicates[1]));
 }
 
 /// NFR-020-AC-1: the range encoding does not multiply along nested records. A 64 x 64 x 64
