@@ -23,8 +23,9 @@ For each FR-040 criterion, build requests that attack it and compare the provide
 independent enumeration of concrete executions on a small model (explicit states over the declared
 horizon). Cover bounds one unit from the representable limit, a flowed interval touching a guard at one
 point, two overlapping guards from one mode, two transitions into one target mode, a reset applied to
-part of an interval, a declared invariant, a horizon equal to and above the step bound, a duplicate and
-an undeclared mode, and inverted intervals and flow deltas. Run each request twice. Under
+part of an interval, a declared invariant, a horizon equal to and above the step bound, a transition repeated verbatim, an empty
+mode identity, a translated model that carries an invariant, and inverted intervals and flow deltas.
+Add one attacking test for each of FR-040-AC-1 through FR-040-AC-12, and the crate-limit requests of NFR-040. Run each request twice. Under
 delegate-and-remove, drive a stub `producer-execute` through complete, stalled, flooding, non-zero-exit,
 missing-tool and unparseable cases.
 
