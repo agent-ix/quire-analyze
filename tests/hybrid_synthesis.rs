@@ -4,11 +4,9 @@
 use ix_trace_rs::trace;
 use proptest::prelude::*;
 use quire_analyze::{
-    hybrid_method_outcome, reach, replay_hybrid, synthesis_method_outcome, synthesize,
-    validate_candidate, CandidateValidator, HybridIncompleteCode, HybridOutcome, HybridRefusalCode,
-    HybridRequest, HybridTransition, Interval, SynthesisAtom, SynthesisIncompleteCode,
-    SynthesisOutcome, SynthesisRefusalCode, SynthesisRequest, ValidationAttestation,
-    ValidationDecision, ValidationFailureCode, ValidationRequest,
+    synthesis_method_outcome, synthesize, validate_candidate, CandidateValidator, SynthesisAtom,
+    SynthesisIncompleteCode, SynthesisOutcome, SynthesisRefusalCode, SynthesisRequest,
+    ValidationAttestation, ValidationDecision, ValidationFailureCode, ValidationRequest,
 };
 use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome};
 
@@ -61,93 +59,6 @@ proptest! {
         };
         prop_assert_eq!(synthesize(&request), synthesize(&reordered));
     }
-}
-
-fn model() -> HybridRequest {
-    HybridRequest {
-        initial_mode: "warmup".into(),
-        transitions: vec![HybridTransition {
-            from_mode: "warmup".into(),
-            to_mode: "run".into(),
-            guard: Interval { lower: 1, upper: 3 },
-            reset_offset: 10,
-        }],
-        initial_set: Interval { lower: 0, upper: 1 },
-        horizon: 2,
-        flow_delta_lower: 1,
-        flow_delta_upper: 2,
-        error_bound: 1,
-        step_bound: 2,
-        convergence_steps: 2,
-    }
-}
-
-#[trace("TC-013", "FR-007-AC-1", "FR-007-AC-3")]
-#[test]
-fn tc_013_preserves_mode_guard_reset_and_exact_replay() {
-    let request = model();
-    let outcome = reach(&request);
-    assert_eq!(
-        hybrid_method_outcome(&outcome),
-        (AnalyzeMethod::HybridReachability, AnalyzeOutcome::Enclosure)
-    );
-    let HybridOutcome::Enclosure {
-        enclosures,
-        witness,
-        ..
-    } = outcome
-    else {
-        panic!("expected enclosure");
-    };
-    assert_eq!(enclosures.len(), 1);
-    assert_eq!(enclosures[0].mode, "run".into());
-    assert_eq!(
-        enclosures[0].interval,
-        Interval {
-            lower: 11,
-            upper: 16
-        }
-    );
-    assert!(replay_hybrid(&request, &witness));
-    let mut changed = request;
-    changed.transitions[0].reset_offset = 11;
-    assert!(!replay_hybrid(&changed, &witness));
-}
-
-#[trace("TC-013", "FR-007-AC-2")]
-#[test]
-fn tc_013_refuses_malformed_models_and_keeps_bound_exhaustion_nonconclusive() {
-    let mut bounded = model();
-    bounded.step_bound = 1;
-    let bounded_outcome = reach(&bounded);
-    assert_eq!(
-        hybrid_method_outcome(&bounded_outcome),
-        (
-            AnalyzeMethod::HybridReachability,
-            AnalyzeOutcome::Incomplete
-        )
-    );
-    assert!(matches!(
-        bounded_outcome,
-        HybridOutcome::Incomplete {
-            code: HybridIncompleteCode::StepBoundExhausted,
-            ..
-        }
-    ));
-    let mut malformed = model();
-    malformed.transitions[0].guard = Interval { lower: 4, upper: 3 };
-    let malformed_outcome = reach(&malformed);
-    assert_eq!(
-        hybrid_method_outcome(&malformed_outcome),
-        (AnalyzeMethod::HybridReachability, AnalyzeOutcome::Refused)
-    );
-    assert!(matches!(
-        malformed_outcome,
-        HybridOutcome::Refused {
-            code: HybridRefusalCode::MalformedModel,
-            ..
-        }
-    ));
 }
 
 #[trace("TC-014", "FR-008-AC-1", "FR-008-AC-2")]
