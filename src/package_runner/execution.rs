@@ -4,14 +4,10 @@
 use std::{
     fmt, fs,
     io::{self, Read, Write},
-    os::unix::{
-        fs::{DirBuilderExt, OpenOptionsExt},
-        process::ExitStatusExt,
-    },
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use quire_contract_model::{
@@ -23,30 +19,16 @@ use super::{
     EXIT_SATISFIED,
 };
 use crate::{
-    compare_solver_records, lower_analysis_request, parse_result_line, publish_report_new,
+    compare_solver_records, invoke_producer_execute, lower_analysis_request, publish_report_new,
     query_request, render_differential_report, render_differential_summary,
     solver_record_from_evidence, translate_analysis_claims, validate_differential_report,
     version_request, version_text, AdapterLimits, AnalysisStatus, DifferentialDisposition,
     ProducerExecutionRequest, ProducerExecutionResult, QueryBundle, SolverConfig, SolverEngine,
-    SolverRecord, MAX_PRODUCER_STREAM_BYTES, MAX_SOLVER_PATH_BYTES,
+    SolverRecord, MAX_SOLVER_PATH_BYTES, MAX_SOLVER_WALL_TIME_MS,
 };
 
 /// The staged query file inside the capability root.
 const QUERY_FILE: &str = "query.smt2";
-/// The most bytes of one `producer-execute` result line the runner reads.
-///
-/// A result line carries up to [`MAX_PRODUCER_STREAM_BYTES`] stdout bytes and as many stderr
-/// bytes, each rendered as a JSON number of at most three digits and a comma (four characters),
-/// plus an envelope of timing, state and host fields that stays far below one MiB.
-const MAX_RESULT_LINE_BYTES: u64 =
-    RESULT_STREAMS * MAX_PRODUCER_STREAM_BYTES as u64 * RESULT_CHARACTERS_PER_STREAM_BYTE
-        + RESULT_ENVELOPE_BYTES;
-/// The captured streams of one result: stdout and stderr.
-const RESULT_STREAMS: u64 = 2;
-/// The most JSON characters one captured byte takes: up to three digits and a comma.
-const RESULT_CHARACTERS_PER_STREAM_BYTE: u64 = 4;
-/// The room for everything in a result line other than the captured bytes.
-const RESULT_ENVELOPE_BYTES: u64 = 1024 * 1024;
 /// The most bytes of the package file the runner reads, one past the reader's ceiling so that
 /// an oversized document is refused by the reader as `Incomplete`.
 const MAX_PACKAGE_READ_BYTES: u64 = CheckedPackageReadLimits::bounded().bytes + 1;
@@ -299,49 +281,12 @@ fn invoke(
     request: &ProducerExecutionRequest,
 ) -> Result<ProducerExecutionResult, RunnerError> {
     let failure = |message: String| RunnerError::failure(format!("producer-execute: {message}"));
-    let mut child = Command::new(producer)
-        .args(["producer-execute", "--request", "-"])
-        .env_clear()
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|error| failure(format!("cannot start {}: {error}", producer.display())))?;
-    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return Err(failure("the process has no piped streams".to_owned()));
-    };
-    let written = stdin.write_all(&request.to_json_bytes());
-    drop(stdin);
-    let mut line = Vec::new();
-    let read = stdout
-        .take(MAX_RESULT_LINE_BYTES + 1)
-        .read_to_end(&mut line);
-    let oversized = line.len() as u64 > MAX_RESULT_LINE_BYTES;
-    if oversized {
-        // The process may still be writing; end it so that waiting cannot block.
-        let _ = child.kill();
-    }
-    let status = child
-        .wait()
-        .map_err(|error| failure(format!("cannot wait for the process: {error}")))?;
-    if oversized {
-        return Err(failure(format!(
-            "the result exceeds {MAX_RESULT_LINE_BYTES} bytes"
-        )));
-    }
-    if !status.success() {
-        return Err(failure(describe_status(status)));
-    }
-    written.map_err(|error| failure(format!("cannot write the request: {error}")))?;
-    read.map_err(|error| failure(format!("cannot read the result: {error}")))?;
-    parse_result_line(&line).map_err(|error| failure(error.to_string()))
-}
-
-fn describe_status(status: ExitStatus) -> String {
-    match (status.code(), status.signal()) {
-        (Some(code), _) => format!("exited with status {code}"),
-        (None, Some(signal)) => format!("ended by signal {signal}"),
-        (None, None) => "ended without a status".to_owned(),
-    }
+    invoke_producer_execute(
+        producer,
+        root,
+        &request.to_json_bytes(),
+        Duration::from_millis(MAX_SOLVER_WALL_TIME_MS + 5_000),
+        Duration::from_millis(1_000),
+    )
+    .map_err(|error| failure(error.to_string()))
 }
