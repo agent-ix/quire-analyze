@@ -1,7 +1,6 @@
 //! Requirement-tagged tests for quantifier lowering over integer ranges, enum domains and finite
 //! collections (FR-030, FR-031, FR-032, NFR-030, NFR-032, TC-030). Quantified-model replay is a
-//! separate requirement (FR-033); the cases that need a verdict on a bounded quantifier assert the
-//! model stays unverified.
+//! separate requirement (FR-033), which replays the original bound after lowering.
 
 #![cfg(target_os = "linux")]
 
@@ -15,14 +14,14 @@ use std::{
 };
 
 use quire_analyze::{
-    AdapterLimits, AnalysisFormula, AnalysisRequest, AnalysisStatus, CAPABILITY_CONTRACT,
+    classify_analysis, compare_solver_records, execute_solver, lower_analysis_request,
+    lower_boolean_statements, render_differential_report, validate_differential_report,
+    validate_report_document, AdapterLimits, AnalysisFormula, AnalysisRequest, AnalysisStatus,
     CancellationToken, CollectionKind, DifferentialDisposition, DomainElement, DomainQuantifier,
     ExplanationState, LoweringError, LoweringErrorCode, QuantifierDomain, QuantifierDomainClass,
     QuantifierEncoding, QuantifierEntryDomain, QuantifierReason, QueryBundle, RangeBound,
     RangeQuantifier, ReplayFailureReason, SolverConfig, SolverEngine, SolverOutcome,
-    StatementInput, UnboundedDomain, classify_analysis, compare_solver_records, execute_solver,
-    lower_analysis_request, lower_boolean_statements, render_differential_report,
-    validate_differential_report, validate_report_document,
+    StatementInput, UnboundedDomain, CAPABILITY_CONTRACT,
 };
 use quire_contract_model::{
     AnchorName, Clause, ClauseId, ClauseKind, ComparisonOperator, ContractPackage,
@@ -455,11 +454,10 @@ fn budget_boundary_is_exactly_1024_instances() {
         ])
     };
     let fits = pair(24);
-    assert!(
-        fits.quantifiers()
-            .iter()
-            .all(|entry| entry.encoding == QuantifierEncoding::Expanded)
-    );
+    assert!(fits
+        .quantifiers()
+        .iter()
+        .all(|entry| entry.encoding == QuantifierEncoding::Expanded));
     let over = pair(25);
     let bounded = over
         .quantifiers()
@@ -751,11 +749,9 @@ fn declared_bound_is_a_query_variable_with_a_finite_declared_range() {
 #[trace("TC-030")]
 #[test]
 fn capability_contract_lists_the_range_quantifier() {
-    assert!(
-        CAPABILITY_CONTRACT
-            .exact_constructs
-            .contains(&"range_quantifier")
-    );
+    assert!(CAPABILITY_CONTRACT
+        .exact_constructs
+        .contains(&"range_quantifier"));
 }
 
 /// FR-031-AC-6 (shared expansion): a free variable named like a quantifier's bound variable is
@@ -1025,11 +1021,9 @@ fn an_invalid_formula_is_refused_when_attached() {
         wide_declared,
     ] {
         let errors = base().with_formula(invalid).expect_err("refused");
-        assert!(
-            errors
-                .iter()
-                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
-        );
+        assert!(errors
+            .iter()
+            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
     }
 }
 
@@ -1186,17 +1180,72 @@ fn expanded_range_models_replay_against_every_instance() {
     let bad = format!("sat\n(model (define-fun {x} () Int 5))\n");
     let conclusion = classify_analysis(&query, &response_record(&query, &bad, SolverEngine::Z3));
     assert!(conclusion.verified_model().is_none());
-    assert_eq!(
-        conclusion.replay_failure().expect("failure").reason(),
-        ReplayFailureReason::AssertionFalse
-    );
+    let failure = conclusion.replay_failure().expect("failure");
+    assert_eq!(failure.reason(), ReplayFailureReason::AssertionFalse);
+    let quantifier = failure.quantifier().expect("quantifier failure details");
+    assert_eq!(quantifier.source(), "Q-any");
+    assert_eq!(quantifier.element(), None);
+    assert_eq!(quantifier.evaluated_count(), 3);
+    assert!(!quantifier.holds());
 }
 
-/// FR-032-AC-1 (controlled responses): a satisfiable bounded query is decided sat, but its
-/// model stays unverified until quantified replay exists.
-#[trace("TC-030", "FR-032-AC-8")]
+/// FR-033-AC-1 and AC-4: universal range replay visits every passing member, then stops on its
+/// first failing member and reports the original range identity.
+#[trace("TC-030", "FR-033-AC-1", "FR-033-AC-4")]
 #[test]
-fn bounded_quantifier_models_stay_unverified() {
+fn universal_range_replay_reports_first_failure_and_full_pass_count() {
+    let query = analysis_query(vec![statement(
+        "all",
+        literal_range("Q-all", QuantifierKind::ForAll, 1, 3, below_x()),
+    )]);
+    let x = symbol_of(&query, 0);
+    let passing = format!("sat\n(model (define-fun {x} () Int 3))\n");
+    let conclusion =
+        classify_analysis(&query, &response_record(&query, &passing, SolverEngine::Z3));
+    let result = conclusion
+        .verified_model()
+        .expect("all range elements hold")
+        .quantifier_results()
+        .first()
+        .expect("quantifier replay result");
+    assert_eq!(result.source(), "Q-all");
+    assert_eq!(result.evaluated_count(), 3);
+    assert!(result.holds());
+
+    let failing = format!("sat\n(model (define-fun {x} () Int 2))\n");
+    let conclusion =
+        classify_analysis(&query, &response_record(&query, &failing, SolverEngine::Z3));
+    let result = conclusion
+        .replay_failure()
+        .expect("universal range fails")
+        .quantifier()
+        .expect("quantifier failure details");
+    assert_eq!(result.source(), "Q-all");
+    assert_eq!(result.element(), Some("3"));
+    assert_eq!(result.evaluated_count(), 3);
+    assert!(!result.holds());
+
+    let cvc5_response = format!("sat\n(define-fun {x} () Int 2)\n");
+    let cvc5 = response_record(&query, &cvc5_response, SolverEngine::Cvc5);
+    let z3 = response_record(&query, &failing, SolverEngine::Z3);
+    let differential = compare_solver_records(&query, &z3, &cvc5);
+    let report = render_differential_report(&query, &differential).expect("report");
+    validate_differential_report(&report, &query, &differential).expect("valid report");
+    let value: serde_json::Value = serde_json::from_slice(&report).expect("json");
+    assert!(value["engines"][0]["diagnostic"]
+        .as_str()
+        .expect("replay diagnostic")
+        .contains("Q-all"));
+    assert!(value["engines"][0]["diagnostic"]
+        .as_str()
+        .expect("replay diagnostic")
+        .contains("element 3"));
+}
+
+/// FR-033-AC-6 and AC-9: a model satisfying a declared range replays and is verified.
+#[trace("TC-030", "FR-032-AC-8", "FR-033-AC-6", "FR-033-AC-9")]
+#[test]
+fn bounded_quantifier_models_replay_from_declared_bounds() {
     let query = analysis_query(vec![bounded_fixture()]);
     let symbols: Vec<_> = (0..query.variables().len())
         .map(|index| symbol_of(&query, index))
@@ -1212,22 +1261,107 @@ fn bounded_quantifier_models_stay_unverified() {
     let record = response_record(&query, &model, SolverEngine::Z3);
     let conclusion = classify_analysis(&query, &record);
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
-    let failure = conclusion.replay_failure().expect("failure");
-    assert_eq!(
-        failure.reason(),
-        ReplayFailureReason::QuantifierNotReplayable
-    );
-    assert_eq!(failure.reason().as_str(), "quantifier_not_replayable");
-    assert!(failure.subject().expect("assertion").starts_with("a_p"));
+    let model = conclusion.verified_model().expect("verified model");
+    let replay = model
+        .quantifier_results()
+        .first()
+        .expect("quantifier replay result");
+    assert_eq!(replay.source(), "Q-declared");
+    assert_eq!(replay.evaluated_count(), 8);
+    assert!(replay.holds());
 }
 
-/// FR-032-AC-8: a bounded quantifier whose body mentions an enum is also unverified for the
-/// quantifier alone, because datatype witnesses replay (FR-021) and only the quantifier does not.
-#[trace("TC-030", "FR-032-AC-8")]
+/// FR-033-AC-6: every unusable declared range bound is incomplete and names that bound symbol;
+/// an inverted interval is the empty domain.
+#[trace("TC-030", "FR-033-AC-6")]
 #[test]
-fn bounded_quantifier_over_an_enum_body_is_unverified_for_the_quantifier_alone() {
+fn declared_range_bound_defects_are_named_and_inverted_range_is_empty() {
+    let query = analysis_query(vec![bounded_fixture()]);
+    let x = query
+        .variables()
+        .iter()
+        .find(|variable| variable.origins.iter().any(|origin| origin.contains("|x|")))
+        .expect("x symbol")
+        .symbol
+        .clone();
+    let n = query
+        .variables()
+        .iter()
+        .find(|variable| variable.origins.iter().any(|origin| origin.contains("|n|")))
+        .expect("n symbol")
+        .symbol
+        .clone();
+    let cases = [
+        (
+            format!("sat\n(model (define-fun {x} () Int 7))\n"),
+            ReplayFailureReason::BoundUndecodable,
+        ),
+        (
+            format!(
+                "sat\n(model (define-fun {x} () Int 7) (define-fun {n} () Int 1.5))\n"
+            ),
+            ReplayFailureReason::BoundUndecodable,
+        ),
+        (
+            format!(
+                "sat\n(model (define-fun {x} () Int 7) (define-fun {n} () Int 7) (define-fun {n} () Int 7))\n"
+            ),
+            ReplayFailureReason::BoundUndecodable,
+        ),
+        (
+            format!("sat\n(model (define-fun {x} () Int 7) (define-fun {n} () Int 101))\n"),
+            ReplayFailureReason::BoundUndecodable,
+        ),
+    ];
+    for (response, reason) in cases {
+        let conclusion = classify_analysis(
+            &query,
+            &response_record(&query, &response, SolverEngine::Z3),
+        );
+        let failure = conclusion.replay_failure().expect("bound is undecodable");
+        assert_eq!(failure.reason(), reason, "{response}");
+        assert_eq!(failure.subject(), Some(n.as_str()), "{response}");
+    }
+
+    let empty = statement(
+        "empty",
+        quantifier(
+            "Q-empty",
+            QuantifierKind::ForAll,
+            "i",
+            RangeBound::Literal(10),
+            RangeBound::Declared(symbol("n")),
+            term(node(ExpressionKind::BooleanLiteral { value: false })),
+        ),
+    );
+    let query = analysis_query(vec![empty]);
+    let n = query
+        .variables()
+        .iter()
+        .find(|variable| variable.origins.iter().any(|origin| origin.contains("|n|")))
+        .expect("n symbol")
+        .symbol
+        .clone();
+    let response = format!("sat\n(model (define-fun {n} () Int 7))\n");
+    let conclusion = classify_analysis(
+        &query,
+        &response_record(&query, &response, SolverEngine::Z3),
+    );
+    let result = conclusion
+        .verified_model()
+        .expect("inverted range is empty and universal holds")
+        .quantifier_results()
+        .first()
+        .expect("empty range replay result");
+    assert_eq!(result.source(), "Q-empty");
+    assert_eq!(result.evaluated_count(), 0);
+    assert!(result.holds());
+}
+
+/// FR-033-AC-2 and AC-9: quantified integer replay composes with datatype witness replay.
+#[trace("TC-030", "FR-032-AC-8", "FR-033-AC-2", "FR-033-AC-9")]
+#[test]
+fn bounded_quantifier_over_an_enum_body_is_verified_on_first_match() {
     let enum_body = AnalysisFormula::And(
         Box::new(below_x()),
         Box::new(term(compare(
@@ -1270,11 +1404,156 @@ fn bounded_quantifier_over_an_enum_body_is_unverified_for_the_quantifier_alone()
     let model = format!("sat\n(model {})\n", definitions.join(" "));
     let conclusion = classify_analysis(&query, &response_record(&query, &model, SolverEngine::Z3));
     assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
-    assert!(conclusion.verified_model().is_none());
-    assert_eq!(
-        conclusion.replay_failure().expect("failure").reason(),
-        ReplayFailureReason::QuantifierNotReplayable
-    );
+    let verified = conclusion.verified_model().expect("verified model");
+    let replay = verified
+        .quantifier_results()
+        .first()
+        .expect("quantifier replay result");
+    assert_eq!(replay.source(), "Q-enum");
+    assert_eq!(replay.element(), Some("0"));
+    assert_eq!(replay.evaluated_count(), 1);
+    assert!(replay.holds());
+
+    let cvc5_model = format!("sat\n({})\n", definitions.join(" "));
+    let z3 = response_record(&query, &model, SolverEngine::Z3);
+    let cvc5 = response_record(&query, &cvc5_model, SolverEngine::Cvc5);
+    let differential = compare_solver_records(&query, &z3, &cvc5);
+    let report = render_differential_report(&query, &differential).expect("report");
+    validate_differential_report(&report, &query, &differential).expect("valid report");
+    let value: serde_json::Value = serde_json::from_slice(&report).expect("json");
+    let diagnostic = value["engines"][0]["diagnostic"]
+        .as_str()
+        .expect("quantifier replay report");
+    assert!(diagnostic.contains("Q-enum"));
+    assert!(diagnostic.contains("element 0"));
+}
+
+/// FR-033-AC-1, AC-2 and AC-4: finite Boolean and enum collections replay their original member
+/// order and expose the selected member with the source identity.
+#[trace("TC-030", "FR-033-AC-1", "FR-033-AC-2", "FR-033-AC-4")]
+#[test]
+fn finite_collection_quantifiers_report_the_selected_typed_member() {
+    let bool_domain = || QuantifierDomain::Collection {
+        kind: CollectionKind::Sequence,
+        elements: vec![DomainElement::Boolean(false), DomainElement::Boolean(true)],
+    };
+    let bool_body = || equals(var("flag"), local("b"));
+    for (kind, model_value, holds, element, count) in [
+        (QuantifierKind::ForAll, "false", false, Some("true"), 2),
+        (QuantifierKind::Exists, "false", true, Some("false"), 1),
+    ] {
+        let formula = domain_quantifier(
+            "Q-bool-collection",
+            kind,
+            "b",
+            ValueType::Boolean,
+            bool_domain(),
+            bool_body(),
+        );
+        let query = analysis_query(vec![statement("bool-collection", formula)]);
+        let flag = query
+            .variables()
+            .iter()
+            .find(|variable| {
+                variable
+                    .origins
+                    .iter()
+                    .any(|origin| origin.contains("|flag|"))
+            })
+            .expect("flag symbol")
+            .symbol
+            .clone();
+        let response = format!("sat\n(model (define-fun {flag} () Bool {model_value}))\n");
+        let conclusion = classify_analysis(
+            &query,
+            &response_record(&query, &response, SolverEngine::Z3),
+        );
+        if holds {
+            let result = conclusion
+                .verified_model()
+                .expect("quantified model verifies")
+                .quantifier_results()
+                .first()
+                .expect("quantifier replay result");
+            assert_eq!(result.source(), "Q-bool-collection");
+            assert_eq!(result.element(), element);
+            assert_eq!(result.evaluated_count(), count);
+        } else {
+            let result = conclusion
+                .replay_failure()
+                .expect("universal model fails replay")
+                .quantifier()
+                .expect("quantifier failure details");
+            assert_eq!(result.source(), "Q-bool-collection");
+            assert_eq!(result.element(), element);
+            assert_eq!(result.evaluated_count(), count);
+        }
+    }
+
+    let enum_domain = || QuantifierDomain::Enum(symbol("Role"));
+    let enum_body = || term(compare(ComparisonOperator::Equal, var("role"), local("r")));
+    for (kind, model_variant, holds, element, count) in [
+        (QuantifierKind::ForAll, "Guest", false, Some("Admin"), 2),
+        (QuantifierKind::Exists, "Admin", true, Some("Admin"), 2),
+    ] {
+        let formula = domain_quantifier(
+            "Q-enum-domain",
+            kind,
+            "r",
+            role_type(),
+            enum_domain(),
+            enum_body(),
+        );
+        let query = analysis_query(vec![statement("enum-domain", formula)]);
+        let role = query
+            .variables()
+            .iter()
+            .find(|variable| {
+                variable
+                    .origins
+                    .iter()
+                    .any(|origin| origin.contains("|role|"))
+            })
+            .expect("role symbol")
+            .symbol
+            .clone();
+        let sort = &query.enum_sorts()[0];
+        let constructor = sort
+            .constructors
+            .iter()
+            .find(|constructor| constructor.variant == model_variant)
+            .expect("enum constructor")
+            .symbol
+            .clone();
+        let response = format!(
+            "sat\n(model (define-fun {role} () {} {constructor}))\n",
+            sort.sort
+        );
+        let conclusion = classify_analysis(
+            &query,
+            &response_record(&query, &response, SolverEngine::Z3),
+        );
+        if holds {
+            let result = conclusion
+                .verified_model()
+                .expect("quantified model verifies")
+                .quantifier_results()
+                .first()
+                .expect("quantifier replay result");
+            assert_eq!(result.source(), "Q-enum-domain");
+            assert_eq!(result.element(), element);
+            assert_eq!(result.evaluated_count(), count);
+        } else {
+            let result = conclusion
+                .replay_failure()
+                .expect("universal model fails replay")
+                .quantifier()
+                .expect("quantifier failure details");
+            assert_eq!(result.source(), "Q-enum-domain");
+            assert_eq!(result.element(), element);
+            assert_eq!(result.evaluated_count(), count);
+        }
+    }
 }
 
 /// FR-032-AC-1: real solvers decide the expanded and bounded fixtures; run only where installed.
@@ -1333,15 +1612,20 @@ fn real_z3_cvc5_decide_range_fixtures() {
         validate_differential_report(&report, query, &run).expect("valid report");
     }
     assert_eq!(unsat[2].logic(), "UFDTLIA");
-    // Satisfiable bounded and expanded fixtures: both solvers answer sat.
+    // Satisfiable bounded and expanded fixtures: both solvers agree on sat, and both returned
+    // models verify only after replaying every original quantified assertion.
     let sat = [
         analysis_query(vec![bounded_fixture()]),
         analysis_query(expanded_fixture()),
     ];
     for query in &sat {
-        for config in [&z3, &cvc5] {
-            let record = execute_solver(query, config, &token);
-            assert_eq!(record.outcome(), SolverOutcome::Sat);
+        let run = quire_analyze::execute_differential(query, &z3, &cvc5, &token).expect("run");
+        assert_eq!(run.disposition(), DifferentialDisposition::Agreement);
+        assert_eq!(run.agreed_status(), Some(AnalysisStatus::Satisfied));
+        for conclusion in [run.z3(), run.cvc5()] {
+            assert_eq!(conclusion.solver().outcome(), SolverOutcome::Sat);
+            assert_eq!(conclusion.explanation(), ExplanationState::Verified);
+            assert!(conclusion.verified_model().is_some());
         }
     }
 }
@@ -1800,12 +2084,10 @@ fn collection_domains_lower_to_the_golden_query() {
     ];
     reversed.reverse();
     assert_eq!(lower(&reversed).query(), query.query());
-    assert!(
-        query
-            .quantifiers()
-            .iter()
-            .all(|entry| entry.domain() == QuantifierDomainClass::Collection)
-    );
+    assert!(query
+        .quantifiers()
+        .iter()
+        .all(|entry| entry.domain() == QuantifierDomainClass::Collection));
 }
 
 /// FR-031-AC-3: a domain fixture's query has no solver quantifier token and one body instance
@@ -2256,11 +2538,9 @@ fn empty_collection_domains_with_unencodable_sorts_are_refused_when_attached() {
         let errors = statement_without_formula()
             .with_formula(formula)
             .expect_err("unencodable empty domain refused");
-        assert!(
-            errors
-                .iter()
-                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
-        );
+        assert!(errors
+            .iter()
+            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
     }
 }
 
@@ -2323,11 +2603,9 @@ fn an_invalid_domain_formula_is_refused_when_attached() {
         let errors = statement_without_formula()
             .with_formula(formula)
             .expect_err("refused");
-        assert!(
-            errors
-                .iter()
-                .all(|error| error.code() == LoweringErrorCode::InvalidStatement)
-        );
+        assert!(errors
+            .iter()
+            .all(|error| error.code() == LoweringErrorCode::InvalidStatement));
     }
 }
 
@@ -2389,5 +2667,15 @@ fn real_z3_cvc5_decide_domain_fixtures() {
             DifferentialDisposition::Agreement,
             "{name}"
         );
+        if expected {
+            for conclusion in [run.z3(), run.cvc5()] {
+                assert_eq!(
+                    conclusion.explanation(),
+                    ExplanationState::Verified,
+                    "{name}"
+                );
+                assert!(conclusion.verified_model().is_some(), "{name}");
+            }
+        }
     }
 }

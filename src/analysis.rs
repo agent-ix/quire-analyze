@@ -9,7 +9,7 @@ use crate::{
     },
     smt::{
         lower_analysis_statements, AnalysisStatement, ReplayAssertion, ReplayAssignment,
-        ReplayFault, ANALYSIS_MODEL_PROFILE,
+        ReplayExpression, ReplayFault, ReplayQuantifierDomain, ANALYSIS_MODEL_PROFILE,
     },
     AnalysisDigest, AnalysisKind, AssertionMap, AssertionPolarity, BindingGroup, LoweringError,
     QueryBundle, SolverOutcome, SolverRecord, StatementInput, StatementRole,
@@ -459,11 +459,11 @@ pub enum ReplayFailureReason {
     SymbolUnknown,
     SortMismatch,
     SymbolMissing,
+    BoundUndecodable,
     ValueOutOfDomain,
     EvaluationOverflow,
+    ReplayLimitExceeded,
     AssertionFalse,
-    /// An assertion holds a bounded solver quantifier, whose replay is not implemented yet.
-    QuantifierNotReplayable,
 }
 
 impl ReplayFailureReason {
@@ -475,10 +475,69 @@ impl ReplayFailureReason {
             Self::SymbolUnknown => "symbol_unknown",
             Self::SortMismatch => "sort_mismatch",
             Self::SymbolMissing => "symbol_missing",
+            Self::BoundUndecodable => "bound_undecodable",
             Self::ValueOutOfDomain => "value_out_of_domain",
             Self::EvaluationOverflow => "evaluation_overflow",
+            Self::ReplayLimitExceeded => "replay_limit_exceeded",
             Self::AssertionFalse => "assertion_false",
-            Self::QuantifierNotReplayable => "quantifier_not_replayable",
+        }
+    }
+}
+
+/// The replay outcome for one original bounded quantifier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QuantifierReplayResult {
+    pub(crate) source: String,
+    pub(crate) element: Option<String>,
+    pub(crate) evaluated_count: u128,
+    pub(crate) holds: bool,
+}
+
+impl QuantifierReplayResult {
+    /// The source identity of the quantified assertion.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// The first failing universal element or first holding existential element, if one exists.
+    pub fn element(&self) -> Option<&str> {
+        self.element.as_deref()
+    }
+
+    /// Number of body instances evaluated for this quantifier.
+    pub const fn evaluated_count(&self) -> u128 {
+        self.evaluated_count
+    }
+
+    /// Whether the quantified assertion held.
+    pub const fn holds(&self) -> bool {
+        self.holds
+    }
+}
+
+impl fmt::Display for QuantifierReplayResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.holds, self.element()) {
+            (true, Some(element)) => write!(
+                formatter,
+                "quantifier {} first holds at element {element} after {} instance(s)",
+                self.source, self.evaluated_count,
+            ),
+            (true, None) => write!(
+                formatter,
+                "universal quantifier {} holds across {} instance(s)",
+                self.source, self.evaluated_count,
+            ),
+            (false, Some(element)) => write!(
+                formatter,
+                "universal quantifier {} first fails at element {element} after {} instance(s)",
+                self.source, self.evaluated_count,
+            ),
+            (false, None) => write!(
+                formatter,
+                "existential quantifier {} has no holding instance after {} instance(s)",
+                self.source, self.evaluated_count,
+            ),
         }
     }
 }
@@ -488,11 +547,21 @@ impl ReplayFailureReason {
 pub struct ReplayFailure {
     reason: ReplayFailureReason,
     subject: Option<String>,
+    quantifier: Option<QuantifierReplayResult>,
 }
 
 impl ReplayFailure {
     fn new(reason: ReplayFailureReason, subject: Option<String>) -> Self {
-        Self { reason, subject }
+        Self {
+            reason,
+            subject,
+            quantifier: None,
+        }
+    }
+
+    fn with_quantifier(mut self, quantifier: Option<QuantifierReplayResult>) -> Self {
+        self.quantifier = quantifier;
+        self
     }
 
     pub const fn reason(&self) -> ReplayFailureReason {
@@ -503,14 +572,23 @@ impl ReplayFailure {
     pub fn subject(&self) -> Option<&str> {
         self.subject.as_deref()
     }
+
+    /// The quantifier element that determined a failed quantified assertion, when applicable.
+    pub fn quantifier(&self) -> Option<&QuantifierReplayResult> {
+        self.quantifier.as_ref()
+    }
 }
 
 impl fmt::Display for ReplayFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.subject {
-            Some(subject) => write!(formatter, "{}: {subject}", self.reason.as_str()),
-            None => formatter.write_str(self.reason.as_str()),
+            Some(subject) => write!(formatter, "{}: {subject}", self.reason.as_str())?,
+            None => formatter.write_str(self.reason.as_str())?,
         }
+        if let Some(quantifier) = &self.quantifier {
+            write!(formatter, "; {quantifier}")?;
+        }
+        Ok(())
     }
 }
 
@@ -521,6 +599,7 @@ pub struct VerifiedBooleanModel {
     integer_values: Vec<MappedIntegerValue>,
     datatype_values: Vec<MappedDatatypeValue>,
     replayed_assertions: Vec<String>,
+    quantifier_results: Vec<QuantifierReplayResult>,
 }
 
 impl VerifiedBooleanModel {
@@ -544,6 +623,11 @@ impl VerifiedBooleanModel {
 
     pub fn replayed_assertions(&self) -> &[String] {
         &self.replayed_assertions
+    }
+
+    /// Typed replay results for each quantified assertion evaluated in the model.
+    pub fn quantifier_results(&self) -> &[QuantifierReplayResult] {
+        &self.quantifier_results
     }
 }
 
@@ -707,6 +791,7 @@ fn verify_model(
         .iter()
         .map(|assertion| assertion.name.as_str())
         .collect::<BTreeSet<_>>();
+    let bound_symbols = quantifier_bound_symbols(query.replay_assertions());
     let ranges = query.integer_ranges();
     let datatypes = DatatypeContext::new(query);
     // A symbol with no declared range or datatype shape is read as Bool.
@@ -726,6 +811,21 @@ fn verify_model(
         .collect::<BTreeMap<_, _>>();
     let parsed = parse_model(bytes, &declared, &assertion_aliases, &datatypes)?;
     if let Some(failure) = parsed.first_defect() {
+        if failure
+            .subject()
+            .is_some_and(|symbol| bound_symbols.contains(symbol))
+            && matches!(
+                failure.reason(),
+                ReplayFailureReason::ValueMalformed
+                    | ReplayFailureReason::SymbolRepeated
+                    | ReplayFailureReason::SortMismatch
+            )
+        {
+            return Err(ReplayFailure::new(
+                ReplayFailureReason::BoundUndecodable,
+                failure.subject.clone(),
+            ));
+        }
         return Err(failure);
     }
     if let Some(missing) = declared
@@ -733,7 +833,11 @@ fn verify_model(
         .find(|symbol| !parsed.defined.contains(**symbol))
     {
         return Err(ReplayFailure::new(
-            ReplayFailureReason::SymbolMissing,
+            if bound_symbols.contains(*missing) {
+                ReplayFailureReason::BoundUndecodable
+            } else {
+                ReplayFailureReason::SymbolMissing
+            },
             Some((*missing).to_owned()),
         ));
     }
@@ -761,11 +865,16 @@ fn verify_model(
     .min()
     {
         return Err(ReplayFailure::new(
-            ReplayFailureReason::ValueOutOfDomain,
+            if bound_symbols.contains(symbol) {
+                ReplayFailureReason::BoundUndecodable
+            } else {
+                ReplayFailureReason::ValueOutOfDomain
+            },
             Some(symbol.clone()),
         ));
     }
-    let replayed_assertions = replay_assertions(query.replay_assertions(), &parsed.assignment)?;
+    let (replayed_assertions, quantifier_results) =
+        replay_assertions(query.replay_assertions(), &parsed.assignment)?;
     let values = query
         .variables()
         .iter()
@@ -818,6 +927,7 @@ fn verify_model(
         integer_values,
         datatype_values,
         replayed_assertions,
+        quantifier_results,
     })
 }
 
@@ -826,12 +936,22 @@ fn verify_model(
 fn replay_assertions(
     assertions: &[ReplayAssertion],
     assignment: &ReplayAssignment,
-) -> Result<Vec<String>, ReplayFailure> {
+) -> Result<(Vec<String>, Vec<QuantifierReplayResult>), ReplayFailure> {
     let mut replayed = Vec::with_capacity(assertions.len());
+    let mut locals = BTreeMap::new();
+    let mut quantifier_instances = 0;
+    let mut all_quantifier_results = Vec::new();
     for assertion in assertions {
-        let reason = match assertion.expression.evaluate(assignment) {
+        let mut quantifier_results = Vec::new();
+        let reason = match assertion.expression.evaluate_with_context(
+            assignment,
+            &mut locals,
+            &mut quantifier_instances,
+            &mut quantifier_results,
+        ) {
             Ok(true) => {
                 replayed.push(assertion.name.clone());
+                all_quantifier_results.extend(quantifier_results);
                 continue;
             }
             Ok(false)
@@ -839,11 +959,64 @@ fn replay_assertions(
                 ReplayFailureReason::AssertionFalse
             }
             Err(ReplayFault::Overflow) => ReplayFailureReason::EvaluationOverflow,
-            Err(ReplayFault::QuantifierUnreplayed) => ReplayFailureReason::QuantifierNotReplayable,
+            Err(ReplayFault::QuantifierLimitExceeded) => ReplayFailureReason::ReplayLimitExceeded,
+            Err(ReplayFault::BoundUndecodable(symbol)) => {
+                return Err(ReplayFailure::new(
+                    ReplayFailureReason::BoundUndecodable,
+                    Some(symbol),
+                )
+                .with_quantifier(quantifier_results.pop()));
+            }
         };
-        return Err(ReplayFailure::new(reason, Some(assertion.name.clone())));
+        let quantifier = (reason == ReplayFailureReason::AssertionFalse)
+            .then(|| quantifier_results.pop())
+            .flatten();
+        return Err(
+            ReplayFailure::new(reason, Some(assertion.name.clone())).with_quantifier(quantifier)
+        );
     }
-    Ok(replayed)
+    Ok((replayed, all_quantifier_results))
+}
+
+fn quantifier_bound_symbols(assertions: &[ReplayAssertion]) -> BTreeSet<String> {
+    fn visit(expression: &ReplayExpression, symbols: &mut BTreeSet<String>) {
+        match expression {
+            ReplayExpression::Not(operand) => visit(operand, symbols),
+            ReplayExpression::And(left, right)
+            | ReplayExpression::Or(left, right)
+            | ReplayExpression::Implies(left, right)
+            | ReplayExpression::Equal(left, right)
+            | ReplayExpression::NotEqual(left, right) => {
+                visit(left, symbols);
+                visit(right, symbols);
+            }
+            ReplayExpression::Quantifier { domain, body, .. } => {
+                if let ReplayQuantifierDomain::Range {
+                    lower_symbol,
+                    upper_symbol,
+                    ..
+                } = domain
+                {
+                    symbols.extend(lower_symbol.iter().cloned());
+                    symbols.extend(upper_symbol.iter().cloned());
+                }
+                visit(body, symbols);
+            }
+            ReplayExpression::Literal(_)
+            | ReplayExpression::Variable(_)
+            | ReplayExpression::Datum(_)
+            | ReplayExpression::Integer(_)
+            | ReplayExpression::IsPresent(_)
+            | ReplayExpression::DatumEqual { .. }
+            | ReplayExpression::Compare { .. } => {}
+        }
+    }
+
+    let mut symbols = BTreeSet::new();
+    for assertion in assertions {
+        visit(&assertion.expression, &mut symbols);
+    }
+    symbols
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1199,6 +1372,7 @@ fn take_atom(tokens: &[ModelToken], cursor: &mut usize) -> Result<String, String
 
 #[cfg(test)]
 mod tests {
+    use crate::smt::ReplayQuantifierElement;
     use ix_trace_rs::trace;
     use quire_contract_model::ComparisonOperator;
 
@@ -1549,7 +1723,7 @@ mod tests {
         assert_eq!(failure.subject(), Some("a"));
         let verified =
             replay_assertions(&unchecked, &assigned(i128::MAX - 1)).expect("no overflow");
-        assert_eq!(verified, ["a"]);
+        assert_eq!(verified.0, ["a"]);
     }
 
     /// FR-011-AC-10: the first assertion in map order that is not true decides the reason.
@@ -1664,5 +1838,38 @@ mod tests {
                 AnalysisStatus::ToolError
             );
         }
+    }
+
+    #[trace("TC-030", "FR-033-AC-1")]
+    #[test]
+    fn quantified_failure_exposes_source_and_first_failing_element() {
+        let local = "bv_0".to_owned();
+        let assertions = [ReplayAssertion {
+            name: "assertion-1".to_owned(),
+            expression: ReplayExpression::Quantifier {
+                kind: quire_contract_model::QuantifierKind::ForAll,
+                local: local.clone(),
+                source: "source-Q".to_owned(),
+                domain: ReplayQuantifierDomain::Elements(vec![
+                    ReplayQuantifierElement {
+                        value: ReplayValue::Bool(false),
+                        label: "false".to_owned(),
+                    },
+                    ReplayQuantifierElement {
+                        value: ReplayValue::Bool(true),
+                        label: "true".to_owned(),
+                    },
+                ]),
+                body: Box::new(ReplayExpression::Variable(local)),
+            },
+        }];
+        let failure = replay_assertions(&assertions, &ReplayAssignment::default())
+            .expect_err("the first universal instance is false");
+        assert_eq!(failure.reason(), ReplayFailureReason::AssertionFalse);
+        let quantifier = failure.quantifier().expect("quantified failure details");
+        assert_eq!(quantifier.source(), "source-Q");
+        assert_eq!(quantifier.element(), Some("false"));
+        assert_eq!(quantifier.evaluated_count(), 1);
+        assert!(!quantifier.holds());
     }
 }
