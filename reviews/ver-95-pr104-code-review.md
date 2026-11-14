@@ -217,6 +217,8 @@ NFR-001 and the literal -v000000 PHAVer request argument are unchanged. The shar
 | FND-005 | fixed | The new file now has the repository SPDX and copyright header. |
 | FND-001 | fixed | Round 2: outer framing and empty disjuncts fail closed; explicit-empty or omitted target output requires the request empty_targets authorization. Public-adapter tests cover unauthorized false and leading, trailing and doubled disjunction separators. |
 | FND-002 | still-open | Still open and not waived. The fix changes only src/hybrid_tool.rs; src/producer_evidence.rs and the shared supervisor/cleanup path are unchanged from disposition pass 1. Nested tool process groups can therefore survive timeout and the I/O reader can remain detached. Per the explicit review brief, the required cleanup belongs in upstream Engineering Assurance; review of specification PR #250 is not a code fix, merge, or consumed implementation. Keep PR #104 blocked until the upstream implementation is delivered and consumed and the nested-group/worker-cleanup regression is verified. |
+| FND-002 | fixed | Round 3: fixed for the supported producer-execute path. Merged upstream Engineering Assurance PR #251 (b77f902) supplies observed-descendant cleanup, direct-child reaping and completed reader joins. The installed 0.8.2 consumer returns its typed timeout result before the bounded 6,500 ms outer deadline; the PHAVer request remains exactly 5,000 ms. Quire adds no nested-process cleanup workaround. Independent focused hybrid tests pass, including both real F10 variants with no enclosure and the ordinary stalled-executor fallback. |
+
 
 ### Disposition evidence
 
@@ -293,4 +295,30 @@ dispositions:
     fix, merge, or consumed implementation. Keep PR #104 blocked until the upstream
     implementation is delivered and consumed and the nested-group/worker-cleanup regression
     is verified.'
+```
+
+
+## Disposition pass 3
+
+Reviewed frozen head `9ea1b599a13bdf0bf0910f6e40e779d129cbe025`. Latest outcome: PASS for the reviewed code findings; FND-002 is fixed. FND-001 remains fixed from round 2, with public-adapter malformed/empty-token tests passing. FND-003 through FND-005 remain fixed. No new finding was identified. Original findings and earlier dispositions are preserved.
+
+The only production delta since round 2 changes the outer supervisor deadline to 6,500 ms: 5,000 ms PHAVer execution + 1,000 ms upstream cleanup + 500 ms startup margin. The producer request continues to use exactly 5,000 ms, absolute installed executable selection, literal `-v000000`, the model artifact binding, and producer-execute only. Its stream/input limits and NFR-001 are unchanged. The shared invocation seam and its existing 500 ms outer fallback cleanup are unchanged; no process-tree enumeration, nested-group termination, or additional cleanup implementation was added to Quire. The startup-margin comment records the coder's 20-launch maximum of 31.6 ms; this microbenchmark was not independently repeated.
+
+Upstream consumption evidence: GitHub reports Engineering Assurance PR #251 merged as `b77f902adedec78056fd9dac2c1bd47624d4631e`. Its production supervisor and fixture/test files are byte-equivalent to the independently reviewed `2a99ea66ae6b6dba27afb9259464b269926d2562` source. That separate review ran all three TC-125 integration tests successfully, including the observed same-session nested-group/held-pipe regression with no surviving observed child and both readers joined within the post-deadline bound. The configured installed Engineering Assurance CLI reports version 0.8.2; the retained installation log reports a successful replacement from the upstream consumer build. That temporary build worktree has since been removed, so its historical checkout could not be reinspected. This does not claim stronger adversarial or unobserved-descendant containment, nor a cryptographic installed-binary/source attestation.
+
+Independent focused verification used the required locked-build wrapper, assigned worktree target, `RUSTUP_TOOLCHAIN=1.98.1`, and `CARGO_PROFILE_DEV_DEBUG=0`: `cargo test --lib hybrid_tool::tests -- --include-ignored --test-threads=1 --nocapture`. test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 36.61s The real same-target F10 returned in 5132 ms and the distinct-target F10 in 5462 ms, both strictly before the 6,500 ms outer deadline and both exactly `Incomplete/tool_timeout` without an enclosure. Since the outer fallback cannot return before that deadline, these results exercise the upstream typed timeout path. The passing request-recording test independently asserts one request, the exact arguments, artifact role, and execution/resource budgets. The same focused run covers the fit census, oracle empty-state case, public malformed responses, tool-none behavior, schema validation and ordinary stalled-executor cleanup. A post-run process census found no Engineering Assurance or PHAVer processes remaining. No aggregate gate or branch edit was performed.
+
+Trace verification with `quire trace --scope . --id FR-042 --prefix --format json` resolves the request-shape and both F10 tests to FR-042-AC-5/AC-7. It emits existing conditional-symbol collision diagnostics in report/solver code and an installed-module unused-import diagnostic; these were retained, not suppressed. No trace failure affects these bindings. No matrix-derived false missing-tag inference was used.
+
+Artifact custody: before this pass, both committed SR copies were byte-identical to the scratchpad versions, including prior dispositions. Only SR-17079 needs this round's new disposition row and comment. SR-17080's FND-001 remains fixed and FND-002 through FND-012 retain their explicit accepted-no-change outcomes for unrelated baseline trace gaps. No new evidence reopens them. Its artifact is unchanged and is revalidated alongside this one. The updated SR-17079 must be copied into the branch by the authorized coding lane; the reviewer made no branch edits.
+
+### Disposition pass 3 evidence
+
+```yaml
+dispositions:
+- fnd: FND-002
+  outcome: fixed
+  after_excerpt: "        Duration::from_millis(\n            MAX_SOLVER_WALL_TIME_MS\n\
+    \                + PRODUCER_EXECUTE_CLEANUP_MS\n                + PRODUCER_EXECUTE_STARTUP_MARGIN_MS,\n\
+    \        ),\n        Duration::from_millis(PRODUCER_EXECUTE_FALLBACK_CLEANUP_MS),"
 ```
