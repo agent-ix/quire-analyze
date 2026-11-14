@@ -94,9 +94,10 @@ struct RequestProducer {
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct LiteralArgument {
-    kind: &'static str,
-    value: &'static str,
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RequestArgument {
+    Literal { value: &'static str },
+    InputArtifact { role: String },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -166,7 +167,7 @@ pub struct ProducerExecutionRequest {
     caller: Contract,
     procedure: &'static str,
     capability_root: String,
-    arguments: Vec<LiteralArgument>,
+    arguments: Vec<RequestArgument>,
     environment: BTreeMap<String, String>,
     inputs: Vec<RequestInput>,
     stdin: RequestStdin,
@@ -269,10 +270,7 @@ fn build_request(
         capability_root,
         arguments: arguments
             .iter()
-            .map(|value| LiteralArgument {
-                kind: "literal",
-                value,
-            })
+            .map(|value| RequestArgument::Literal { value })
             .collect(),
         environment: BTreeMap::new(),
         inputs,
@@ -287,6 +285,88 @@ fn build_request(
         },
         cancellation: Cancellation { kind: "disabled" },
         budget: budget(config),
+        response: RequestResponse {
+            protocol: Contract {
+                kind: RESPONSE_PROTOCOL_KIND,
+                version: "1",
+            },
+            adapter: Contract {
+                kind: RESPONSE_ADAPTER_KIND,
+                version: "1",
+            },
+            exit_codes: ExitCodes { kind: "any" },
+        },
+    })
+}
+
+/// Build a bounded external-tool invocation with one staged input artifact.
+pub fn external_tool_request(
+    executable: &Path,
+    capability_root: &Path,
+    input_file: &Path,
+    environment: BTreeMap<String, String>,
+    timeout_millis: u64,
+    max_input_bytes: u64,
+    max_stdout_bytes: u64,
+    max_stderr_bytes: u64,
+) -> Result<ProducerExecutionRequest, EvidenceError> {
+    let executable = path_text(executable, "tool executable")?.to_owned();
+    let capability_root = path_text(capability_root, "capability root")?.to_owned();
+    let input_file = relative_path_text(input_file, "staged model")?.to_owned();
+    if timeout_millis == 0 || max_input_bytes == 0 || max_stdout_bytes == 0 || max_stderr_bytes == 0
+    {
+        return Err(EvidenceError::new(
+            EvidenceErrorKind::Request,
+            "tool request limits must be positive",
+        ));
+    }
+    Ok(ProducerExecutionRequest {
+        protocol: PRODUCER_REQUEST_PROTOCOL,
+        producer: RequestProducer {
+            name: "phaver",
+            version: UNPROBED_VERSION.to_owned(),
+            executable,
+        },
+        caller: Contract {
+            kind: CALLER_KIND,
+            version: "1",
+        },
+        procedure: "direct",
+        capability_root,
+        arguments: vec![
+            RequestArgument::Literal { value: "-v000000" },
+            RequestArgument::InputArtifact {
+                role: "model".to_owned(),
+            },
+        ],
+        environment,
+        inputs: vec![RequestInput {
+            role: "model",
+            path: input_file,
+        }],
+        stdin: RequestStdin {
+            kind: "null",
+            role: None,
+        },
+        outputs: Vec::new(),
+        containment: Containment {
+            profile: "process-group-v1",
+            contract: Contract {
+                kind: CONTAINMENT_KIND,
+                version: "v1",
+            },
+        },
+        cancellation: Cancellation { kind: "disabled" },
+        budget: Budget {
+            timeout_millis,
+            max_stdout_bytes: max_stdout_bytes.min(MAX_PRODUCER_STREAM_BYTES as u64),
+            max_stderr_bytes: max_stderr_bytes.min(MAX_PRODUCER_STREAM_BYTES as u64),
+            max_input_bytes,
+            max_output_artifacts: 0,
+            max_output_bytes: 0,
+            max_descendants: MAX_DESCENDANTS,
+            max_concurrency: MAX_CONCURRENCY,
+        },
         response: RequestResponse {
             protocol: Contract {
                 kind: RESPONSE_PROTOCOL_KIND,
@@ -513,6 +593,60 @@ impl ProducerExecutionResult {
     pub const fn is_completed(&self) -> bool {
         matches!(self.state, State::Completed { .. })
     }
+
+    /// Return the producer's terminal category for a delegated non-solver tool.
+    pub const fn external_state(&self) -> ExternalExecutionState {
+        match self.state {
+            State::Unavailable {} => ExternalExecutionState::Unavailable,
+            State::TimedOut {} => ExternalExecutionState::TimedOut,
+            State::Failed {
+                reason: FailureReason::StdoutTooLarge {} | FailureReason::StderrTooLarge {},
+            } => ExternalExecutionState::OutputLimit,
+            State::Failed {
+                reason: FailureReason::ExitCode { .. } | FailureReason::Signal { .. },
+            } => ExternalExecutionState::Failed,
+            State::Completed { observation } if observation.exit_code == 0 => {
+                ExternalExecutionState::Completed
+            }
+            State::Completed { .. } => ExternalExecutionState::Failed,
+            State::MalformedResponse {}
+            | State::ContainmentFailure {}
+            | State::Cancelled {}
+            | State::Refused { .. }
+            | State::Failed { .. } => ExternalExecutionState::Other,
+        }
+    }
+
+    /// Captured stdout when process evidence is present.
+    pub fn external_stdout(&self) -> Option<&[u8]> {
+        self.process
+            .as_ref()
+            .map(|process| process.stdout.bytes.as_slice())
+    }
+
+    /// Whether either captured stream was truncated.
+    pub fn external_output_truncated(&self) -> bool {
+        self.process
+            .as_ref()
+            .is_some_and(|process| process.stdout.truncated || process.stderr.truncated)
+    }
+}
+
+/// Closed terminal classes used by external-tool adapters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalExecutionState {
+    /// The process completed with exit code zero.
+    Completed,
+    /// The configured executable could not be found.
+    Unavailable,
+    /// The process exceeded its time budget.
+    TimedOut,
+    /// Captured stdout or stderr exceeded its declared budget.
+    OutputLimit,
+    /// The process completed unsuccessfully.
+    Failed,
+    /// The producer returned a state that the adapter cannot interpret.
+    Other,
 }
 
 /// The engine outcome of a result state that is not `completed`, by the FR-009 table.
