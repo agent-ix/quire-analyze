@@ -1,10 +1,8 @@
 ---
 id: FR-041
-title: "Review the hybrid reachability module and record one disposition"
+title: Review the hybrid reachability module and record one disposition
 type: FR
 relationships:
-  - target: ix://agent-ix/quire-analyze/FR-040
-    type: depends_on
   - target: ix://agent-ix/quire-analyze/StR-001
     type: implements
 ---
@@ -12,25 +10,28 @@ relationships:
 
 ## Description
 
-When a ticket proposes work that builds on the in-house hybrid reachability module, the maintainers SHALL review the module against [FR-040](./FR-040-hybrid-enclosure-soundness.md).
+When a ticket proposes work that builds on the in-house hybrid reachability module, the maintainers SHALL compare its reachable-state enclosures with an independent finite-execution enumeration and record each adversarial request and outcome.
 
-The review SHALL record exactly one disposition: keep and harden the module, or remove it and delegate hybrid reachability to an established external reachability tool run through `producer-execute`. When no established tool supports the model class, delegate-and-remove has the tool "none": the module is removed and every hybrid request ends `Refused`.
+The review SHALL record exactly one disposition: keep and harden the module, or remove it and delegate hybrid reachability to an established external reachability tool through producer-execute.
 
-quire-analyze runs external solvers and supplies no prover of its own, so the review decides whether an in-house reachability algorithm belongs here at all.
+When no established external tool supports the model class, the maintainers SHALL record the tool none.
+
+When the recorded tool is none, the analyzer SHALL end every hybrid request as Refused with zero external invocations.
+
+The analyzer SHALL contain no fallback between the two paths.
 
 ## Acceptance Criteria
 
 | ID | Criteria | Verification |
 | --- | --- | --- |
-| FR-041-AC-1 | The review holds an adversarial test set with at least one test for each of FR-040-AC-1 through FR-040-AC-12, and each test names the FR-040 criterion it attacks. The set includes tests for rounding and representability at a guard boundary, overlapping guards, a reset that leaves an invariant, horizon exhaustion and a malformed mode. | Inspection |
-| FR-041-AC-2 | Every test in the set that observes a violated FR-040 criterion is recorded as a finding with the test's name, the criterion and a minimal request that reproduces it. The finding is marked unsound when the result omits a reachable state or reports an unreached horizon as reached, and marked precision when the result contains only extra states. | Inspection |
-| FR-041-AC-3 | The review lists the callers of `reach` and `replay_hybrid` and each requirement or planned consumer that depends on their output. | Inspection |
-| FR-041-AC-4 | The recorded disposition is exactly one of keep-and-harden or delegate-and-remove. The reason is stated against four criteria: the number and severity of unsound findings, whether each unsound finding has a bounded fix, whether the model class in use is one an established external tool supports, and the cost of maintaining an algorithm that no external engine cross-checks. The rule applies in order. (1) An unsound finding with a bounded fix, where an established external tool supports the model class, selects delegate-and-remove with that tool. (2) An unsound finding with no bounded fix selects delegate-and-remove with that tool when one supports the model class, and with the tool "none" otherwise. (3) When every unsound finding has a bounded fix and no established tool supports the model class, or when there is no unsound finding and no established tool supports the model class, the disposition is keep-and-harden, and the TC-040 independent enumeration of concrete executions is the differential check. (4) When there is no unsound finding and an established tool supports the model class, the disposition is keep-and-harden only if the review adds a differential test that checks the module against that tool on the enumerated models, and is delegate-and-remove otherwise. | Inspection |
-| FR-041-AC-5 | The disposition names no fallback between the two paths. A review that records both as alternatives, or records a conditional switch from one to the other, is incomplete. | Inspection |
-| FR-041-AC-6 | The disposition states whether the engine-ownership ruling for hybrid models, IR-1469, is recorded when the disposition is made. When it is recorded, the disposition agrees with it or states why it does not. When it is not recorded, the disposition proceeds without waiting for it and the application ticket re-checks agreement under FR-042-AC-6. | Inspection |
-| FR-041-AC-7 | The findings and the disposition are posted on the tracking ticket for the review before the disposition is applied. | Inspection |
+| FR-041-AC-1 | The review records a named adversarial set covering flow and reset overflow, outward widening, closed and overlapping guards, non-forced source-mode persistence, multiple transitions into one mode, invariant handling, horizon coverage and exhaustion, malformed inputs, and typed outcomes. Each case records its minimal request and the reachable states from independent finite-execution enumeration. | Inspection |
+| FR-041-AC-2 | Every case that omits an enumerated reachable state or reports an unreached horizon as reached is recorded as an unsound finding with its case name and minimal request. A case that adds states without omitting reachable states is recorded as a precision finding. | Inspection |
+| FR-041-AC-3 | The review lists the callers of reachability and replay operations and each requirement or planned consumer that depends on their output. | Inspection |
+| FR-041-AC-4 | The recorded disposition is exactly one of keep-and-harden or delegate-and-remove. The reason is stated against the number and severity of unsound findings, whether each unsound finding has a bounded fix, whether an established external tool supports the model class, and the cost of maintaining an algorithm that no external engine cross-checks. An unsound finding with a bounded fix and a supported model class selects delegate-and-remove with that tool. An unsound finding without a bounded fix selects delegate-and-remove with a supporting tool, or with the tool none otherwise. When no tool supports a model class and every unsound finding has a bounded fix, or no unsound finding exists, the disposition is keep-and-harden. When a tool supports a model class and no unsound finding exists, keep-and-harden requires a differential check against that tool using the recorded finite-execution cases; otherwise the disposition is delegate-and-remove. | Inspection |
+| FR-041-AC-5 | The disposition names no fallback between the two paths. A review that records both as alternatives or records a conditional switch from one to the other is incomplete. | Inspection |
+| FR-041-AC-6 | The disposition states whether the engine-ownership ruling for hybrid models, IR-1469, is recorded when the disposition is made. When it is recorded, the disposition agrees with it or states why it does not. When it is not recorded, the disposition proceeds without waiting for it and the application ticket re-checks agreement under [FR-042](./FR-042-hybrid-reachability-disposition.md)-AC-6. | Inspection |
+| FR-041-AC-7 | The findings and disposition are posted on the tracking ticket before the disposition is applied. | Inspection |
 
 ## Dependencies
 
-- [FR-040](./FR-040-hybrid-enclosure-soundness.md) supplies the obligations the review judges against.
-- [FR-007](./FR-007-sound-hybrid-reachability.md) is the requirement removed if the disposition is delegate-and-remove.
+- [FR-042](./FR-042-hybrid-reachability-disposition.md) governs application of the recorded disposition.

@@ -32,8 +32,10 @@ type: TestMatrix
 | FR-005 | FR-005-AC-3 | TC-006 | 🚧 Differential states and real SAT/UNSAT complete; retained full corpus #24 open |
 | FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
 | FR-005 | FR-005-AC-6 | TC-007 | ✅ v2 schema, validator, and rejection tests; v1 rejected |
-| FR-007 | FR-007-AC-1, FR-007-AC-2, FR-007-AC-3 | TC-013 | ✅ Bounded hybrid reachability provider complete |
 | FR-008 | FR-008-AC-1, FR-008-AC-2, FR-008-AC-3 | TC-014 | ✅ Bounded canonical synthesis provider complete |
+| FR-042 | FR-042-AC-1 | Selected path is delegate-and-remove | ✅ Keep-and-harden branch not selected |
+| FR-042 | FR-042-AC-2, FR-042-AC-5, FR-042-AC-6, FR-042-AC-7 | Inspection | 🚧 Removal, no fallback, IR-1469 and license evidence required |
+| FR-042 | FR-042-AC-3, FR-042-AC-4 | TC-041 | 🚧 Delegated hybrid reachability disposition |
 
 ## Nonfunctional and Stakeholder Coverage
 
@@ -61,16 +63,16 @@ type: TestMatrix
 | TC-008 | Library/CLI parity and atomic output | Integration | P0 | FR-005 | 🚧 Fault boundaries, concurrency, durability, and crash states covered; #24 and crash-residue signoff open |
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
-| TC-013 | Sound bounded hybrid reachability | Analysis | P0 | FR-007 | ✅ Complete |
 | TC-014 | Bounded canonical synthesis | Property | P0 | FR-008 | ✅ Complete |
+| TC-041 | Delegated hybrid reachability | Analysis | P0 | FR-042, NFR-001 | 🚧 PHAVer fit and adapter evidence required |
 
 TC-001 completes the Boolean-v1 analysis algebra and independent finite truth table. TC-002 through
 TC-004 and TC-006 through TC-008 remain planned as complete campaigns; issue #4 closes their exact
 request, mapping, replay, and incomplete-state slices without claiming real-engine differential or
 evidence publication. TC-005 completes the Linux adapter v1 boundary. TC-009 is completed architecture
-research. TC-010 completes only Boolean-v1 lowering. TC-013 verifies conservative
-hybrid enclosures, exact replay, and typed non-conclusions. TC-014 verifies canonical bounded synthesis
-and the separation of candidates from independent validation. The placeholder crate tests count only as
+research. TC-010 completes only Boolean-v1 lowering. TC-014 verifies canonical bounded synthesis
+and the separation of candidates from independent validation. TC-041 verifies the selected external
+hybrid path against finite execution enumeration and the producer-execute failure boundary. The placeholder crate tests count only as
 scaffold health and satisfy no row. A row may become complete only when its entire acceptance scope
 runs; ignored, skipped, unavailable, or platform-deferred cases remain visible and not complete.
 

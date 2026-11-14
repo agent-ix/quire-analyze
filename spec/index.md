@@ -51,13 +51,15 @@ versioned dependencies and a named human retains release authority.
 
 ## Requirements Architecture
 
-StR-001 is refined by FR-001 through FR-005, FR-007 through FR-012 and FR-030 through FR-034 and FR-040 through FR-042 and constrained by NFR-001 through NFR-004, NFR-030 through NFR-032 and NFR-040.
+StR-001 is refined by FR-001 through FR-005, FR-008 through FR-012, FR-030 through FR-034 and FR-041 through FR-042 and constrained by NFR-001 through NFR-004 and NFR-030 through NFR-032.
 `interface_001` defines the request, response, outcome, diagnostic, and evidence boundary. TC-001
-through TC-010, TC-013 through TC-018, TC-030 and TC-040 form the verification matrix. FR-007 and FR-008 own the bounded hybrid
-reachability and canonical synthesis providers. FR-010 through FR-012 and NFR-004 own linear integer
-arithmetic: lowering and solver agreement, witness replay, and package claim translation. FR-030 through FR-034 and NFR-030 through NFR-032 own bounded quantifiers: admitted domains, lowering, replay, package translation and instance bounds. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the
-assurance boundary. FR-040 through FR-042, NFR-040 and TC-040 specify the hybrid reachability review. PLAN-001 maps this foundation and native issues #6, #7, #3, #4, #5, and #33.
-
+through TC-010, TC-014 through TC-018, TC-030 and TC-041 form the verification matrix. FR-008 owns
+bounded canonical synthesis. FR-041 and FR-042 with TC-041 specify the hybrid reachability review
+and disposition. FR-010 through FR-012 and NFR-004 own linear integer arithmetic: lowering and solver
+agreement, witness replay, and package claim translation. FR-030 through FR-034 and NFR-030 through
+NFR-032 own bounded quantifiers: admitted domains, lowering, replay, package translation and instance
+bounds. AP-001, AD-001, CAC-001, MP-001, and AA-001 define the assurance boundary. PLAN-001 maps this
+foundation and native issues #6, #7, #3, #4, #5, and #33.
 ## References
 
 - [Program umbrella](https://github.com/agent-ix/quire-contract-ir/issues/1).

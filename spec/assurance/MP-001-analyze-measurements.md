@@ -50,7 +50,7 @@ this plan does not claim that procedure or any executed observation exists.
 The population includes every public IR construct and boundary, consistency and implication kind,
 exact and unsupported capability, solver/protocol/failure state, output artifact, mutation class,
 and declared supported platform. At this definition, `spec/test/` declares 12 TC procedures:
-TC-001 through TC-010, TC-013, and TC-014. Each repetition must record one outcome for each
+TC-001 through TC-010, TC-014, and TC-041. Each repetition must record one outcome for each
 of those 12 procedures, including unavailable or inconclusive outcomes. The collection must
 state `population.examined` of at least 12 and `population.repetitions` of at least 3; a
 shorter collection is refused before the zero-count rule is evaluated. The human gate
