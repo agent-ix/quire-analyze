@@ -1,20 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Agent-IX
+
 //! PHAVer adapter for bounded hybrid reachability (FR-042).
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
 };
 
 use quire_analyze_method_contract::{AnalyzeMethod, AnalyzeOutcome};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    external_tool_request, parse_result_line, ExternalExecutionState, MAX_SOLVER_STDERR_BYTES,
-    MAX_SOLVER_STDIN_BYTES, MAX_SOLVER_STDOUT_BYTES, MAX_SOLVER_WALL_TIME_MS,
+    external_tool_request, invoke_producer_execute, EvidenceErrorKind, ExternalExecutionState,
+    MAX_SOLVER_STDERR_BYTES, MAX_SOLVER_STDIN_BYTES, MAX_SOLVER_STDOUT_BYTES,
+    MAX_SOLVER_WALL_TIME_MS,
 };
 
 const RESULT_SCHEMA: &str = "quire-analyze.hybrid-tool-result/v1";
@@ -200,18 +203,30 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
             }
         }
     };
-    let result = match invoke(
+    let result = match invoke_producer_execute(
         &config.producer_execute,
         root.path(),
         &request_doc.to_json_bytes(),
+        Duration::from_millis(MAX_SOLVER_WALL_TIME_MS + 500),
+        Duration::from_millis(500),
     ) {
         Ok(result) => result,
-        Err(InvokeError::Unavailable) => {
+        Err(error) if error.kind() == EvidenceErrorKind::ExecutorUnavailable => {
             return HybridOutcome::Refused {
                 reason: "tool_unavailable",
             }
         }
-        Err(InvokeError::Other) => {
+        Err(error) if error.kind() == EvidenceErrorKind::ExecutorTimedOut => {
+            return HybridOutcome::Incomplete {
+                reason: "tool_timeout",
+            }
+        }
+        Err(error) if error.kind() == EvidenceErrorKind::ExecutorOutputLimit => {
+            return HybridOutcome::Incomplete {
+                reason: "tool_output_limit_exceeded",
+            }
+        }
+        Err(_) => {
             return HybridOutcome::Refused {
                 reason: "result_schema_invalid",
             }
@@ -339,55 +354,61 @@ fn parse_phaver_output(
     stdout: &[u8],
     request: &HybridRequest,
 ) -> Result<Vec<Vec<HybridEnclosure>>, ParseError> {
-    let text = std::str::from_utf8(stdout).map_err(|_| ParseError::Schema)?;
+    let text = std::str::from_utf8(stdout)
+        .map_err(|_| ParseError::Schema)?
+        .trim();
+    let body = text
+        .strip_prefix("R = A.{")
+        .and_then(|text| text.strip_suffix("};"))
+        .ok_or(ParseError::Schema)?;
+    if body.contains("};") {
+        return Err(ParseError::Schema);
+    }
     let modes = requested_modes(request);
     let mut found = BTreeMap::<String, Vec<((i128, i128), (i128, i128))>>::new();
-    let mut cursor = 0;
-    while let Some(relative) = text[cursor..].find("& ") {
-        let amp = cursor + relative;
-        let prefix = &text[..amp];
-        let marker = prefix.rfind(['{', ',']).ok_or(ParseError::Schema)?;
-        let mode = prefix[marker + 1..].trim();
+    for result_mode in body.split(',') {
+        let result_mode = result_mode.trim();
+        if result_mode.is_empty() {
+            return Err(ParseError::Schema);
+        }
+        let (mode, constraints) = result_mode.split_once('&').ok_or(ParseError::Schema)?;
+        let mode = mode.trim();
         if !modes.contains(mode) {
             return Err(ParseError::Schema);
         }
-        let end = text[amp + 2..]
-            .find([',', '}'])
-            .map(|offset| amp + 2 + offset)
-            .unwrap_or(text.len());
-        let body = &text[amp + 2..end];
+        let constraints = constraints.trim();
+        let constraints = match (constraints.starts_with('('), constraints.ends_with(')')) {
+            (true, true) if constraints.len() >= 2 => &constraints[1..constraints.len() - 1],
+            (false, false) => constraints,
+            _ => return Err(ParseError::Schema),
+        };
         let mut intervals = Vec::new();
-        for constraint in body.split('|') {
-            if let Some((lower, rest)) = constraint
-                .trim()
-                .trim_start_matches('(')
-                .split_once("<= x <=")
-            {
-                let upper = rest.trim().trim_end_matches(')').trim_end_matches(';');
+        for constraint in constraints.split('|') {
+            let constraint = constraint.trim();
+            if let Some((lower, rest)) = constraint.split_once("<= x <=") {
+                let upper = rest.trim();
                 let lower = rational(lower.trim())?;
                 let upper = rational(upper)?;
                 if compare_rational(&lower, &upper) == std::cmp::Ordering::Greater {
                     return Err(ParseError::InvertedInterval);
                 }
                 intervals.push((lower, upper));
-            } else if let Some(value) = constraint
-                .trim()
-                .trim_start_matches('(')
-                .strip_prefix("x ==")
-            {
-                let value = rational(value.trim().trim_end_matches(')').trim_end_matches(';'))?;
+            } else if let Some(value) = constraint.strip_prefix("x ==") {
+                let value = rational(value.trim())?;
                 intervals.push((value, value));
-            } else if !constraint.trim().is_empty() && constraint.trim() != "false" {
+            } else if !constraint.is_empty() && constraint != "false" {
                 return Err(ParseError::Schema);
             }
         }
         found.entry(mode.to_owned()).or_default().extend(intervals);
-        cursor = end.saturating_add(1);
-        if cursor >= text.len() {
-            break;
-        }
     }
     if found.is_empty() {
+        return Err(ParseError::Schema);
+    }
+    if !found
+        .get(&request.initial_mode)
+        .is_some_and(|intervals| !intervals.is_empty())
+    {
         return Err(ParseError::Schema);
     }
     let mut global = BTreeMap::<String, ((i128, i128), (i128, i128))>::new();
@@ -676,10 +697,15 @@ impl CapabilityRoot {
         let id = ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let root =
             std::env::temp_dir().join(format!("quire-analyze-phaver-{}-{id}", std::process::id()));
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = fs::DirBuilder::new();
-        builder.mode(0o700);
-        builder.create(&root).map_err(|_| ())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            builder.create(&root).map_err(|_| ())?;
+        }
+        #[cfg(not(unix))]
+        fs::create_dir(&root).map_err(|_| ())?;
         Ok(Self(root))
     }
 
@@ -694,47 +720,10 @@ impl Drop for CapabilityRoot {
     }
 }
 
-enum InvokeError {
-    Unavailable,
-    Other,
-}
-
-fn invoke(
-    executable: &Path,
-    root: &Path,
-    request: &[u8],
-) -> Result<crate::ProducerExecutionResult, InvokeError> {
-    let mut child = Command::new(executable)
-        .args(["producer-execute", "--request", "-"])
-        .env_clear()
-        .current_dir(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| InvokeError::Unavailable)?;
-    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return Err(InvokeError::Other);
-    };
-    stdin.write_all(request).map_err(|_| InvokeError::Other)?;
-    drop(stdin);
-    let mut line = Vec::new();
-    stdout
-        .take(80 * 1024 * 1024)
-        .read_to_end(&mut line)
-        .map_err(|_| InvokeError::Other)?;
-    let status = child.wait().map_err(|_| InvokeError::Other)?;
-    if !status.success() {
-        return Err(InvokeError::Other);
-    }
-    let result = parse_result_line(&line).map_err(|_| InvokeError::Other)?;
-    Ok(result)
-}
-
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::MAX_PRODUCER_STREAM_BYTES;
+    use crate::{parse_result_line, MAX_PRODUCER_STREAM_BYTES};
     use ix_trace_rs::trace;
     use serde_json::{json, Value};
     use std::{
@@ -748,14 +737,6 @@ mod tests {
 
     impl StubProducer {
         fn new(state: Value, stdout: &str, truncated: bool) -> Self {
-            let id = STUB_COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
-            let root = std::env::temp_dir().join(format!(
-                "quire-analyze-hybrid-stub-{}-{id}",
-                std::process::id()
-            ));
-            fs::create_dir(&root).expect("create stub directory");
-            let calls = root.join("calls");
-            let request = root.join("request.json");
             let result = json!({
                 "protocol": "engineering-assurance.producer-execution-result/v1",
                 "producer": {"name": "phaver", "version": "0.38", "executable": "/phaver"},
@@ -773,12 +754,32 @@ mod tests {
             let result = serde_json::to_string(&result).expect("serialize producer result");
             parse_result_line(format!("{result}\n").as_bytes())
                 .expect("stub result uses producer-execute's result protocol");
-            let script = format!(
-                "#!/bin/sh\nprintf 'called\\n' >> '{}'\nIFS= read -r request\nprintf '%s\\n' \"$request\" > '{}'\nprintf '%s\\n' {}\n",
-                calls.display(),
-                request.display(),
-                shell_quote(&result)
-            );
+            let script = format!("printf '%s\\n' {}\n", shell_quote(&result));
+            Self::from_script(format!(
+                "#!/bin/sh\nprintf 'called\\n' >> '{{calls}}'\nIFS= read -r request\nprintf '%s\\n' \"$request\" > '{{request}}'\n{script}"
+            ))
+        }
+
+        fn sleeping() -> Self {
+            Self::from_script(
+                "#!/bin/sh\nexec 2>/dev/null\nprintf 'called\\n' >> '{calls}'\nIFS= read -r request\nprintf '%s\\n' \"$request\" > '{request}'\n/bin/sleep 20 &\nchild=$!\ntrap 'wait \"$child\"; exit' TERM\nprintf '%s %s\\n' \"$$\" \"$child\" > '{pid}'\nwait\n".into(),
+            )
+        }
+
+        fn from_script(script: String) -> Self {
+            let id = STUB_COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "quire-analyze-hybrid-stub-{}-{id}",
+                std::process::id()
+            ));
+            fs::create_dir(&root).expect("create stub directory");
+            let calls = root.join("calls");
+            let request = root.join("request.json");
+            let pid = root.join("pid");
+            let script = script
+                .replace("{calls}", &calls.display().to_string())
+                .replace("{request}", &request.display().to_string())
+                .replace("{pid}", &pid.display().to_string());
             let executable = root.join("producer-execute");
             fs::write(&executable, script).expect("write stub producer");
             fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
@@ -803,6 +804,17 @@ mod tests {
                 &fs::read(self.0.join("request.json")).expect("captured request"),
             )
             .expect("request JSON")
+        }
+
+        fn pids(&self) -> Vec<u32> {
+            fs::read_to_string(self.0.join("pid"))
+                .expect("captured child pid")
+                .split_whitespace()
+                .map(|pid| {
+                    pid.parse()
+                        .expect("valid producer-execute and descendant pids")
+                })
+                .collect()
         }
     }
 
@@ -960,6 +972,14 @@ mod tests {
             ),
             (
                 json!({"kind": "completed", "observation": {"exitCode": 0}}),
+                "R = A.{m & 0 <= x <= 2",
+                false,
+                HybridOutcome::Refused {
+                    reason: "result_schema_invalid",
+                },
+            ),
+            (
+                json!({"kind": "completed", "observation": {"exitCode": 0}}),
                 "R = A.{m & 2 <= x <= 1};\n",
                 false,
                 HybridOutcome::Refused {
@@ -1005,6 +1025,29 @@ mod tests {
             }
         );
         assert_eq!(stub.call_count(), 0);
+    }
+
+    #[trace("TC-041", "FR-042-AC-5", "FR-042-AC-7")]
+    #[test]
+    #[ignore = "verifies bounded producer-execute supervisor timeout and process cleanup"]
+    fn sleeping_producer_is_terminated_within_supervisor_and_cleanup_budgets() {
+        let stub = StubProducer::sleeping();
+        let started = std::time::Instant::now();
+        let outcome = reach_hybrid(&request(), &stub.config(Some("/absolute/phaver".into())));
+        assert_eq!(
+            outcome,
+            HybridOutcome::Incomplete {
+                reason: "tool_timeout"
+            }
+        );
+        assert!(started.elapsed() < Duration::from_secs(7));
+        assert_eq!(stub.call_count(), 1);
+        for pid in stub.pids() {
+            assert!(
+                !Path::new(&format!("/proc/{pid}")).exists(),
+                "producer-execute process-group member {pid} remains after cleanup"
+            );
+        }
     }
 
     #[trace("TC-041", "FR-042-AC-4", "FR-042-AC-7")]
@@ -1060,6 +1103,41 @@ mod tests {
                 }],
             ])
         );
+    }
+
+    #[trace("TC-041", "FR-042-AC-4", "FR-042-AC-7")]
+    #[test]
+    fn oracle_accepts_explicit_empty_enclosure_for_unreachable_target() {
+        let unreachable = fit_case(
+            "unreachable-target",
+            "m",
+            (0, 0),
+            (0, 0),
+            1,
+            0,
+            &[("m", "t", 1, 1, 0)],
+        );
+        assert_eq!(
+            oracle_next(&unreachable.request, &oracle_initial(&unreachable.request)),
+            BTreeMap::from([("m".to_owned(), vec![(0, 0)])])
+        );
+        let outcome = HybridOutcome::Enclosure {
+            steps: (0..=1)
+                .map(|_| {
+                    vec![
+                        HybridEnclosure {
+                            mode: "m".into(),
+                            interval: Some(IntegerInterval { lower: 0, upper: 0 }),
+                        },
+                        HybridEnclosure {
+                            mode: "t".into(),
+                            interval: None,
+                        },
+                    ]
+                })
+                .collect(),
+        };
+        assert_contains_oracle(&unreachable.request, &outcome);
     }
 
     #[trace("TC-041", "FR-042-AC-7")]
@@ -1254,12 +1332,13 @@ mod tests {
                 let guard_lower = i128::from(transition.guard.lower);
                 let guard_upper = i128::from(transition.guard.upper);
                 let reset = i128::from(transition.reset_offset);
-                let target = next.entry(transition.to_mode.clone()).or_default();
                 for (lower, upper) in &flowed {
                     let lower = (*lower).max(guard_lower);
                     let upper = (*upper).min(guard_upper);
                     if lower <= upper {
-                        target.push((lower + reset, upper + reset));
+                        next.entry(transition.to_mode.clone())
+                            .or_default()
+                            .push((lower + reset, upper + reset));
                     }
                 }
             }
@@ -1270,7 +1349,7 @@ mod tests {
         next
     }
 
-    fn assert_contains_oracle(request: &HybridRequest, outcome: HybridOutcome) {
+    fn assert_contains_oracle(request: &HybridRequest, outcome: &HybridOutcome) {
         let HybridOutcome::Enclosure { steps } = outcome else {
             panic!("expected a complete fit enclosure for {request:?}, got {outcome:?}");
         };
@@ -1295,6 +1374,9 @@ mod tests {
         assert_eq!(steps.len(), usize::try_from(request.horizon).unwrap() + 1);
         for (step_index, enclosures) in steps.iter().enumerate() {
             for (mode, states) in &expected {
+                if states.is_empty() {
+                    continue;
+                }
                 let enclosure = enclosures
                     .iter()
                     .find(|enclosure| enclosure.mode == *mode)
@@ -1311,38 +1393,47 @@ mod tests {
         }
     }
 
+    struct NamedFitCase {
+        name: String,
+        request: HybridRequest,
+    }
+
     fn fit_case(
+        name: &str,
         initial_mode: &str,
         initial_set: (i64, i64),
         delta: (i64, i64),
         horizon: u64,
         error_bound: u64,
         transitions: &[(&str, &str, i64, i64, i64)],
-    ) -> HybridRequest {
-        HybridRequest {
-            initial_mode: initial_mode.into(),
-            initial_set: Interval {
-                lower: initial_set.0,
-                upper: initial_set.1,
+    ) -> NamedFitCase {
+        NamedFitCase {
+            name: name.to_owned(),
+            request: HybridRequest {
+                initial_mode: initial_mode.into(),
+                initial_set: Interval {
+                    lower: initial_set.0,
+                    upper: initial_set.1,
+                },
+                flow_delta: Interval {
+                    lower: delta.0,
+                    upper: delta.1,
+                },
+                transitions: transitions
+                    .iter()
+                    .map(|(from, to, lower, upper, reset)| HybridTransition {
+                        from_mode: (*from).into(),
+                        to_mode: (*to).into(),
+                        guard: Interval {
+                            lower: *lower,
+                            upper: *upper,
+                        },
+                        reset_offset: *reset,
+                    })
+                    .collect(),
+                horizon,
+                error_bound,
             },
-            flow_delta: Interval {
-                lower: delta.0,
-                upper: delta.1,
-            },
-            transitions: transitions
-                .iter()
-                .map(|(from, to, lower, upper, reset)| HybridTransition {
-                    from_mode: (*from).into(),
-                    to_mode: (*to).into(),
-                    guard: Interval {
-                        lower: *lower,
-                        upper: *upper,
-                    },
-                    reset_offset: *reset,
-                })
-                .collect(),
-            horizon,
-            error_bound,
         }
     }
 
@@ -1350,10 +1441,19 @@ mod tests {
     #[test]
     #[ignore = "runs the declared PHAVer fit cases through producer-execute"]
     fn tc_041_fit_cases_contain_independent_finite_oracle_states() {
-        let cases = [
-            fit_case("m", (i64::MIN, i64::MIN), (-1, 0), 1, 0, &[]),
-            fit_case("m", (i64::MAX, i64::MAX), (0, 1), 1, 0, &[]),
+        let cases = vec![
             fit_case(
+                "F1_underflow",
+                "m",
+                (i64::MIN, i64::MIN),
+                (-1, 0),
+                1,
+                0,
+                &[],
+            ),
+            fit_case("F1_overflow", "m", (i64::MAX, i64::MAX), (0, 1), 1, 0, &[]),
+            fit_case(
+                "F2_reset_overflow",
                 "m",
                 (i64::MAX - 1, i64::MAX),
                 (0, 0),
@@ -1361,15 +1461,56 @@ mod tests {
                 0,
                 &[("m", "t", i64::MAX - 1, i64::MAX, 1)],
             ),
-            fit_case("m", (i64::MIN, i64::MIN), (0, 0), 0, 1, &[]),
-            fit_case("m", (i64::MAX, i64::MAX), (0, 0), 0, 1, &[]),
-            fit_case("m", (0, 10), (0, 0), 1, 0, &[("m", "t", 8, 20, 100)]),
-            fit_case("m", (0, 10), (0, 0), 1, 0, &[("m", "t", -5, 20, 100)]),
-            fit_case("m", (0, 0), (1, 1), 2, 0, &[]),
-            fit_case("m", (0, 0), (0, 0), 0, u64::MAX, &[]),
-            fit_case("m", (0, 0), (0, 0), 1_000_000, 0, &[]),
-            fit_case("m", (0, 2), (1, 1), 1, 0, &[("m", "t", 3, 5, 0)]),
             fit_case(
+                "F3_widen_lower",
+                "m",
+                (i64::MIN, i64::MIN),
+                (0, 0),
+                0,
+                1,
+                &[],
+            ),
+            fit_case(
+                "F3_widen_upper",
+                "m",
+                (i64::MAX, i64::MAX),
+                (0, 0),
+                0,
+                1,
+                &[],
+            ),
+            fit_case(
+                "F4_partial_guard",
+                "m",
+                (0, 10),
+                (0, 0),
+                1,
+                0,
+                &[("m", "t", 8, 20, 100)],
+            ),
+            fit_case(
+                "F4_covering_guard",
+                "m",
+                (0, 10),
+                (0, 0),
+                1,
+                0,
+                &[("m", "t", -5, 20, 100)],
+            ),
+            fit_case("F7_intermediate_steps", "m", (0, 0), (1, 1), 2, 0, &[]),
+            fit_case("F8_error_bound_max", "m", (0, 0), (0, 0), 0, u64::MAX, &[]),
+            fit_case("F9_million_horizon", "m", (0, 0), (0, 0), 1_000_000, 0, &[]),
+            fit_case(
+                "AC3_upper_guard_touch",
+                "m",
+                (0, 2),
+                (1, 1),
+                1,
+                0,
+                &[("m", "t", 3, 5, 0)],
+            ),
+            fit_case(
+                "AC5_multiple_targets",
                 "m",
                 (0, 5),
                 (0, 0),
@@ -1377,26 +1518,117 @@ mod tests {
                 0,
                 &[("m", "t", 0, 20, 0), ("m", "u", 0, 20, -50)],
             ),
-            fit_case("m", (0, 10), (0, 0), 1, 0, &[("m", "t", 8, 20, 100)]),
-            fit_case("m", (2, 4), (0, 0), 0, 5, &[]),
             fit_case(
+                "AC5_same_target_join",
                 "m",
-                (0, 1),
+                (0, 5),
                 (0, 0),
                 1,
                 0,
-                &[("ghost", "elsewhere", 0, 1, 0)],
+                &[("m", "t", 0, 20, 0), ("m", "t", 0, 20, 100)],
+            ),
+            fit_case(
+                "AC5_duplicate_reordered_a",
+                "m",
+                (0, 5),
+                (0, 0),
+                1,
+                0,
+                &[
+                    ("m", "t", 0, 20, 100),
+                    ("m", "u", 0, 20, -50),
+                    ("m", "t", 0, 20, 100),
+                ],
+            ),
+            fit_case(
+                "AC5_duplicate_reordered_b",
+                "m",
+                (0, 5),
+                (0, 0),
+                1,
+                0,
+                &[
+                    ("m", "t", 0, 20, 100),
+                    ("m", "t", 0, 20, 100),
+                    ("m", "u", 0, 20, -50),
+                ],
+            ),
+            fit_case(
+                "AC6_exact_bounded_states",
+                "m",
+                (0, 2),
+                (0, 1),
+                2,
+                0,
+                &[("m", "t", 1, 2, 3)],
+            ),
+            fit_case("AC10_valid_error_widening", "m", (2, 4), (0, 0), 0, 5, &[]),
+            fit_case(
+                "AC11_unreachable_target",
+                "m",
+                (0, 0),
+                (0, 0),
+                1,
+                0,
+                &[("m", "t", 1, 1, 0)],
             ),
         ];
-        for request in &cases {
-            let outcome = reach_hybrid(request, &phaver_config());
-            assert_contains_oracle(request, outcome);
+        let required = BTreeSet::from([
+            "F1_underflow",
+            "F1_overflow",
+            "F2_reset_overflow",
+            "F3_widen_lower",
+            "F3_widen_upper",
+            "F4_partial_guard",
+            "F4_covering_guard",
+            "F7_intermediate_steps",
+            "F8_error_bound_max",
+            "F9_million_horizon",
+            "AC3_upper_guard_touch",
+            "AC5_multiple_targets",
+            "AC5_same_target_join",
+            "AC5_duplicate_reordered_a",
+            "AC5_duplicate_reordered_b",
+            "AC6_exact_bounded_states",
+            "AC10_valid_error_widening",
+            "AC11_unreachable_target",
+        ]);
+        let executed: BTreeSet<_> = cases.iter().map(|case| case.name.as_str()).collect();
+        assert_eq!(executed, required, "fit case census changed");
+        let mut order_permutation_results = BTreeMap::new();
+        for case in &cases {
+            let outcome = reach_hybrid(&case.request, &phaver_config());
+            if case.name.starts_with("AC5_duplicate_reordered_") {
+                order_permutation_results.insert(case.name.as_str(), outcome.clone());
+            }
+            assert_contains_oracle(&case.request, &outcome);
         }
+        assert_eq!(
+            order_permutation_results.get("AC5_duplicate_reordered_a"),
+            order_permutation_results.get("AC5_duplicate_reordered_b"),
+            "duplicate/reordered transition fixture changed the PHAVer enclosure"
+        );
         let extremes = [i64::MIN, i64::MIN + 1, -1, 0, 1, i64::MAX - 1, i64::MAX];
+        let errors = [0, 1, u64::MAX];
+        let mut required_ac12 = BTreeSet::new();
         for initial in extremes {
             for reset in extremes {
-                for error in [0, 1, u64::MAX] {
-                    let request = fit_case(
+                for error in errors {
+                    required_ac12.insert(format!("AC12_{initial}_{reset}_{error}"));
+                }
+            }
+        }
+        let mut executed_ac12 = BTreeSet::new();
+        for initial in extremes {
+            for reset in extremes {
+                for error in errors {
+                    let name = format!("AC12_{initial}_{reset}_{error}");
+                    assert!(
+                        executed_ac12.insert(name.clone()),
+                        "duplicate fit case {name}"
+                    );
+                    let case = fit_case(
+                        &name,
                         "m",
                         (initial, initial),
                         (reset.min(0), reset.max(0)),
@@ -1404,10 +1636,14 @@ mod tests {
                         error,
                         &[("m", "t", i64::MIN, i64::MAX, reset)],
                     );
-                    assert_contains_oracle(&request, reach_hybrid(&request, &phaver_config()));
+                    assert_contains_oracle(
+                        &case.request,
+                        &reach_hybrid(&case.request, &phaver_config()),
+                    );
                 }
             }
         }
+        assert_eq!(executed_ac12, required_ac12, "AC12 fit case census changed");
     }
 
     #[trace("TC-041", "FR-042-AC-4", "FR-042-AC-5", "FR-042-AC-7")]

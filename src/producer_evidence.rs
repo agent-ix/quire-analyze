@@ -7,7 +7,17 @@
 //! line, and turns a result into a [`SolverRecord`] by the FR-009 result-state
 //! table.
 
-use std::{collections::BTreeMap, fmt, path::Path, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    io::{Read, Write},
+    path::Path,
+    path::PathBuf,
+    process::{Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,6 +37,9 @@ pub const UNPROBED_VERSION: &str = "unprobed";
 pub const QUERY_ROLE: &str = "query";
 /// Stdout and stderr ceiling of `producer-execute` (`MAX_STREAM_BYTES`).
 pub const MAX_PRODUCER_STREAM_BYTES: usize = 8_388_608;
+/// Maximum result-line bytes emitted by producer-execute, including its JSON envelope.
+pub const MAX_PRODUCER_RESULT_LINE_BYTES: u64 =
+    2 * MAX_PRODUCER_STREAM_BYTES as u64 * 4 + 1024 * 1024;
 
 const CALLER_KIND: &str = "quire-analyze.run-package";
 const CONTAINMENT_KIND: &str = "quire.solver-process";
@@ -44,6 +57,219 @@ pub enum EvidenceErrorKind {
     ResultLine,
     /// The result line is not a valid `producer-execution-result/v1` document.
     ResultDocument,
+    /// The producer-execute executable could not be started.
+    ExecutorUnavailable,
+    /// The producer-execute supervisor deadline expired.
+    ExecutorTimedOut,
+    /// The producer-execute response exceeded its protocol ceiling.
+    ExecutorOutputLimit,
+    /// The producer-execute process or its I/O failed.
+    ExecutorFailure,
+}
+
+/// Invoke producer-execute with a bounded supervisor deadline and bounded result line.
+///
+/// The request's own tool budget is enforced by producer-execute. `supervisor_timeout` includes
+/// the allowed time for producer-execute to return its typed timeout result; `cleanup_timeout`
+/// bounds termination of the producer-execute process group after a supervisor timeout or an
+/// oversized response.
+pub fn invoke_producer_execute(
+    executable: &Path,
+    capability_root: &Path,
+    request: &[u8],
+    supervisor_timeout: Duration,
+    cleanup_timeout: Duration,
+) -> Result<ProducerExecutionResult, EvidenceError> {
+    let failure = |kind, message: String| EvidenceError::new(kind, message);
+    let mut command = Command::new(executable);
+    command
+        .args(["producer-execute", "--request", "-"])
+        .env_clear()
+        .current_dir(capability_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().map_err(|error| {
+        failure(
+            if error.kind() == std::io::ErrorKind::NotFound {
+                EvidenceErrorKind::ExecutorUnavailable
+            } else {
+                EvidenceErrorKind::ExecutorFailure
+            },
+            format!("cannot start {}: {error}", executable.display()),
+        )
+    })?;
+    let process_group = child.id();
+    let Some(stdin) = child.stdin.take() else {
+        terminate_process_group(process_group, &mut child, cleanup_timeout);
+        return Err(failure(
+            EvidenceErrorKind::ExecutorFailure,
+            "the process has no piped stdin".to_owned(),
+        ));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        terminate_process_group(process_group, &mut child, cleanup_timeout);
+        return Err(failure(
+            EvidenceErrorKind::ExecutorFailure,
+            "the process has no piped stdout".to_owned(),
+        ));
+    };
+
+    let (write_tx, write_rx) = mpsc::channel();
+    let request = request.to_vec();
+    let writer = thread::spawn(move || {
+        let mut stdin = stdin;
+        let result = stdin.write_all(&request);
+        drop(stdin);
+        let _ = write_tx.send(result);
+    });
+    let (read_tx, read_rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout
+            .take(MAX_PRODUCER_RESULT_LINE_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes);
+        let _ = read_tx.send((result, bytes));
+    });
+
+    let deadline = Instant::now() + supervisor_timeout;
+    let mut status = None;
+    let mut written = None;
+    let mut output = None;
+    let mut timed_out = false;
+    let mut oversized = false;
+    loop {
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(result) => status = result,
+                Err(error) => {
+                    terminate_process_group(process_group, &mut child, cleanup_timeout);
+                    return Err(failure(
+                        EvidenceErrorKind::ExecutorFailure,
+                        format!("cannot inspect producer-execute: {error}"),
+                    ));
+                }
+            }
+        }
+        if written.is_none() {
+            if let Some(result) = receive(&write_rx) {
+                written = Some(result);
+            }
+        }
+        if output.is_none() {
+            if let Some(result) = receive(&read_rx) {
+                oversized = result.1.len() as u64 > MAX_PRODUCER_RESULT_LINE_BYTES;
+                output = Some(result);
+            }
+        }
+        if oversized {
+            terminate_process_group(process_group, &mut child, cleanup_timeout);
+            return Err(failure(
+                EvidenceErrorKind::ExecutorOutputLimit,
+                format!("result exceeds {MAX_PRODUCER_RESULT_LINE_BYTES} bytes"),
+            ));
+        }
+        if status.is_some() && written.is_some() && output.is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    if timed_out {
+        terminate_process_group(process_group, &mut child, cleanup_timeout);
+        return Err(failure(
+            EvidenceErrorKind::ExecutorTimedOut,
+            "producer-execute supervisor deadline expired".to_owned(),
+        ));
+    }
+
+    if let Err(error) = written.expect("completed writer channel") {
+        let _ = writer.join();
+        let _ = reader.join();
+        return Err(failure(
+            EvidenceErrorKind::ExecutorFailure,
+            format!("cannot write producer-execute request: {error}"),
+        ));
+    }
+    let (read_result, bytes) = output.expect("completed reader channel");
+    writer.join().map_err(|_| {
+        failure(
+            EvidenceErrorKind::ExecutorFailure,
+            "producer-execute request writer panicked".to_owned(),
+        )
+    })?;
+    reader.join().map_err(|_| {
+        failure(
+            EvidenceErrorKind::ExecutorFailure,
+            "producer-execute result reader panicked".to_owned(),
+        )
+    })?;
+    read_result.map_err(|error| {
+        failure(
+            EvidenceErrorKind::ExecutorFailure,
+            format!("cannot read producer-execute result: {error}"),
+        )
+    })?;
+    let status = status.expect("observed child status");
+    if !status.success() {
+        return Err(failure(
+            EvidenceErrorKind::ExecutorFailure,
+            format!("producer-execute exited with {status}"),
+        ));
+    }
+    parse_result_line(&bytes)
+}
+
+fn receive<T>(receiver: &Receiver<T>) -> Option<T> {
+    receiver.try_recv().ok()
+}
+
+fn terminate_process_group(process_group: u32, child: &mut std::process::Child, cleanup: Duration) {
+    #[cfg(not(unix))]
+    let _ = process_group;
+    #[cfg(unix)]
+    {
+        signal_process_group(process_group, "TERM");
+    }
+    let cleanup_deadline = Instant::now() + cleanup;
+    let grace_deadline = Instant::now() + cleanup.min(Duration::from_millis(100));
+    while Instant::now() < grace_deadline && child.try_wait().ok().flatten().is_none() {
+        thread::sleep(Duration::from_millis(5));
+    }
+    #[cfg(unix)]
+    {
+        signal_process_group(process_group, "KILL");
+    }
+    let _ = child.kill();
+    while Instant::now() < cleanup_deadline {
+        if child.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(unix)]
+fn signal_process_group(process_group: u32, signal: &str) {
+    let Ok(group) = i32::try_from(process_group) else {
+        return;
+    };
+    let group = format!("-{group}");
+    let _ = Command::new("/bin/kill")
+        .args([format!("-{signal}"), "--".to_owned(), group])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// A request that cannot be built or a result line that cannot be read.
