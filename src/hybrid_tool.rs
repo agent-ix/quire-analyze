@@ -25,6 +25,10 @@ const MAX_MODE_BYTES: usize = 128;
 const MAX_TRANSITIONS: usize = 100_000;
 const MAX_RESULT_ENTRIES: usize = 4_000_000;
 const MODEL_FILE: &str = "model.pha";
+const PRODUCER_EXECUTE_CLEANUP_MS: u64 = 1_000;
+// 20 CLI launches with invalid requests measured at most 31.6 ms end to end.
+const PRODUCER_EXECUTE_STARTUP_MARGIN_MS: u64 = 500;
+const PRODUCER_EXECUTE_FALLBACK_CLEANUP_MS: u64 = 500;
 static ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A closed integer interval used by the finite hybrid request.
@@ -210,8 +214,12 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
         &config.producer_execute,
         root.path(),
         &request_doc.to_json_bytes(),
-        Duration::from_millis(MAX_SOLVER_WALL_TIME_MS + 500),
-        Duration::from_millis(500),
+        Duration::from_millis(
+            MAX_SOLVER_WALL_TIME_MS
+                + PRODUCER_EXECUTE_CLEANUP_MS
+                + PRODUCER_EXECUTE_STARTUP_MARGIN_MS,
+        ),
+        Duration::from_millis(PRODUCER_EXECUTE_FALLBACK_CLEANUP_MS),
     ) {
         Ok(result) => result,
         Err(error) if error.kind() == EvidenceErrorKind::ExecutorUnavailable => {
@@ -1797,8 +1805,24 @@ mod tests {
                 })
                 .collect(),
         };
+        let started = std::time::Instant::now();
+        let outcome = reach_hybrid(&oversized, &phaver_config());
+        let elapsed = started.elapsed();
+        eprintln!(
+            "F10 same-target complete timeout result in {} ms",
+            elapsed.as_millis()
+        );
+        assert!(
+            elapsed
+                < Duration::from_millis(
+                    MAX_SOLVER_WALL_TIME_MS
+                        + PRODUCER_EXECUTE_CLEANUP_MS
+                        + PRODUCER_EXECUTE_STARTUP_MARGIN_MS
+                ),
+            "producer-execute timed_out result must arrive before the outer fallback deadline"
+        );
         assert_eq!(
-            reach_hybrid(&oversized, &phaver_config()),
+            outcome,
             HybridOutcome::Incomplete {
                 reason: "tool_timeout"
             }
@@ -1825,8 +1849,24 @@ mod tests {
                 })
                 .collect(),
         };
+        let started = std::time::Instant::now();
+        let outcome = reach_hybrid(&oversized, &phaver_config());
+        let elapsed = started.elapsed();
+        eprintln!(
+            "F10 distinct-target complete timeout result in {} ms",
+            elapsed.as_millis()
+        );
+        assert!(
+            elapsed
+                < Duration::from_millis(
+                    MAX_SOLVER_WALL_TIME_MS
+                        + PRODUCER_EXECUTE_CLEANUP_MS
+                        + PRODUCER_EXECUTE_STARTUP_MARGIN_MS
+                ),
+            "producer-execute timed_out result must arrive before the outer fallback deadline"
+        );
         assert_eq!(
-            reach_hybrid(&oversized, &phaver_config()),
+            outcome,
             HybridOutcome::Incomplete {
                 reason: "tool_timeout"
             }

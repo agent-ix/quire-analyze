@@ -194,3 +194,103 @@ bindings:
   ac_id: FR-042-AC-7
   trace: correct
 ```
+
+
+## Disposition pass 1
+
+Reviewed fix 5bab70078d4e589762158fd6b93bf4c193adef22. Before appending these dispositions, verified the committed reviews/ copy was byte-identical to the original scratchpad artifact. Original findings and scope are preserved unchanged. No newly numbered finding was added; remaining failures are unresolved parts of the existing findings.
+
+FAIL — FND-001 and FND-002 remain open; PR #104 is not mergeable.
+
+Focused checks only: cargo test --lib hybrid_tool::tests -- --include-ignored --test-threads=1 passed 11/11 (37.44 s), including both unchanged F10 timeout cases, real fit sweep, malformed-output checks, ordinary supervisor cleanup, and empty-target regression. cargo test --test package_runner passed 32 tests with 2 existing ignored tests (25.67 s), covering the caller moved to the shared seam. Every cargo/rustc command used the assigned locked-build.sh wrapper, target directory, RUSTUP_TOOLCHAIN=1.98.1 and CARGO_PROFILE_DEV_DEBUG=0. No aggregate gate ran. Public API reproductions are in /tmp/codex-theories/ver95-disposition1/public-reproductions.log; test and probe-build logs are in the same directory. The first nested-group harness used captured stderr, which the surviving descendant held open; the repeated file-backed run measured the adapter return directly. Reproduction descendants were explicitly killed by the reviewer.
+
+NFR-001 and the literal -v000000 PHAVer request argument are unchanged. The shared seam still invokes only producer-execute. Platform and header fixes were inspected directly. Baseline FND-002 through FND-012 in SR-17080 were checked against unchanged source and the explicit review scope.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | still-open | The original unterminated prefix is now Refused/result_schema_invalid, but malformed inner constraints remain accepted. On current HEAD, completed stdout `R = A.{m & 0 <= x <= 2, t & };` returns Enclosure with t=None at every step for the existing request whose reachable t states are 5..7. A trailing empty disjunct is also accepted. src/hybrid_tool.rs:388-406 skips empty constraint tokens instead of refusing them. Reject empty constraints/disjuncts and cover them through the public adapter, not only the normalized JSON validator. |
+| FND-002 | still-open | The duplicate invocation code was removed and ordinary stalled producers now time out, but cleanup remains incomplete. invoke_producer_execute signals only the outer producer process group and returns on timeout without joining the I/O workers. A stub creating a child with os.setpgrp (a separate group in the same session, matching engineering-assurance build_command process_group(0)) returns Incomplete/tool_timeout after about 5.55 s while its sleep child remains alive and threads_after_return=2. The reviewer killed the reproduction child group. src/producer_evidence.rs:186-191 and 235-257 must contain/terminate nested tool groups and retire bounded I/O workers before cleanup is claimed complete. |
+| FND-003 | fixed | The oracle now creates target entries only for nonempty guard intersections and also skips empty expected sets. A focused regression accepts explicitly empty t for m={0}, flow 0, guard [1,1]. |
+| FND-004 | fixed | DirBuilderExt and mode(0700) are guarded by cfg(unix); non-Unix code uses fs::create_dir. Unix-specific test helpers are gated. Source-inspected; no non-Unix cross-build was run. |
+| FND-005 | fixed | The new file now has the repository SPDX and copyright header. |
+| FND-001 | fixed | Round 2: outer framing and empty disjuncts fail closed; explicit-empty or omitted target output requires the request empty_targets authorization. Public-adapter tests cover unauthorized false and leading, trailing and doubled disjunction separators. |
+| FND-002 | still-open | Still open and not waived. The fix changes only src/hybrid_tool.rs; src/producer_evidence.rs and the shared supervisor/cleanup path are unchanged from disposition pass 1. Nested tool process groups can therefore survive timeout and the I/O reader can remain detached. Per the explicit review brief, the required cleanup belongs in upstream Engineering Assurance; review of specification PR #250 is not a code fix, merge, or consumed implementation. Keep PR #104 blocked until the upstream implementation is delivered and consumed and the nested-group/worker-cleanup regression is verified. |
+
+### Disposition evidence
+
+```yaml
+dispositions:
+- fnd: FND-001
+  outcome: still-open
+  reason: The original unterminated prefix is now Refused/result_schema_invalid, but
+    malformed inner constraints remain accepted. On current HEAD, completed stdout
+    `R = A.{m & 0 <= x <= 2, t & };` returns Enclosure with t=None at every step for
+    the existing request whose reachable t states are 5..7. A trailing empty disjunct
+    is also accepted. src/hybrid_tool.rs:388-406 skips empty constraint tokens instead
+    of refusing them. Reject empty constraints/disjuncts and cover them through the
+    public adapter, not only the normalized JSON validator.
+- fnd: FND-002
+  outcome: still-open
+  reason: The duplicate invocation code was removed and ordinary stalled producers
+    now time out, but cleanup remains incomplete. invoke_producer_execute signals
+    only the outer producer process group and returns on timeout without joining the
+    I/O workers. A stub creating a child with os.setpgrp (a separate group in the
+    same session, matching engineering-assurance build_command process_group(0)) returns
+    Incomplete/tool_timeout after about 5.55 s while its sleep child remains alive
+    and threads_after_return=2. The reviewer killed the reproduction child group.
+    src/producer_evidence.rs:186-191 and 235-257 must contain/terminate nested tool
+    groups and retire bounded I/O workers before cleanup is claimed complete.
+- fnd: FND-003
+  outcome: fixed
+  after_excerpt: "                    if lower <= upper {\n                      \
+    \  next.entry(transition.to_mode.clone())\n                            .or_default()\n\
+    \                            .push((lower + reset, upper + reset));\n        \
+    \            }\n                }\n            }\n  "
+- fnd: FND-004
+  outcome: fixed
+  after_excerpt: "        #[cfg(unix)]\n        {\n            use std::os::unix::fs::DirBuilderExt;\n\
+    \            let mut builder = fs::DirBuilder::new();\n            builder.mode(0o700);\n\
+    \            builder.create(&root).map_err(|_| ())?;\n        }\n        #[cfg(not(unix))]\n\
+    \        fs::create_dir(&root).map_err(|_| ())?;\n"
+- fnd: FND-005
+  outcome: fixed
+  after_excerpt: '// SPDX-License-Identifier: AGPL-3.0-or-later
+
+    // Copyright (C) 2026 Agent-IX'
+```
+
+
+## Disposition pass 2
+
+Reviewed ed1f53556bc1ba069dbab299c8e61c48f19045a4 by source inspection only, as explicitly requested: no builds, tests, runtime probes or aggregate gate were run by this reviewer. FND-001 is fixed under the user-directed empty_targets contract. Request validation permits declarations only for valid transition targets, excluding the initial mode. The native parser rejects empty tokens, mixed false/nonempty disjunctions, duplicates, unauthorized empty results and unauthorized missing modes; normalization and document validation retain the same authorization. All HybridRequest constructors in source were updated. Existing empty-target oracle and fit-census fixes remain intact. No new finding or regression was identified by this source pass. FND-002 remains still-open; overall review verdict remains FAIL.
+
+Coder-provided logs were inspected as supplementary, unrerun evidence: ver-95-round2-hybrid-tests.log records 7 passed/5 ignored; ver-95-round2-fit.log records 1 passed; ver-95-round2-f10.log records 2 passed. These are not claimed as independent reviewer executions.
+
+Artifact custody: the committed reviews/ files are byte-identical to the original review-pass files, and are exact prefixes of the latest scratchpad artifacts. They do not yet include disposition pass 1. The lead/coder must copy the latest scratchpad artifacts, including this pass, into reviews/ in the next authorized commit. The reviewer made no branch edits. SR-17080 has no prior still-open or undisposed finding; its fixed/accepted-no-change outcomes are unchanged, so it gets no round-2 rows or comment.
+
+### Disposition pass 2 evidence
+
+```yaml
+dispositions:
+- fnd: FND-001
+  outcome: fixed
+  after_excerpt: "        if disjuncts.is_empty() || disjuncts.iter().any(|constraint|\
+    \ constraint.is_empty()) {\n            return Err(ParseError::Schema);\n    \
+    \    }\n        let is_explicit_empty = disjuncts.as_slice() == [\"false\"];\n\
+    \        if disjuncts.contains(&\"false\") && !is_explicit_empty {\n         \
+    \   return Err(ParseError::Schema);\n        }\n        if is_explicit_empty &&\
+    \ !request.empty_targets.contains(mode) {\n            return Err(ParseError::Schema);\n\
+    \        }\n"
+- fnd: FND-002
+  outcome: still-open
+  reason: 'Still open and not waived. The fix changes only src/hybrid_tool.rs; src/producer_evidence.rs
+    and the shared supervisor/cleanup path are unchanged from disposition pass 1.
+    Nested tool process groups can therefore survive timeout and the I/O reader can
+    remain detached. Per the explicit review brief, the required cleanup belongs in
+    upstream Engineering Assurance; review of specification PR #250 is not a code
+    fix, merge, or consumed implementation. Keep PR #104 blocked until the upstream
+    implementation is delivered and consumed and the nested-group/worker-cleanup regression
+    is verified.'
+```

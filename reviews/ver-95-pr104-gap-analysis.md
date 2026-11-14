@@ -1259,3 +1259,131 @@ scope:
     and bounded small models.
 bindings: []
 ```
+
+
+## Disposition pass 1
+
+Reviewed fix 5bab70078d4e589762158fd6b93bf4c193adef22. Before appending these dispositions, verified the committed reviews/ copy was byte-identical to the original scratchpad artifact. Original findings and scope are preserved unchanged. No newly numbered finding was added; remaining failures are unresolved parts of the existing findings.
+
+VER-95-specific finding fixed. Eleven unrelated baseline gaps explicitly accepted without change for this PR; this is not a repository-wide traceability PASS.
+
+Focused checks only: cargo test --lib hybrid_tool::tests -- --include-ignored --test-threads=1 passed 11/11 (37.44 s), including both unchanged F10 timeout cases, real fit sweep, malformed-output checks, ordinary supervisor cleanup, and empty-target regression. cargo test --test package_runner passed 32 tests with 2 existing ignored tests (25.67 s), covering the caller moved to the shared seam. Every cargo/rustc command used the assigned locked-build.sh wrapper, target directory, RUSTUP_TOOLCHAIN=1.98.1 and CARGO_PROFILE_DEV_DEBUG=0. No aggregate gate ran. Public API reproductions are in /tmp/codex-theories/ver95-disposition1/public-reproductions.log; test and probe-build logs are in the same directory. The first nested-group harness used captured stderr, which the surviving descendant held open; the repeated file-backed run measured the adapter return directly. Reproduction descendants were explicitly killed by the reviewer.
+
+NFR-001 and the literal -v000000 PHAVer request argument are unchanged. The shared seam still invokes only producer-execute. Platform and header fixes were inspected directly. Baseline FND-002 through FND-012 in SR-17080 were checked against unchanged source and the explicit review scope.
+
+## Dispositions
+
+| FND | outcome | reason |
+| --- | --- | --- |
+| FND-001 | fixed | Named same-target join and duplicate/reordered transition cases are present in the required census and were executed. Same-target +0/+100 contributions use the exact interval-union oracle; the reordered duplicate cases additionally compare outcomes. The real PHAVer fit test passed. |
+| FND-002 | accepted-no-change | FR-009-AC-10 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-003 | accepted-no-change | FR-033-AC-5 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-004 | accepted-no-change | FR-033-AC-8 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-005 | accepted-no-change | FR-034-AC-1 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-006 | accepted-no-change | FR-034-AC-2 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-007 | accepted-no-change | FR-034-AC-3 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-008 | accepted-no-change | FR-034-AC-4 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-009 | accepted-no-change | FR-034-AC-5 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-010 | accepted-no-change | FR-034-AC-6 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-011 | accepted-no-change | FR-034-AC-7 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+| FND-012 | accepted-no-change | FR-034-AC-8 remains a pre-existing baseline trace gap. Source inspection on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier source and requirement files are outside this diff. Per the code lead's explicit disposition brief, retain this real gap without expanding PR #104 into unrelated work. Acceptance is limited to VER-95 merge scope; it does not claim that the baseline gap is fixed or that repository-wide trace coverage passes. |
+
+### Disposition evidence
+
+```yaml
+dispositions:
+- fnd: FND-001
+  outcome: fixed
+  after_excerpt: "            fit_case(\n                \"AC5_same_target_join\"\
+    ,\n                \"m\",\n                (0, 5),\n                (0, 0),\n\
+    \                1,\n                0,\n                &[(\"m\", \"t\", 0, 20,\
+    \ 0), (\"m\", \"t\", 0, 20, 100)],\n            ),\n"
+- fnd: FND-002
+  outcome: accepted-no-change
+  reason: 'FR-009-AC-10 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-003
+  outcome: accepted-no-change
+  reason: 'FR-033-AC-5 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-004
+  outcome: accepted-no-change
+  reason: 'FR-033-AC-8 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-005
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-1 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-006
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-2 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-007
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-3 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-008
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-4 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-009
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-5 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-010
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-6 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-011
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-7 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+- fnd: FND-012
+  outcome: accepted-no-change
+  reason: 'FR-034-AC-8 remains a pre-existing baseline trace gap. Source inspection
+    on 5bab700 confirms it is unchanged by the VER-95 fix; the relevant report/quantifier
+    source and requirement files are outside this diff. Per the code lead''s explicit
+    disposition brief, retain this real gap without expanding PR #104 into unrelated
+    work. Acceptance is limited to VER-95 merge scope; it does not claim that the
+    baseline gap is fixed or that repository-wide trace coverage passes.'
+```
