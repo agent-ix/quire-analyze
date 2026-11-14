@@ -33,9 +33,17 @@ type: TestMatrix
 | FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
 | FR-005 | FR-005-AC-6 | TC-007 | ✅ v2 schema, validator, and rejection tests; v1 rejected |
 | FR-008 | FR-008-AC-1, FR-008-AC-2, FR-008-AC-3 | TC-014 | ✅ Bounded canonical synthesis provider complete |
+| FR-041 | FR-041-AC-1 | Inspection | 🚧 Adversarial set and independent enumeration evidence required |
+| FR-041 | FR-041-AC-2 | Inspection | 🚧 Finding classification evidence required |
+| FR-041 | FR-041-AC-3 | Inspection | 🚧 Caller and consumer inventory required |
+| FR-041 | FR-041-AC-4 | Inspection | 🚧 Disposition rationale evidence required |
+| FR-041 | FR-041-AC-5 | Inspection | 🚧 Single-path disposition evidence required |
+| FR-041 | FR-041-AC-6 | Inspection | 🚧 IR-1469 status and disposition evidence required |
+| FR-041 | FR-041-AC-7 | Inspection | 🚧 Tracking-ticket record evidence required |
 | FR-042 | FR-042-AC-1 | Selected path is delegate-and-remove | ✅ Keep-and-harden branch not selected |
-| FR-042 | FR-042-AC-2, FR-042-AC-5, FR-042-AC-6, FR-042-AC-7 | Inspection | 🚧 Removal, no fallback, IR-1469 and license evidence required |
-| FR-042 | FR-042-AC-3, FR-042-AC-4 | TC-041 | 🚧 Delegated hybrid reachability disposition |
+| FR-042 | FR-042-AC-2, FR-042-AC-3, FR-042-AC-8, FR-042-AC-9, FR-042-AC-10 | Inspection | 🚧 Code/artifact removal, no fallback, IR-1469 and license evidence required |
+| FR-042 | FR-042-AC-4 | TC-041 | 🚧 Independent-oracle enclosure containment required |
+| FR-042 | FR-042-AC-5, FR-042-AC-6, FR-042-AC-7 | TC-041 | 🚧 Delegated invocation, refusal, and result contract evidence required |
 
 ## Nonfunctional and Stakeholder Coverage
 
@@ -64,7 +72,7 @@ type: TestMatrix
 | TC-009 | ADR-0010 identity research | Analysis | P0 | FR-001 | ✅ Complete |
 | TC-010 | Exact Boolean SMT-LIB2 v1 lowering slice | Integration | P0 | FR-001, FR-002, NFR-001 | ✅ Complete |
 | TC-014 | Bounded canonical synthesis | Property | P0 | FR-008 | ✅ Complete |
-| TC-041 | Delegated hybrid reachability | Analysis | P0 | FR-042, NFR-001 | 🚧 PHAVer fit and adapter evidence required |
+| TC-041 | Delegated hybrid reachability | Analysis | P0 | FR-041, FR-042, NFR-001 | 🚧 PHAVer fit and adapter evidence required |
 
 TC-001 completes the Boolean-v1 analysis algebra and independent finite truth table. TC-002 through
 TC-004 and TC-006 through TC-008 remain planned as complete campaigns; issue #4 closes their exact
