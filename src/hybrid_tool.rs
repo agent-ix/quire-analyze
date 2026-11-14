@@ -60,6 +60,9 @@ pub struct HybridRequest {
     pub flow_delta: Interval,
     /// Authored guarded/reset transitions.
     pub transitions: Vec<HybridTransition>,
+    /// Requested transition targets whose reachable set is explicitly expected to be empty.
+    /// These modes are included in every result step and may have no intervals.
+    pub empty_targets: BTreeSet<String>,
     /// Number of discrete flow/transition steps to analyze.
     pub horizon: u64,
     /// Widening applied to reported tool intervals.
@@ -165,7 +168,7 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
         Err(()) => {
             return HybridOutcome::Refused {
                 reason: "malformed_request",
-            }
+            };
         }
     };
     if model.len() > MAX_SOLVER_STDIN_BYTES {
@@ -178,7 +181,7 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
         Err(()) => {
             return HybridOutcome::Incomplete {
                 reason: "tool_unavailable",
-            }
+            };
         }
     };
     if fs::write(root.path().join(MODEL_FILE), model.as_bytes()).is_err() {
@@ -200,7 +203,7 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
         Err(_) => {
             return HybridOutcome::Refused {
                 reason: "malformed_request",
-            }
+            };
         }
     };
     let result = match invoke_producer_execute(
@@ -214,22 +217,22 @@ pub fn reach_hybrid(request: &HybridRequest, config: &HybridToolConfig) -> Hybri
         Err(error) if error.kind() == EvidenceErrorKind::ExecutorUnavailable => {
             return HybridOutcome::Refused {
                 reason: "tool_unavailable",
-            }
+            };
         }
         Err(error) if error.kind() == EvidenceErrorKind::ExecutorTimedOut => {
             return HybridOutcome::Incomplete {
                 reason: "tool_timeout",
-            }
+            };
         }
         Err(error) if error.kind() == EvidenceErrorKind::ExecutorOutputLimit => {
             return HybridOutcome::Incomplete {
                 reason: "tool_output_limit_exceeded",
-            }
+            };
         }
         Err(_) => {
             return HybridOutcome::Refused {
                 reason: "result_schema_invalid",
-            }
+            };
         }
     };
     match result.external_state() {
@@ -295,6 +298,16 @@ fn validate_request(request: &HybridRequest) -> Result<(), ()> {
             return Err(());
         }
     }
+    let targets: BTreeSet<_> = request
+        .transitions
+        .iter()
+        .map(|transition| transition.to_mode.as_str())
+        .collect();
+    if request.empty_targets.iter().any(|mode| {
+        !valid_mode(mode) || mode == &request.initial_mode || !targets.contains(mode.as_str())
+    }) {
+        return Err(());
+    }
     Ok(())
 }
 
@@ -319,6 +332,7 @@ fn render_model(request: &HybridRequest) -> Result<String, ()> {
             .or_default()
             .push(transition);
     }
+    modes.extend(request.empty_targets.iter().cloned());
     let mut output = String::from("automaton A\ncontr_var: x,clk;\nsynclabs: a;\n");
     for mode in modes {
         output.push_str(&format!(
@@ -373,7 +387,7 @@ fn parse_phaver_output(
         }
         let (mode, constraints) = result_mode.split_once('&').ok_or(ParseError::Schema)?;
         let mode = mode.trim();
-        if !modes.contains(mode) {
+        if !modes.contains(mode) || found.contains_key(mode) {
             return Err(ParseError::Schema);
         }
         let constraints = constraints.trim();
@@ -383,8 +397,21 @@ fn parse_phaver_output(
             _ => return Err(ParseError::Schema),
         };
         let mut intervals = Vec::new();
-        for constraint in constraints.split('|') {
-            let constraint = constraint.trim();
+        let disjuncts: Vec<_> = constraints.split('|').map(str::trim).collect();
+        if disjuncts.is_empty() || disjuncts.iter().any(|constraint| constraint.is_empty()) {
+            return Err(ParseError::Schema);
+        }
+        let is_explicit_empty = disjuncts.as_slice() == ["false"];
+        if disjuncts.contains(&"false") && !is_explicit_empty {
+            return Err(ParseError::Schema);
+        }
+        if is_explicit_empty && !request.empty_targets.contains(mode) {
+            return Err(ParseError::Schema);
+        }
+        if request.empty_targets.contains(mode) && !is_explicit_empty {
+            return Err(ParseError::Schema);
+        }
+        for constraint in disjuncts {
             if let Some((lower, rest)) = constraint.split_once("<= x <=") {
                 let upper = rest.trim();
                 let lower = rational(lower.trim())?;
@@ -396,7 +423,7 @@ fn parse_phaver_output(
             } else if let Some(value) = constraint.strip_prefix("x ==") {
                 let value = rational(value.trim())?;
                 intervals.push((value, value));
-            } else if !constraint.is_empty() && constraint != "false" {
+            } else if constraint != "false" {
                 return Err(ParseError::Schema);
             }
         }
@@ -408,6 +435,12 @@ fn parse_phaver_output(
     if !found
         .get(&request.initial_mode)
         .is_some_and(|intervals| !intervals.is_empty())
+    {
+        return Err(ParseError::Schema);
+    }
+    if modes
+        .iter()
+        .any(|mode| !found.contains_key(mode) && !request.empty_targets.contains(mode))
     {
         return Err(ParseError::Schema);
     }
@@ -515,6 +548,7 @@ fn requested_modes(request: &HybridRequest) -> BTreeSet<String> {
         modes.insert(transition.from_mode.clone());
         modes.insert(transition.to_mode.clone());
     }
+    modes.extend(request.empty_targets.iter().cloned());
     modes
 }
 
@@ -656,6 +690,7 @@ fn validate_result_document(
         }
         let mut modes = Vec::with_capacity(step.modes.len());
         for mode in step.modes {
+            let explicitly_empty = mode.intervals.is_empty();
             let mut hull: Option<IntegerInterval> = None;
             for interval in mode.intervals {
                 let (lower, lower_denominator) = rational(&interval.lower)?;
@@ -679,6 +714,9 @@ fn validate_result_document(
                         },
                     });
                 }
+            }
+            if request.empty_targets.contains(&mode.mode) != explicitly_empty {
+                return Err(ParseError::Schema);
             }
             modes.push(HybridEnclosure {
                 mode: mode.mode,
@@ -854,6 +892,7 @@ mod tests {
                 guard: Interval { lower: 0, upper: 2 },
                 reset_offset: 5,
             }],
+            empty_targets: BTreeSet::new(),
             horizon: 2,
             error_bound: 0,
         }
@@ -1027,6 +1066,56 @@ mod tests {
         assert_eq!(stub.call_count(), 0);
     }
 
+    #[trace("TC-041", "FR-042-AC-7")]
+    #[test]
+    fn empty_target_results_require_request_authorization_and_well_formed_disjuncts() {
+        let authorized = {
+            let mut request = request();
+            request.empty_targets.insert("t".into());
+            request
+        };
+        let outputs = [
+            ("R = A.{m & 0 <= x <= 2, t & false};\n", true),
+            ("R = A.{m & 0 <= x <= 2};\n", true),
+            ("R = A.{m & 0 <= x <= 2, t & 5 <= x <= 7};\n", false),
+        ];
+        for (stdout, accepted) in outputs {
+            let stub = StubProducer::new(
+                json!({"kind": "completed", "observation": {"exitCode": 0}}),
+                stdout,
+                false,
+            );
+            let outcome = reach_hybrid(&authorized, &stub.config(Some("/absolute/phaver".into())));
+            assert_eq!(matches!(outcome, HybridOutcome::Enclosure { .. }), accepted);
+            if let HybridOutcome::Enclosure { steps } = outcome {
+                assert!(steps
+                    .iter()
+                    .all(|step| step[1].mode == "t" && step[1].interval.is_none()));
+            }
+            assert_eq!(stub.call_count(), 1);
+        }
+
+        for stdout in [
+            "R = A.{m & 0 <= x <= 2, t & false};\n",
+            "R = A.{m & (0 <= x <= 2 | ), t & 5 <= x <= 7};\n",
+            "R = A.{m & ( | 0 <= x <= 2), t & 5 <= x <= 7};\n",
+            "R = A.{m & (0 <= x <= 2 || 1 <= x <= 2), t & 5 <= x <= 7};\n",
+        ] {
+            let stub = StubProducer::new(
+                json!({"kind": "completed", "observation": {"exitCode": 0}}),
+                stdout,
+                false,
+            );
+            assert_eq!(
+                reach_hybrid(&request(), &stub.config(Some("/absolute/phaver".into()))),
+                HybridOutcome::Refused {
+                    reason: "result_schema_invalid"
+                }
+            );
+            assert_eq!(stub.call_count(), 1);
+        }
+    }
+
     #[trace("TC-041", "FR-042-AC-5", "FR-042-AC-7")]
     #[test]
     #[ignore = "verifies bounded producer-execute supervisor timeout and process cleanup"]
@@ -1080,6 +1169,7 @@ mod tests {
                 upper: 0,
             },
             transitions: vec![],
+            empty_targets: BTreeSet::new(),
             horizon: 1,
             error_bound: 0,
         };
@@ -1108,7 +1198,7 @@ mod tests {
     #[trace("TC-041", "FR-042-AC-4", "FR-042-AC-7")]
     #[test]
     fn oracle_accepts_explicit_empty_enclosure_for_unreachable_target() {
-        let unreachable = fit_case(
+        let mut unreachable = fit_case(
             "unreachable-target",
             "m",
             (0, 0),
@@ -1117,6 +1207,7 @@ mod tests {
             0,
             &[("m", "t", 1, 1, 0)],
         );
+        unreachable.request.empty_targets.insert("t".into());
         assert_eq!(
             oracle_next(&unreachable.request, &oracle_initial(&unreachable.request)),
             BTreeMap::from([("m".to_owned(), vec![(0, 0)])])
@@ -1174,13 +1265,20 @@ mod tests {
             })
         );
 
+        let mut empty_request = request();
+        empty_request.empty_targets.insert("t".into());
         let mut empty = valid.clone();
-        empty["steps"][0]["modes"][0]["intervals"] = serde_json::json!([]);
+        for step in 0..=2 {
+            empty["steps"][step]["modes"][1]["intervals"] = serde_json::json!([]);
+        }
         assert_eq!(
-            validate_result_document(&request(), &serde_json::to_vec(&empty).unwrap()).unwrap()[0]
-                [0]
-            .interval,
+            validate_result_document(&empty_request, &serde_json::to_vec(&empty).unwrap()).unwrap()
+                [0][1]
+                .interval,
             None
+        );
+        assert!(
+            validate_result_document(&request(), &serde_json::to_vec(&empty).unwrap()).is_err()
         );
 
         let mut unknown = valid.clone();
@@ -1431,6 +1529,7 @@ mod tests {
                         reset_offset: *reset,
                     })
                     .collect(),
+                empty_targets: BTreeSet::new(),
                 horizon,
                 error_bound,
             },
@@ -1441,7 +1540,7 @@ mod tests {
     #[test]
     #[ignore = "runs the declared PHAVer fit cases through producer-execute"]
     fn tc_041_fit_cases_contain_independent_finite_oracle_states() {
-        let cases = vec![
+        let mut cases = vec![
             fit_case(
                 "F1_underflow",
                 "m",
@@ -1573,6 +1672,13 @@ mod tests {
                 &[("m", "t", 1, 1, 0)],
             ),
         ];
+        cases
+            .iter_mut()
+            .find(|case| case.name == "AC11_unreachable_target")
+            .expect("named unreachable-target fixture")
+            .request
+            .empty_targets
+            .insert("t".into());
         let required = BTreeSet::from([
             "F1_underflow",
             "F1_overflow",
@@ -1681,6 +1787,7 @@ mod tests {
             flow_delta: Interval { lower: 0, upper: 0 },
             horizon: 0,
             error_bound: 0,
+            empty_targets: BTreeSet::new(),
             transitions: (0..100_000)
                 .map(|_| HybridTransition {
                     from_mode: "m".into(),
@@ -1708,6 +1815,7 @@ mod tests {
             flow_delta: Interval { lower: 0, upper: 0 },
             horizon: 0,
             error_bound: 0,
+            empty_targets: BTreeSet::new(),
             transitions: (0..100_000)
                 .map(|index| HybridTransition {
                     from_mode: "m".into(),
