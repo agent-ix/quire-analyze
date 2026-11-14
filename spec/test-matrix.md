@@ -33,6 +33,8 @@ type: TestMatrix
 | FR-005 | FR-005-AC-5 | TC-006, Inspection | 🚧 Stable regressions present; complete retained corpus #24 open |
 | FR-005 | FR-005-AC-6 | TC-007 | ✅ v2 schema, validator, and rejection tests; v1 rejected |
 | FR-008 | FR-008-AC-1, FR-008-AC-2, FR-008-AC-3 | TC-014 | ✅ Bounded canonical synthesis provider complete |
+| FR-009 | FR-009-AC-15 | TC-015 | ✅ Published request-schema validation, budgets, and version/query sequencing tested |
+| FR-009 | FR-009-AC-16 | TC-015 | ✅ Bad version results skip the query and use the result-state outcome |
 | FR-041 | FR-041-AC-1 | Inspection | 🚧 Adversarial set and independent enumeration evidence required |
 | FR-041 | FR-041-AC-2 | Inspection | 🚧 Finding classification evidence required |
 | FR-041 | FR-041-AC-3 | Inspection | 🚧 Caller and consumer inventory required |
