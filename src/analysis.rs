@@ -974,7 +974,8 @@ fn replay_assertions(
                     Some(symbol),
                 )
                 .with_quantifier(
-                    last_quantifier_node.and_then(|node_id| quantifier_results.get(&node_id).cloned()),
+                    last_quantifier_node
+                        .and_then(|node_id| quantifier_results.get(&node_id).cloned()),
                 ));
             }
         };

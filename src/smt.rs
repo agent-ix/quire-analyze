@@ -949,41 +949,80 @@ impl ReplayExpression {
                     .copied()
                     .ok_or(ReplayFault::Unassigned),
             },
-            Self::Not(operand) => {
-                Ok(!operand.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?)
-            }
+            Self::Not(operand) => Ok(!operand.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
             // A guard in the left operand may protect arithmetic in the right one, so the right
             // operand is evaluated only when the left does not decide the result.
-            Self::And(left, right) => {
-                Ok(
-                    left.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?
-                        && right.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?,
-                )
-            }
-            Self::Or(left, right) => {
-                Ok(
-                    left.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?
-                        || right.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?,
-                )
-            }
-            Self::Implies(left, right) => {
-                Ok(
-                    !left.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?
-                        || right.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?,
-                )
-            }
-            Self::Equal(left, right) => {
-                Ok(
-                    left.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?
-                        == right.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?,
-                )
-            }
-            Self::NotEqual(left, right) => {
-                Ok(
-                    left.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?
-                        != right.evaluate_with_context(values, locals, used, quantifier_results, last_quantifier_node)?,
-                )
-            }
+            Self::And(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? && right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Or(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? || right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Implies(left, right) => Ok(!left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? || right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Equal(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? == right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::NotEqual(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? != right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
             Self::Quantifier {
                 node_id,
                 kind,
