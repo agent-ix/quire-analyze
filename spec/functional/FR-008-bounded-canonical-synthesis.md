@@ -26,5 +26,3 @@ candidate discovery distinct from independent validation.
 
 - [StR-001](../stakeholder/StR-001-reviewable-analysis.md) owns the
   deterministic bounded-analysis boundary.
-- [FR-007](./FR-007-sound-hybrid-reachability.md) supplies the shared typed
-  provider-result and non-conclusion boundary.
