@@ -1840,7 +1840,7 @@ impl LowerState<'_> {
         let node_id = u64::try_from(self.quantifiers.entries.len()).map_err(|_| {
             LoweringError::new(
                 LoweringErrorCode::InvalidStatement,
-                path.to_string(),
+                path.render(),
                 "too many quantified nodes to assign replay identities",
             )
         })?;
@@ -1905,7 +1905,7 @@ impl LowerState<'_> {
         let node_id = u64::try_from(self.quantifiers.entries.len()).map_err(|_| {
             LoweringError::new(
                 LoweringErrorCode::InvalidStatement,
-                path.to_string(),
+                path.render(),
                 "too many quantified nodes to assign replay identities",
             )
         })?;
