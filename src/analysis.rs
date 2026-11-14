@@ -487,6 +487,7 @@ impl ReplayFailureReason {
 /// The replay outcome for one original bounded quantifier.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QuantifierReplayResult {
+    pub(crate) node_id: u64,
     pub(crate) source: String,
     pub(crate) element: Option<String>,
     pub(crate) evaluated_count: u128,
@@ -494,6 +495,11 @@ pub struct QuantifierReplayResult {
 }
 
 impl QuantifierReplayResult {
+    /// The stable replay-node identity within the lowered query.
+    pub const fn node_id(&self) -> u64 {
+        self.node_id
+    }
+
     /// The source identity of the quantified assertion.
     pub fn source(&self) -> &str {
         &self.source
@@ -520,23 +526,23 @@ impl fmt::Display for QuantifierReplayResult {
         match (self.holds, self.element()) {
             (true, Some(element)) => write!(
                 formatter,
-                "quantifier {} first holds at element {element} after {} instance(s)",
-                self.source, self.evaluated_count,
+                "quantifier {} (node {}) first holds at element {element} after {} instance(s)",
+                self.source, self.node_id, self.evaluated_count,
             ),
             (true, None) => write!(
                 formatter,
-                "universal quantifier {} holds across {} instance(s)",
-                self.source, self.evaluated_count,
+                "universal quantifier {} (node {}) holds across {} instance(s)",
+                self.source, self.node_id, self.evaluated_count,
             ),
             (false, Some(element)) => write!(
                 formatter,
-                "universal quantifier {} first fails at element {element} after {} instance(s)",
-                self.source, self.evaluated_count,
+                "universal quantifier {} (node {}) first fails at element {element} after {} instance(s)",
+                self.source, self.node_id, self.evaluated_count,
             ),
             (false, None) => write!(
                 formatter,
-                "existential quantifier {} has no holding instance after {} instance(s)",
-                self.source, self.evaluated_count,
+                "existential quantifier {} (node {}) has no holding instance after {} instance(s)",
+                self.source, self.node_id, self.evaluated_count,
             ),
         }
     }
@@ -942,16 +948,18 @@ fn replay_assertions(
     let mut quantifier_instances = 0;
     let mut all_quantifier_results = Vec::new();
     for assertion in assertions {
-        let mut quantifier_results = Vec::new();
+        let mut quantifier_results = BTreeMap::new();
+        let mut last_quantifier_node = None;
         let reason = match assertion.expression.evaluate_with_context(
             assignment,
             &mut locals,
             &mut quantifier_instances,
             &mut quantifier_results,
+            &mut last_quantifier_node,
         ) {
             Ok(true) => {
                 replayed.push(assertion.name.clone());
-                all_quantifier_results.extend(quantifier_results);
+                all_quantifier_results.extend(quantifier_results.into_values());
                 continue;
             }
             Ok(false)
@@ -965,11 +973,15 @@ fn replay_assertions(
                     ReplayFailureReason::BoundUndecodable,
                     Some(symbol),
                 )
-                .with_quantifier(quantifier_results.pop()));
+                .with_quantifier(
+                    last_quantifier_node.and_then(|node_id| quantifier_results.get(&node_id).cloned()),
+                ));
             }
         };
         let quantifier = (reason == ReplayFailureReason::AssertionFalse)
-            .then(|| quantifier_results.pop())
+            .then(|| {
+                last_quantifier_node.and_then(|node_id| quantifier_results.get(&node_id).cloned())
+            })
             .flatten();
         return Err(
             ReplayFailure::new(reason, Some(assertion.name.clone())).with_quantifier(quantifier)
@@ -1847,6 +1859,7 @@ mod tests {
         let assertions = [ReplayAssertion {
             name: "assertion-1".to_owned(),
             expression: ReplayExpression::Quantifier {
+                node_id: 2,
                 kind: quire_contract_model::QuantifierKind::ForAll,
                 local: local.clone(),
                 source: "source-Q".to_owned(),

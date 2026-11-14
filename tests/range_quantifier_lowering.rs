@@ -1271,6 +1271,33 @@ fn bounded_quantifier_models_replay_from_declared_bounds() {
     assert!(replay.holds());
 }
 
+/// FR-033-AC-3 and NFR-031-AC-1: the public classifier preserves solver status while abstaining
+/// when typed replay would exceed its per-request instance limit.
+#[trace("TC-030", "FR-033-AC-3", "NFR-031-AC-1")]
+#[test]
+fn classify_analysis_exposes_over_limit_replay_as_incomplete() {
+    let formula = literal_range(
+        "Q-over-limit",
+        QuantifierKind::ForAll,
+        0,
+        1_048_576,
+        term(node(ExpressionKind::BooleanLiteral { value: true })),
+    );
+    let query = analysis_query(vec![statement("over-limit", formula)]);
+    let conclusion = classify_analysis(
+        &query,
+        &response_record(&query, "sat\n(model)\n", SolverEngine::Z3),
+    );
+    assert_eq!(conclusion.status(), AnalysisStatus::Satisfied);
+    assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+    let failure = conclusion
+        .replay_failure()
+        .expect("limit failure is public");
+    assert_eq!(failure.reason(), ReplayFailureReason::ReplayLimitExceeded);
+    assert_eq!(failure.reason().as_str(), "replay_limit_exceeded");
+    assert!(conclusion.verified_model().is_none());
+}
+
 /// FR-033-AC-6: every unusable declared range bound is incomplete and names that bound symbol;
 /// an inverted interval is the empty domain.
 #[trace("TC-030", "FR-033-AC-6")]
@@ -1554,6 +1581,130 @@ fn finite_collection_quantifiers_report_the_selected_typed_member() {
             assert_eq!(result.evaluated_count(), count);
         }
     }
+}
+
+/// FR-033-AC-4: replay keeps distinct quantified nodes even when their source identities repeat.
+#[trace("TC-030", "FR-033-AC-4", "FR-033-AC-9")]
+#[test]
+fn repeated_quantifier_source_identities_keep_each_node_result() {
+    let quantified = |local_name| {
+        domain_quantifier(
+            "Q-shared-source",
+            QuantifierKind::ForAll,
+            local_name,
+            ValueType::Boolean,
+            QuantifierDomain::Collection {
+                kind: CollectionKind::Sequence,
+                elements: vec![DomainElement::Boolean(true)],
+            },
+            term(node(ExpressionKind::BooleanLiteral { value: true })),
+        )
+    };
+    let formula = AnalysisFormula::And(Box::new(quantified("left")), Box::new(quantified("right")));
+    let query = analysis_query(vec![statement("repeated-source", formula)]);
+    let conclusion = classify_analysis(
+        &query,
+        &response_record(&query, "sat\n(model)\n", SolverEngine::Z3),
+    );
+    let results = conclusion
+        .verified_model()
+        .expect("both quantified nodes hold")
+        .quantifier_results();
+    assert_eq!(results.len(), 2);
+    assert!(results
+        .iter()
+        .all(|result| result.source() == "Q-shared-source"));
+    assert_ne!(results[0].node_id(), results[1].node_id());
+    assert!(results.iter().all(|result| result.holds()));
+}
+
+/// FR-033-AC-4: enum and finite-collection domains also cover passing universal and failing
+/// existential models.
+#[trace("TC-030", "FR-033-AC-4")]
+#[test]
+fn enum_and_collection_domains_cover_complementary_outcomes() {
+    fn assert_constant_outcome(
+        source: &str,
+        kind: QuantifierKind,
+        domain: QuantifierDomain,
+        local_type: ValueType,
+        body_holds: bool,
+        expected_count: u128,
+    ) {
+        let formula = domain_quantifier(
+            source,
+            kind,
+            "member",
+            local_type,
+            domain,
+            term(node(ExpressionKind::BooleanLiteral { value: body_holds })),
+        );
+        let query = analysis_query(vec![statement(source, formula)]);
+        let conclusion = classify_analysis(
+            &query,
+            &response_record(&query, "sat\n(model)\n", SolverEngine::Z3),
+        );
+        if body_holds {
+            assert_eq!(conclusion.explanation(), ExplanationState::Verified);
+            let result = conclusion
+                .verified_model()
+                .expect("passing universal model verifies")
+                .quantifier_results()
+                .first()
+                .expect("quantifier replay result");
+            assert_eq!(result.source(), source);
+            assert_eq!(result.evaluated_count(), expected_count);
+            assert!(result.holds());
+        } else {
+            assert_eq!(conclusion.explanation(), ExplanationState::Incomplete);
+            let result = conclusion
+                .replay_failure()
+                .expect("failing existential model is incomplete")
+                .quantifier()
+                .expect("quantifier failure details");
+            assert_eq!(result.source(), source);
+            assert_eq!(result.element(), None);
+            assert_eq!(result.evaluated_count(), expected_count);
+            assert!(!result.holds());
+        }
+    }
+
+    let collection = QuantifierDomain::Collection {
+        kind: CollectionKind::Sequence,
+        elements: vec![DomainElement::Boolean(false), DomainElement::Boolean(true)],
+    };
+    assert_constant_outcome(
+        "Q-bool-collection-forall-pass",
+        QuantifierKind::ForAll,
+        collection.clone(),
+        ValueType::Boolean,
+        true,
+        2,
+    );
+    assert_constant_outcome(
+        "Q-bool-collection-exists-fail",
+        QuantifierKind::Exists,
+        collection,
+        ValueType::Boolean,
+        false,
+        2,
+    );
+    assert_constant_outcome(
+        "Q-enum-forall-pass",
+        QuantifierKind::ForAll,
+        QuantifierDomain::Enum(symbol("Role")),
+        role_type(),
+        true,
+        2,
+    );
+    assert_constant_outcome(
+        "Q-enum-exists-fail",
+        QuantifierKind::Exists,
+        QuantifierDomain::Enum(symbol("Role")),
+        role_type(),
+        false,
+        2,
+    );
 }
 
 /// FR-032-AC-1: real solvers decide the expanded and bounded fixtures; run only where installed.
