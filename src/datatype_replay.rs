@@ -77,6 +77,8 @@ impl ReplayShape {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ReplayDatum {
     Variable(String),
+    /// A typed value supplied by a finite quantifier instance.
+    Local(String),
     /// An enum literal, by its constructor symbol.
     Enum(String),
     /// A record literal, every field in declared field order.
@@ -101,28 +103,35 @@ pub(crate) enum ReplayItem {
 }
 
 impl ReplayDatum {
-    pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<ReplayValue, ReplayFault> {
+    pub(crate) fn evaluate_with_locals(
+        &self,
+        values: &ReplayAssignment,
+        locals: &BTreeMap<String, ReplayValue>,
+    ) -> Result<ReplayValue, ReplayFault> {
         match self {
             Self::Variable(symbol) => values
                 .datums
                 .get(symbol)
                 .cloned()
                 .ok_or(ReplayFault::Unassigned),
+            Self::Local(symbol) => locals.get(symbol).cloned().ok_or(ReplayFault::Unassigned),
             Self::Enum(constructor) => Ok(ReplayValue::Enum(constructor.clone())),
             Self::Record(items) => items
                 .iter()
-                .map(|item| item.evaluate(values))
+                .map(|item| item.evaluate_with_locals(values, locals))
                 .collect::<Result<Vec<_>, _>>()
                 .map(ReplayValue::Record),
-            Self::Field { base, index } => match base.evaluate(values)? {
+            Self::Field { base, index } => match base.evaluate_with_locals(values, locals)? {
                 ReplayValue::Record(mut fields) if *index < fields.len() => {
                     Ok(fields.swap_remove(*index))
                 }
                 _ => Err(ReplayFault::IllTyped),
             },
             Self::None => Ok(ReplayValue::Option(None)),
-            Self::Some(item) => Ok(ReplayValue::Option(Some(Box::new(item.evaluate(values)?)))),
-            Self::Unwrap(option) => match option.evaluate(values)? {
+            Self::Some(item) => Ok(ReplayValue::Option(Some(Box::new(
+                item.evaluate_with_locals(values, locals)?,
+            )))),
+            Self::Unwrap(option) => match option.evaluate_with_locals(values, locals)? {
                 ReplayValue::Option(Some(payload)) => Ok(*payload),
                 ReplayValue::Option(None) => Err(ReplayFault::AbsentOption),
                 _ => Err(ReplayFault::IllTyped),
@@ -132,11 +141,19 @@ impl ReplayDatum {
 }
 
 impl ReplayItem {
-    pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<ReplayValue, ReplayFault> {
+    pub(crate) fn evaluate_with_locals(
+        &self,
+        values: &ReplayAssignment,
+        locals: &BTreeMap<String, ReplayValue>,
+    ) -> Result<ReplayValue, ReplayFault> {
         match self {
-            Self::Bool(expression) => expression.evaluate(values).map(ReplayValue::Bool),
-            Self::Int(term) => term.evaluate(values).map(ReplayValue::Int),
-            Self::Datum(datum) => datum.evaluate(values),
+            Self::Bool(expression) => expression
+                .evaluate_with_locals(values, locals)
+                .map(ReplayValue::Bool),
+            Self::Int(term) => term
+                .evaluate_with_locals(values, locals)
+                .map(ReplayValue::Int),
+            Self::Datum(datum) => datum.evaluate_with_locals(values, locals),
         }
     }
 }

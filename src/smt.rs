@@ -14,9 +14,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::datatype_replay::{ReplayDatum, ReplayItem, ReplayShape, ReplayValue};
 use crate::quantifier::{
-    AnalysisFormula, DomainElement, DomainQuantifier, QuantifierDomain, QuantifierEncoding,
-    QuantifierEntry, QuantifierEntryDomain, QuantifierReason, QuantifierRefusal, RangeBound,
-    RangeQuantifier, expansion_cost, literal_width,
+    expansion_cost, literal_width, AnalysisFormula, DomainElement, DomainQuantifier,
+    QuantifierDomain, QuantifierEncoding, QuantifierEntry, QuantifierEntryDomain, QuantifierReason,
+    QuantifierRefusal, RangeBound, RangeQuantifier,
 };
 
 /// The accepted engine-neutral analysis model profile.
@@ -769,14 +769,16 @@ pub(crate) struct ReplayAssignment {
 }
 
 /// Why a replay expression produced no verdict.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ReplayFault {
     /// An intermediate result left the 128-bit signed range.
     Overflow,
     /// A referenced symbol has no value in the assignment.
     Unassigned,
-    /// The expression involves a bounded solver quantifier, which is not replayed yet (VER-92).
-    QuantifierUnreplayed,
+    /// The request exceeded the maximum number of concrete quantifier instances.
+    QuantifierLimitExceeded,
+    /// A declared range bound could not be decoded from the model.
+    BoundUndecodable(String),
     /// An `Unwrap` was evaluated on an absent option.
     AbsentOption,
     /// A term evaluated to a value of the wrong type for its position.
@@ -795,39 +797,44 @@ pub(crate) enum ReplayTerm {
         factor: i128,
         term: Box<Self>,
     },
-    /// The bound variable of a bounded solver quantifier, which is not replayed yet (VER-92).
-    QuantifierUnreplayed,
     /// An integer read out of a datatype value.
     Datum(Box<ReplayDatum>),
 }
 
 impl ReplayTerm {
-    pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<i128, ReplayFault> {
+    pub(crate) fn evaluate_with_locals(
+        &self,
+        values: &ReplayAssignment,
+        locals: &BTreeMap<String, ReplayValue>,
+    ) -> Result<i128, ReplayFault> {
         match self {
             Self::Constant(value) => Ok(*value),
-            Self::Variable(symbol) => values
-                .integers
-                .get(symbol)
-                .copied()
-                .ok_or(ReplayFault::Unassigned),
+            Self::Variable(symbol) => match locals.get(symbol) {
+                Some(ReplayValue::Int(value)) => Ok(*value),
+                Some(_) => Err(ReplayFault::IllTyped),
+                None => values
+                    .integers
+                    .get(symbol)
+                    .copied()
+                    .ok_or(ReplayFault::Unassigned),
+            },
             Self::Negate(operand) => operand
-                .evaluate(values)?
+                .evaluate_with_locals(values, locals)?
                 .checked_neg()
                 .ok_or(ReplayFault::Overflow),
             Self::Add(left, right) => left
-                .evaluate(values)?
-                .checked_add(right.evaluate(values)?)
+                .evaluate_with_locals(values, locals)?
+                .checked_add(right.evaluate_with_locals(values, locals)?)
                 .ok_or(ReplayFault::Overflow),
             Self::Subtract(left, right) => left
-                .evaluate(values)?
-                .checked_sub(right.evaluate(values)?)
+                .evaluate_with_locals(values, locals)?
+                .checked_sub(right.evaluate_with_locals(values, locals)?)
                 .ok_or(ReplayFault::Overflow),
             Self::Scale { factor, term } => term
-                .evaluate(values)?
+                .evaluate_with_locals(values, locals)?
                 .checked_mul(*factor)
                 .ok_or(ReplayFault::Overflow),
-            Self::QuantifierUnreplayed => Err(ReplayFault::QuantifierUnreplayed),
-            Self::Datum(datum) => match datum.evaluate(values)? {
+            Self::Datum(datum) => match datum.evaluate_with_locals(values, locals)? {
                 ReplayValue::Int(value) => Ok(value),
                 _ => Err(ReplayFault::IllTyped),
             },
@@ -845,9 +852,15 @@ pub(crate) enum ReplayExpression {
     Implies(Box<Self>, Box<Self>),
     Equal(Box<Self>, Box<Self>),
     NotEqual(Box<Self>, Box<Self>),
-    /// A bounded solver quantifier. Its replay is not implemented yet (VER-92), so it never
-    /// evaluates to a verdict.
-    QuantifierUnreplayed,
+    /// An original bounded quantifier retained for typed in-process replay.
+    Quantifier {
+        node_id: u64,
+        kind: QuantifierKind,
+        local: String,
+        source: String,
+        domain: ReplayQuantifierDomain,
+        body: Box<Self>,
+    },
     /// A datatype-valued term. Evaluated as a Boolean it must read a Boolean out of the datatype.
     Datum(Box<ReplayDatum>),
     /// An integer-valued term lowered where a typed value is carried (a record field or payload).
@@ -868,30 +881,171 @@ pub(crate) enum ReplayExpression {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ReplayQuantifierDomain {
+    Range {
+        lower: ReplayTerm,
+        lower_symbol: Option<String>,
+        upper: ReplayTerm,
+        upper_symbol: Option<String>,
+    },
+    Elements(Vec<ReplayQuantifierElement>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReplayQuantifierElement {
+    pub(crate) value: ReplayValue,
+    pub(crate) label: String,
+}
+
+pub(crate) type ReplayQuantifierResult = crate::analysis::QuantifierReplayResult;
+
 impl ReplayExpression {
+    #[cfg(test)]
     pub(crate) fn evaluate(&self, values: &ReplayAssignment) -> Result<bool, ReplayFault> {
+        let mut locals = BTreeMap::new();
+        let mut used = 0;
+        self.evaluate_with_context(
+            values,
+            &mut locals,
+            &mut used,
+            &mut BTreeMap::new(),
+            &mut None,
+        )
+    }
+
+    pub(crate) fn evaluate_with_locals(
+        &self,
+        values: &ReplayAssignment,
+        locals: &BTreeMap<String, ReplayValue>,
+    ) -> Result<bool, ReplayFault> {
+        let mut locals = locals.clone();
+        let mut used = 0;
+        self.evaluate_with_context(
+            values,
+            &mut locals,
+            &mut used,
+            &mut BTreeMap::new(),
+            &mut None,
+        )
+    }
+
+    pub(crate) fn evaluate_with_context(
+        &self,
+        values: &ReplayAssignment,
+        locals: &mut BTreeMap<String, ReplayValue>,
+        used: &mut u128,
+        quantifier_results: &mut BTreeMap<u64, ReplayQuantifierResult>,
+        last_quantifier_node: &mut Option<u64>,
+    ) -> Result<bool, ReplayFault> {
         match self {
             Self::Literal(value) => Ok(*value),
-            Self::Variable(symbol) => values
-                .booleans
-                .get(symbol)
-                .copied()
-                .ok_or(ReplayFault::Unassigned),
-            Self::Not(operand) => Ok(!operand.evaluate(values)?),
+            Self::Variable(symbol) => match locals.get(symbol) {
+                Some(ReplayValue::Bool(value)) => Ok(*value),
+                Some(_) => Err(ReplayFault::IllTyped),
+                None => values
+                    .booleans
+                    .get(symbol)
+                    .copied()
+                    .ok_or(ReplayFault::Unassigned),
+            },
+            Self::Not(operand) => Ok(!operand.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
             // A guard in the left operand may protect arithmetic in the right one, so the right
             // operand is evaluated only when the left does not decide the result.
-            Self::And(left, right) => Ok(left.evaluate(values)? && right.evaluate(values)?),
-            Self::Or(left, right) => Ok(left.evaluate(values)? || right.evaluate(values)?),
-            Self::Implies(left, right) => Ok(!left.evaluate(values)? || right.evaluate(values)?),
-            Self::Equal(left, right) => Ok(left.evaluate(values)? == right.evaluate(values)?),
-            Self::NotEqual(left, right) => Ok(left.evaluate(values)? != right.evaluate(values)?),
-            Self::QuantifierUnreplayed => Err(ReplayFault::QuantifierUnreplayed),
-            Self::Datum(datum) => match datum.evaluate(values)? {
+            Self::And(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? && right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Or(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? || right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Implies(left, right) => Ok(!left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? || right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Equal(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? == right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::NotEqual(left, right) => Ok(left.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )? != right.evaluate_with_context(
+                values,
+                locals,
+                used,
+                quantifier_results,
+                last_quantifier_node,
+            )?),
+            Self::Quantifier {
+                node_id,
+                kind,
+                local,
+                source,
+                domain,
+                body,
+            } => {
+                let mut context = ReplayEvaluationContext {
+                    values,
+                    locals,
+                    used,
+                    quantifier_results,
+                    last_quantifier_node,
+                };
+                evaluate_quantifier(*node_id, *kind, local, source, domain, body, &mut context)
+            }
+            Self::Datum(datum) => match datum.evaluate_with_locals(values, locals)? {
                 ReplayValue::Bool(value) => Ok(value),
                 _ => Err(ReplayFault::IllTyped),
             },
             Self::Integer(_) => Err(ReplayFault::IllTyped),
-            Self::IsPresent(option) => match option.evaluate(values)? {
+            Self::IsPresent(option) => match option.evaluate_with_locals(values, locals)? {
                 ReplayValue::Option(value) => Ok(value.is_some()),
                 _ => Err(ReplayFault::IllTyped),
             },
@@ -899,13 +1053,18 @@ impl ReplayExpression {
                 left,
                 right,
                 negated,
-            } => Ok((left.evaluate(values)? == right.evaluate(values)?) != *negated),
+            } => Ok((left.evaluate_with_locals(values, locals)?
+                == right.evaluate_with_locals(values, locals)?)
+                != *negated),
             Self::Compare {
                 operator,
                 left,
                 right,
             } => {
-                let (left, right) = (left.evaluate(values)?, right.evaluate(values)?);
+                let (left, right) = (
+                    left.evaluate_with_locals(values, locals)?,
+                    right.evaluate_with_locals(values, locals)?,
+                );
                 Ok(match operator {
                     ComparisonOperator::Equal => left == right,
                     ComparisonOperator::NotEqual => left != right,
@@ -916,6 +1075,134 @@ impl ReplayExpression {
                 })
             }
         }
+    }
+}
+
+/// Maximum number of concrete bounded-quantifier instances replayed in one model request.
+pub(crate) const MAX_REPLAY_QUANTIFIER_INSTANCES: u128 = 1_048_576;
+
+struct ReplayEvaluationContext<'a> {
+    values: &'a ReplayAssignment,
+    locals: &'a mut BTreeMap<String, ReplayValue>,
+    used: &'a mut u128,
+    quantifier_results: &'a mut BTreeMap<u64, ReplayQuantifierResult>,
+    last_quantifier_node: &'a mut Option<u64>,
+}
+
+fn evaluate_quantifier(
+    node_id: u64,
+    kind: QuantifierKind,
+    local: &str,
+    source: &str,
+    domain: &ReplayQuantifierDomain,
+    body: &ReplayExpression,
+    context: &mut ReplayEvaluationContext<'_>,
+) -> Result<bool, ReplayFault> {
+    let mut instances: Box<dyn Iterator<Item = (ReplayValue, String)> + '_> = match domain {
+        ReplayQuantifierDomain::Range {
+            lower,
+            lower_symbol,
+            upper,
+            upper_symbol,
+        } => {
+            let lower = lower
+                .evaluate_with_locals(context.values, context.locals)
+                .map_err(|fault| bound_fault(fault, lower_symbol.as_deref()))?;
+            let upper = upper
+                .evaluate_with_locals(context.values, context.locals)
+                .map_err(|fault| bound_fault(fault, upper_symbol.as_deref()))?;
+            let range: Box<dyn Iterator<Item = (ReplayValue, String)> + '_> = if lower <= upper {
+                Box::new(
+                    std::iter::successors(Some(lower), move |current| {
+                        (*current < upper).then(|| current.checked_add(1)).flatten()
+                    })
+                    .map(|value| (ReplayValue::Int(value), value.to_string())),
+                )
+            } else {
+                Box::new(std::iter::empty())
+            };
+            range
+        }
+        ReplayQuantifierDomain::Elements(elements) => Box::new(
+            elements
+                .iter()
+                .map(|element| (element.value.clone(), element.label.clone())),
+        ),
+    };
+    let previous = context.locals.get(local).cloned();
+    let mut evaluated_count = 0_u128;
+    let mut selected_element = None;
+    let mut holds = kind == QuantifierKind::ForAll;
+    for (element, label) in instances.by_ref() {
+        let Some(next_used) = context.used.checked_add(1) else {
+            restore_local(context.locals, local, previous);
+            return Err(ReplayFault::QuantifierLimitExceeded);
+        };
+        if next_used > MAX_REPLAY_QUANTIFIER_INSTANCES {
+            restore_local(context.locals, local, previous);
+            return Err(ReplayFault::QuantifierLimitExceeded);
+        }
+        *context.used = next_used;
+        evaluated_count += 1;
+        context.locals.insert(local.to_owned(), element);
+        let body_holds = match body.evaluate_with_context(
+            context.values,
+            context.locals,
+            context.used,
+            context.quantifier_results,
+            context.last_quantifier_node,
+        ) {
+            Ok(holds) => holds,
+            Err(fault) => {
+                restore_local(context.locals, local, previous);
+                return Err(fault);
+            }
+        };
+        match kind {
+            QuantifierKind::ForAll if !body_holds => {
+                holds = false;
+                selected_element = Some(label);
+                break;
+            }
+            QuantifierKind::Exists if body_holds => {
+                holds = true;
+                selected_element = Some(label);
+                break;
+            }
+            _ => {}
+        }
+    }
+    restore_local(context.locals, local, previous);
+    let result = ReplayQuantifierResult {
+        node_id,
+        source: source.to_owned(),
+        element: selected_element,
+        evaluated_count,
+        holds,
+    };
+    context.quantifier_results.insert(node_id, result);
+    *context.last_quantifier_node = Some(node_id);
+    Ok(holds)
+}
+
+fn bound_fault(fault: ReplayFault, symbol: Option<&str>) -> ReplayFault {
+    match fault {
+        ReplayFault::Unassigned | ReplayFault::IllTyped => {
+            ReplayFault::BoundUndecodable(symbol.unwrap_or("<bound>").to_owned())
+        }
+        other => other,
+    }
+}
+
+fn restore_local(
+    locals: &mut BTreeMap<String, ReplayValue>,
+    local: &str,
+    previous: Option<ReplayValue>,
+) {
+    if let Some(value) = previous {
+        locals.insert(local.to_owned(), value);
+    } else {
+        locals.remove(local);
     }
 }
 
@@ -1419,7 +1706,9 @@ enum LocalValue {
 
 /// The members one expanded quantifier ranges over, with the bound variable they bind.
 struct Instances<'a, I> {
+    node_id: u64,
     kind: QuantifierKind,
+    source: &'a str,
     local: &'a SymbolName,
     local_type: &'a ValueType,
     members: I,
@@ -1434,6 +1723,7 @@ enum Planned<'f> {
     Implies(Box<Planned<'f>>, Box<Planned<'f>>),
     /// A literal range expanded to one body instance per element.
     Expanded {
+        node_id: u64,
         quantifier: &'f RangeQuantifier,
         lower: i128,
         upper: i128,
@@ -1441,12 +1731,14 @@ enum Planned<'f> {
     },
     /// An enum or collection domain expanded to one body instance per member, in domain order.
     Enumerated {
+        node_id: u64,
         quantifier: &'f DomainQuantifier,
         members: Vec<LocalValue>,
         body: Box<Planned<'f>>,
     },
     /// A solver quantifier with a finite interval guard.
     Bounded {
+        node_id: u64,
         quantifier: &'f RangeQuantifier,
         lower: FiniteBound<'f>,
         upper: FiniteBound<'f>,
@@ -1545,6 +1837,13 @@ impl LowerState<'_> {
             Some((_, _, count)) => (QuantifierEncoding::Expanded, count),
             None => (QuantifierEncoding::Bounded, 0),
         };
+        let node_id = u64::try_from(self.quantifiers.entries.len()).map_err(|_| {
+            LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                path.render(),
+                "too many quantified nodes to assign replay identities",
+            )
+        })?;
         // `count` is at most the budget, so neither sum can overflow.
         self.quantifiers.used += count;
         self.quantifiers.entries.push(QuantifierEntry {
@@ -1563,6 +1862,7 @@ impl LowerState<'_> {
                 // The body's instance count is this quantifier's, already multiplied.
                 let body = self.plan(&quantifier.body, depth + 1, &body_path, count)?;
                 Planned::Expanded {
+                    node_id,
                     quantifier,
                     lower: low,
                     upper: high,
@@ -1572,6 +1872,7 @@ impl LowerState<'_> {
             None => {
                 let body = self.plan(&quantifier.body, depth + 1, &body_path, enclosing)?;
                 Planned::Bounded {
+                    node_id,
                     quantifier,
                     lower,
                     upper,
@@ -1601,6 +1902,13 @@ impl LowerState<'_> {
                 "domain expansion exceeds the instance budget (expansion-ceiling)",
             ));
         };
+        let node_id = u64::try_from(self.quantifiers.entries.len()).map_err(|_| {
+            LoweringError::new(
+                LoweringErrorCode::InvalidStatement,
+                path.render(),
+                "too many quantified nodes to assign replay identities",
+            )
+        })?;
         // `count` is at most the budget, so the sum cannot overflow.
         self.quantifiers.used += count;
         self.quantifiers.entries.push(QuantifierEntry {
@@ -1626,6 +1934,7 @@ impl LowerState<'_> {
             .collect();
         let body = self.plan(&quantifier.body, depth + 1, &path.child("body"), count)?;
         Ok(Planned::Enumerated {
+            node_id,
             quantifier,
             members,
             body: Box::new(body),
@@ -1796,18 +2105,22 @@ impl LowerState<'_> {
                 })
             }
             Planned::Expanded {
+                node_id,
                 quantifier,
                 lower,
                 upper,
                 body,
-            } => self.lower_expanded(quantifier, (*lower, *upper), body, depth, path),
+            } => self.lower_expanded(*node_id, quantifier, (*lower, *upper), body, depth, path),
             Planned::Enumerated {
+                node_id,
                 quantifier,
                 members,
                 body,
             } => self.lower_instances(
                 Instances {
+                    node_id: *node_id,
                     kind: quantifier.kind,
+                    source: &quantifier.identity,
                     local: &quantifier.local,
                     local_type: &quantifier.local_type,
                     members: members.iter().cloned(),
@@ -1817,11 +2130,12 @@ impl LowerState<'_> {
                 path,
             ),
             Planned::Bounded {
+                node_id,
                 quantifier,
                 lower,
                 upper,
                 body,
-            } => self.lower_bounded(quantifier, (*lower, *upper), body, depth, path),
+            } => self.lower_bounded(*node_id, quantifier, (*lower, *upper), body, depth, path),
         }
     }
 
@@ -1829,6 +2143,7 @@ impl LowerState<'_> {
     /// disjunction for an existential quantifier, in ascending element order.
     fn lower_expanded(
         &mut self,
+        node_id: u64,
         quantifier: &RangeQuantifier,
         (lower, upper): (i128, i128),
         body: &Planned<'_>,
@@ -1838,7 +2153,9 @@ impl LowerState<'_> {
         let local_type = ValueType::integer(quantifier.local_type.clone());
         self.lower_instances(
             Instances {
+                node_id,
                 kind: quantifier.kind,
+                source: &quantifier.identity,
                 local: &quantifier.local,
                 local_type: &local_type,
                 members: (lower..=upper).map(LocalValue::Element),
@@ -1859,12 +2176,13 @@ impl LowerState<'_> {
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
         let universal = instances.kind == QuantifierKind::ForAll;
+        let members = instances.members.collect::<Vec<_>>();
         let mut parts = Vec::new();
-        for value in instances.members {
+        for value in &members {
             self.scope.push(LocalBinding {
                 name: instances.local.clone(),
                 value_type: instances.local_type.clone(),
-                value,
+                value: value.clone(),
             });
             let instance = self.lower_planned(body, depth + 1, &path.child("body"));
             self.scope.pop();
@@ -1875,44 +2193,86 @@ impl LowerState<'_> {
         } else {
             ("or", false)
         };
-        if parts.len() <= 1 {
-            return Ok(parts.pop().unwrap_or(LoweredExpression {
-                smt: empty.to_string(),
-                replay: ReplayExpression::Literal(empty),
-            }));
-        }
-        let smt = format!(
-            "({operator} {})",
-            parts
-                .iter()
-                .map(|part| part.smt.as_str())
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
-        let mut replays = parts.into_iter().map(|part| part.replay);
-        let first = replays.next().unwrap_or(ReplayExpression::Literal(empty));
-        let replay = replays.fold(first, |accumulated, next| {
-            if universal {
-                ReplayExpression::And(Box::new(accumulated), Box::new(next))
-            } else {
-                ReplayExpression::Or(Box::new(accumulated), Box::new(next))
-            }
+        let smt = if parts.is_empty() {
+            empty.to_string()
+        } else if parts.len() == 1 {
+            parts[0].smt.clone()
+        } else {
+            format!(
+                "({operator} {})",
+                parts
+                    .iter()
+                    .map(|part| part.smt.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        };
+
+        let symbol = format!("bv_{}", self.bound_depth);
+        self.scope.push(LocalBinding {
+            name: instances.local.clone(),
+            value_type: instances.local_type.clone(),
+            value: LocalValue::Symbol(symbol.clone()),
         });
-        Ok(LoweredExpression { smt, replay })
+        self.bound_depth += 1;
+        let replay_body = self.lower_planned(body, depth + 1, &path.child("body"));
+        self.bound_depth -= 1;
+        self.scope.pop();
+        let replay_body = replay_body?;
+        let mut replay_elements = Vec::with_capacity(members.len());
+        for member in members {
+            replay_elements.push(match member {
+                LocalValue::Element(value) => ReplayQuantifierElement {
+                    value: ReplayValue::Int(value),
+                    label: value.to_string(),
+                },
+                LocalValue::Boolean(value) => ReplayQuantifierElement {
+                    value: ReplayValue::Bool(value),
+                    label: value.to_string(),
+                },
+                LocalValue::Variant {
+                    enumeration,
+                    variant,
+                } => ReplayQuantifierElement {
+                    value: ReplayValue::Enum(self.lower_enum_variant(&enumeration, &variant)?.smt),
+                    label: variant.as_str().to_owned(),
+                },
+                LocalValue::Symbol(_) => {
+                    return Err(LoweringError::new(
+                        LoweringErrorCode::InvalidStatement,
+                        "quantifier",
+                        "a symbolic variable cannot be an expanded domain member",
+                    ));
+                }
+            });
+        }
+        Ok(LoweredExpression {
+            smt,
+            replay: ReplayExpression::Quantifier {
+                node_id: instances.node_id,
+                kind: instances.kind,
+                local: symbol,
+                source: instances.source.to_owned(),
+                domain: ReplayQuantifierDomain::Elements(replay_elements),
+                body: Box::new(replay_body.replay),
+            },
+        })
     }
 
     /// A solver quantifier whose finite interval guard conjoins both bounds to the bound
     /// variable. The body is lowered once, over the bound variable's symbol.
     fn lower_bounded(
         &mut self,
+        node_id: u64,
         quantifier: &RangeQuantifier,
         (lower, upper): (FiniteBound<'_>, FiniteBound<'_>),
         body: &Planned<'_>,
         depth: usize,
         path: &ExprPath<'_>,
     ) -> Result<LoweredExpression, LoweringError> {
-        let lower = self.bound_term(lower)?;
-        let upper = self.bound_term(upper)?;
+        let (lower_bound, upper_bound) = (lower, upper);
+        let lower = self.bound_term(lower_bound)?;
+        let upper = self.bound_term(upper_bound)?;
         let symbol = format!("bv_{}", self.bound_depth);
         self.scope.push(LocalBinding {
             name: quantifier.local.clone(),
@@ -1934,10 +2294,37 @@ impl LowerState<'_> {
         } else {
             format!("(exists (({symbol} Int)) (and {guard} {}))", lowered.smt)
         };
+        let (lower_term, lower_symbol) = self.replay_bound(lower_bound)?;
+        let (upper_term, upper_symbol) = self.replay_bound(upper_bound)?;
         Ok(LoweredExpression {
             smt,
-            replay: ReplayExpression::QuantifierUnreplayed,
+            replay: ReplayExpression::Quantifier {
+                node_id,
+                kind: quantifier.kind,
+                local: symbol,
+                source: quantifier.identity.clone(),
+                domain: ReplayQuantifierDomain::Range {
+                    lower: lower_term,
+                    lower_symbol,
+                    upper: upper_term,
+                    upper_symbol,
+                },
+                body: Box::new(lowered.replay),
+            },
         })
+    }
+
+    fn replay_bound(
+        &mut self,
+        bound: FiniteBound<'_>,
+    ) -> Result<(ReplayTerm, Option<String>), LoweringError> {
+        match bound {
+            FiniteBound::Literal(value) => Ok((ReplayTerm::Constant(value), None)),
+            FiniteBound::Declared(name) => {
+                let symbol = self.reference(name, StateObservation::Current)?;
+                Ok((ReplayTerm::Variable(symbol.clone()), Some(symbol)))
+            }
+        }
     }
 
     /// The query term of a finite range bound.
@@ -1996,7 +2383,21 @@ impl LowerState<'_> {
                         enumeration,
                         variant,
                     } => self.lower_enum_variant(&enumeration, &variant),
-                    LocalValue::Element(_) | LocalValue::Symbol(_) => Err(unsupported(
+                    LocalValue::Symbol(symbol) => match &binding.value_type {
+                        ValueType::Boolean => Ok(LoweredExpression {
+                            smt: symbol.clone(),
+                            replay: ReplayExpression::Variable(symbol),
+                        }),
+                        ValueType::Enum { .. } => Ok(LoweredExpression {
+                            smt: symbol.clone(),
+                            replay: ReplayExpression::Datum(Box::new(ReplayDatum::Local(symbol))),
+                        }),
+                        _ => Err(unsupported(
+                            &path.render(),
+                            "an integer bound variable is not a Boolean term",
+                        )),
+                    },
+                    LocalValue::Element(_) => Err(unsupported(
                         &path.render(),
                         "an integer bound variable is not a Boolean term",
                     )),
@@ -2818,7 +3219,7 @@ impl LowerState<'_> {
                     ReplayTerm::Datum(Box::new(lowered.replay.into_datum()?)),
                 )
             }
-            IntegerTree::Bound(symbol) => (symbol.clone(), ReplayTerm::QuantifierUnreplayed),
+            IntegerTree::Bound(symbol) => (symbol.clone(), ReplayTerm::Variable(symbol.clone())),
             IntegerTree::Negate(operand) => {
                 let (smt, term) = self.emit(operand)?;
                 (format!("(- {smt})"), ReplayTerm::Negate(Box::new(term)))
@@ -3994,6 +4395,7 @@ pub(crate) fn derive_query_digest(
 
 #[cfg(test)]
 mod tests {
+    use ix_trace_rs::trace;
     use quire_contract_model::{SourceDocumentId, SourceIdentity, SourceLocation, SourceRevision};
 
     use super::*;
@@ -4671,5 +5073,334 @@ mod tests {
             assert_eq!(oracle_status, expected_satisfiable, "{name}");
             assert_eq!(lowered_status, expected_satisfiable, "{name}");
         }
+    }
+
+    #[trace("TC-030", "FR-033-AC-2", "NFR-031-AC-1", "NFR-031-AC-2")]
+    #[test]
+    fn bounded_quantifier_replay_handles_early_exit_and_limit() {
+        let integer = ReplayTerm::Constant;
+        let local = "bv_0".to_owned();
+        let existential = ReplayExpression::Quantifier {
+            node_id: 3,
+            kind: QuantifierKind::Exists,
+            local: local.clone(),
+            source: "test-exists".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer(10),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Compare {
+                operator: ComparisonOperator::Equal,
+                left: ReplayTerm::Variable(local.clone()),
+                right: integer(1),
+            }),
+        };
+        let mut used = 0;
+        assert_eq!(
+            existential.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut BTreeMap::new(),
+                &mut None,
+            ),
+            Ok(true)
+        );
+        assert_eq!(used, 2);
+
+        let forall_at_limit = ReplayExpression::Quantifier {
+            node_id: 4,
+            kind: QuantifierKind::ForAll,
+            local: local.clone(),
+            source: "test-limit".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer(MAX_REPLAY_QUANTIFIER_INSTANCES as i128 - 1),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Literal(true)),
+        };
+        let mut used = 0;
+        assert_eq!(
+            forall_at_limit.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut BTreeMap::new(),
+                &mut None,
+            ),
+            Ok(true)
+        );
+        assert_eq!(used, MAX_REPLAY_QUANTIFIER_INSTANCES);
+
+        let wide_range = ReplayExpression::Quantifier {
+            node_id: 5,
+            kind: QuantifierKind::ForAll,
+            local: "wide".to_owned(),
+            source: "test-wide".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer((1_i128 << 64) - 1),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Literal(true)),
+        };
+        let mut used = 0;
+        assert_eq!(
+            wide_range.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut BTreeMap::new(),
+                &mut None,
+            ),
+            Err(ReplayFault::QuantifierLimitExceeded)
+        );
+        assert_eq!(used, MAX_REPLAY_QUANTIFIER_INSTANCES);
+
+        let inner = ReplayExpression::Quantifier {
+            node_id: 6,
+            kind: QuantifierKind::ForAll,
+            local: "inner".to_owned(),
+            source: "test-nested-inner".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer((1_i128 << 64) - 1),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Literal(true)),
+        };
+        let nested = ReplayExpression::Quantifier {
+            node_id: 7,
+            kind: QuantifierKind::ForAll,
+            local: "outer".to_owned(),
+            source: "test-nested-outer".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer((1_i128 << 64) - 1),
+                upper_symbol: None,
+            },
+            body: Box::new(inner),
+        };
+        let mut used = 0;
+        assert_eq!(
+            nested.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut BTreeMap::new(),
+                &mut None,
+            ),
+            Err(ReplayFault::QuantifierLimitExceeded)
+        );
+        assert_eq!(used, MAX_REPLAY_QUANTIFIER_INSTANCES);
+
+        let forall_over_limit = ReplayExpression::Quantifier {
+            node_id: 8,
+            kind: QuantifierKind::ForAll,
+            local,
+            source: "test-over-limit".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: integer(0),
+                lower_symbol: None,
+                upper: integer(MAX_REPLAY_QUANTIFIER_INSTANCES as i128),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Literal(true)),
+        };
+        let mut used = 0;
+        assert_eq!(
+            forall_over_limit.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut BTreeMap::new(),
+                &mut None,
+            ),
+            Err(ReplayFault::QuantifierLimitExceeded)
+        );
+        assert_eq!(used, MAX_REPLAY_QUANTIFIER_INSTANCES);
+    }
+
+    #[trace("TC-030", "FR-033-AC-1", "FR-033-AC-2")]
+    #[test]
+    fn finite_domain_replay_uses_typed_members_and_reports_source_element() {
+        let local = "bv_0".to_owned();
+        let universal = ReplayExpression::Quantifier {
+            node_id: 9,
+            kind: QuantifierKind::ForAll,
+            local: local.clone(),
+            source: "source-universal".to_owned(),
+            domain: ReplayQuantifierDomain::Elements(vec![
+                ReplayQuantifierElement {
+                    value: ReplayValue::Bool(false),
+                    label: "false".to_owned(),
+                },
+                ReplayQuantifierElement {
+                    value: ReplayValue::Bool(true),
+                    label: "true".to_owned(),
+                },
+            ]),
+            body: Box::new(ReplayExpression::Variable(local.clone())),
+        };
+        let mut used = 0;
+        let mut results = BTreeMap::new();
+        assert_eq!(
+            universal.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut results,
+                &mut None,
+            ),
+            Ok(false)
+        );
+        assert_eq!(used, 1);
+        assert_eq!(results[&9].source, "source-universal");
+        assert_eq!(results[&9].element.as_deref(), Some("false"));
+        assert_eq!(results[&9].evaluated_count, 1);
+
+        let existential = ReplayExpression::Quantifier {
+            node_id: 10,
+            kind: QuantifierKind::Exists,
+            local: local.clone(),
+            source: "source-existential".to_owned(),
+            domain: ReplayQuantifierDomain::Elements(vec![
+                ReplayQuantifierElement {
+                    value: ReplayValue::Enum("E_A".to_owned()),
+                    label: "A".to_owned(),
+                },
+                ReplayQuantifierElement {
+                    value: ReplayValue::Enum("E_B".to_owned()),
+                    label: "B".to_owned(),
+                },
+                ReplayQuantifierElement {
+                    value: ReplayValue::Enum("E_C".to_owned()),
+                    label: "C".to_owned(),
+                },
+            ]),
+            body: Box::new(ReplayExpression::DatumEqual {
+                left: Box::new(ReplayDatum::Local(local)),
+                right: Box::new(ReplayDatum::Enum("E_B".to_owned())),
+                negated: false,
+            }),
+        };
+        let mut used = 0;
+        let mut results = BTreeMap::new();
+        assert_eq!(
+            existential.evaluate_with_context(
+                &ReplayAssignment::default(),
+                &mut BTreeMap::new(),
+                &mut used,
+                &mut results,
+                &mut None,
+            ),
+            Ok(true)
+        );
+        assert_eq!(used, 2);
+        assert_eq!(results[&10].source, "source-existential");
+        assert_eq!(results[&10].element.as_deref(), Some("B"));
+        assert_eq!(results[&10].evaluated_count, 2);
+    }
+
+    #[trace("TC-030", "FR-033-AC-4")]
+    #[test]
+    fn range_enum_and_collection_forms_replay_each_quantifier_outcome() {
+        let domains = [
+            ReplayQuantifierDomain::Range {
+                lower: ReplayTerm::Constant(0),
+                lower_symbol: None,
+                upper: ReplayTerm::Constant(1),
+                upper_symbol: None,
+            },
+            ReplayQuantifierDomain::Elements(vec![
+                ReplayQuantifierElement {
+                    value: ReplayValue::Bool(false),
+                    label: "false".to_owned(),
+                },
+                ReplayQuantifierElement {
+                    value: ReplayValue::Bool(true),
+                    label: "true".to_owned(),
+                },
+            ]),
+            ReplayQuantifierDomain::Elements(vec![
+                ReplayQuantifierElement {
+                    value: ReplayValue::Enum("E_A".to_owned()),
+                    label: "A".to_owned(),
+                },
+                ReplayQuantifierElement {
+                    value: ReplayValue::Enum("E_B".to_owned()),
+                    label: "B".to_owned(),
+                },
+            ]),
+        ];
+        for (domain_index, domain) in domains.into_iter().enumerate() {
+            for (kind, body_holds, expected_holds, expected_count) in [
+                (QuantifierKind::ForAll, true, true, 2),
+                (QuantifierKind::ForAll, false, false, 1),
+                (QuantifierKind::Exists, true, true, 1),
+                (QuantifierKind::Exists, false, false, 2),
+            ] {
+                let expression = ReplayExpression::Quantifier {
+                    node_id: 11,
+                    kind,
+                    local: "bv_0".to_owned(),
+                    source: format!("source-{domain_index}"),
+                    domain: domain.clone(),
+                    body: Box::new(ReplayExpression::Literal(body_holds)),
+                };
+                let mut used = 0;
+                let mut results = BTreeMap::new();
+                assert_eq!(
+                    expression.evaluate_with_context(
+                        &ReplayAssignment::default(),
+                        &mut BTreeMap::new(),
+                        &mut used,
+                        &mut results,
+                        &mut None,
+                    ),
+                    Ok(expected_holds),
+                    "domain {domain_index}, {kind:?}, body={body_holds}"
+                );
+                assert_eq!(results[&11].evaluated_count, expected_count);
+                assert_eq!(results[&11].holds, expected_holds);
+            }
+        }
+    }
+
+    #[trace("TC-030", "FR-033-AC-7")]
+    #[test]
+    fn quantified_body_overflow_is_not_wrapped() {
+        let local = "bv_0".to_owned();
+        let quantified = ReplayExpression::Quantifier {
+            node_id: 12,
+            kind: QuantifierKind::ForAll,
+            local: local.clone(),
+            source: "overflow-range".to_owned(),
+            domain: ReplayQuantifierDomain::Range {
+                lower: ReplayTerm::Constant(i128::MAX),
+                lower_symbol: None,
+                upper: ReplayTerm::Constant(i128::MAX),
+                upper_symbol: None,
+            },
+            body: Box::new(ReplayExpression::Compare {
+                operator: ComparisonOperator::Greater,
+                left: ReplayTerm::Add(
+                    Box::new(ReplayTerm::Variable(local)),
+                    Box::new(ReplayTerm::Constant(1)),
+                ),
+                right: ReplayTerm::Constant(0),
+            }),
+        };
+        assert_eq!(
+            quantified.evaluate(&ReplayAssignment::default()),
+            Err(ReplayFault::Overflow)
+        );
     }
 }

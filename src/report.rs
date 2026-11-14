@@ -744,11 +744,24 @@ fn source_value(source: &quire_contract_model::SourceSpan) -> Value {
 fn engine_value(conclusion: &AnalysisConclusion) -> Value {
     let record = conclusion.solver();
     let limits = record.limits();
+    let replay_diagnostic = conclusion
+        .replay_failure()
+        .map(ToString::to_string)
+        .or_else(|| {
+            conclusion.verified_model().and_then(|model| {
+                let outcomes = model
+                    .quantifier_results()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>();
+                (!outcomes.is_empty()).then(|| outcomes.join("; "))
+            })
+        });
     json!({
         "argv": record.argv(),
         "cleanupMs": record.cleanup_ms(),
         "configuredExecutable": record.configured_executable().to_str().expect("validated UTF-8 path"),
-        "diagnostic": record.diagnostic(),
+        "diagnostic": replay_diagnostic.or_else(|| record.diagnostic().map(str::to_owned)),
         "elapsedMs": record.elapsed_ms(),
         "engine": record.engine().as_str(),
         "explanation": match conclusion.explanation() { ExplanationState::NotApplicable => "not-applicable", ExplanationState::Incomplete => "incomplete", ExplanationState::Verified => "verified" },
